@@ -117,8 +117,11 @@ Python 3.10+ is required (uses `match`/structural typing in ovos-core).
 
 | Resource | Path |
 |---|---|
+| Machine-readable facts | [`../QUICK_FACTS.md`](../QUICK_FACTS.md) |
 | Common questions | [`../FAQ.md`](../FAQ.md) |
 | Change log | [`../CHANGELOG.md`](../CHANGELOG.md) |
+| Known issues | [`../AUDIT.md`](../AUDIT.md) |
+| Improvement proposals | [`../SUGGESTIONS.md`](../SUGGESTIONS.md) |
 
 ## Who Uses ovoscope
 
@@ -134,3 +137,4 @@ Python 3.10+ is required (uses `match`/structural typing in ovos-core).
 - [ovos-workshop](https://github.com/OpenVoiceOS/ovos-workshop) — `OVOSSkill` base class
 - [ovos-bus-client](https://github.com/OpenVoiceOS/ovos-bus-client) — `Message`, `Session`, `SessionManager`
 - [ovos-pydantic-models](https://github.com/OpenVoiceOS/ovos-pydantic-models) — optional typed message models (see [pydantic-integration.md](pydantic-integration.md))
+- [gh-automations](https://github.com/TigreGotico/gh-automations) — CI reusable workflows (see [ci-integration.md](ci-integration.md))

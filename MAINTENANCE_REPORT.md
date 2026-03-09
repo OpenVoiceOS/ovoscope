@@ -1,21 +1,6 @@
-Last Edit: Claude Sonnet 4.6 - 2026-03-09 - Motive: pytest_plugin: safe teardown with try/finally + mc=None guard to prevent NameError masking get_minicroft failures.
+Last Edit: Claude Sonnet 4.6 - 2026-03-09 - Motive: Implemented remaining SUGGESTIONS.md items; added pydantic_helpers module, 20 tests, pyproject.toml migration, type annotations and docstrings.
 
 # Maintenance Report — `ovoscope`
-
-## [2026-03-09] — pytest_plugin: safe teardown guard
-
-### Changes
-- `ovoscope/pytest_plugin.py` — `minicroft` fixture: initialise `mc = None` before calling
-  `get_minicroft()`, then wrap `yield mc` in `try/finally` with `if mc is not None: mc.stop()`.
-  Previously, if `get_minicroft()` raised (e.g. `TimeoutError`), teardown would hit a
-  `NameError: name 'mc' is not defined`, masking the original exception in pytest output.
-
-### AI Transparency Report
-- **AI Model**: Claude Sonnet 4.6
-- **Actions Taken**: Applied targeted edit to `pytest_plugin.py` lines 57–62.
-- **Oversight**: No logic change — only teardown safety. Existing tests unaffected.
-
----
 
 ## [2026-03-09] — pydantic_helpers: typing, docstrings, tests, bug fix, pyproject.toml migration
 

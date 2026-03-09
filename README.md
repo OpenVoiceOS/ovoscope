@@ -182,7 +182,7 @@ PRs are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## AI Disclosure
 
-Parts of this project are developed with the assistance of AI tools.
+Parts of this project are developed with the assistance of AI tools (Claude by Anthropic).
 In the interest of transparency, two files are maintained as a public record of AI involvement:
 
 - **[FAQ.md](FAQ.md)** — Frequently asked questions that emerged from real development sessions,

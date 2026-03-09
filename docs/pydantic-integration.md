@@ -213,40 +213,28 @@ This would catch malformed messages from skills (e.g. a skill emitting `speak` w
 
 ## Dependency Consideration
 
-`ovos-pydantic-models` is a pure Pydantic v2 package with no OVOS runtime dependencies. OvoScope depends on `ovos-core>=2.0.4a2`. The optional dependency is declared in `pyproject.toml`:
-
-```toml
-[project.optional-dependencies]
-pydantic = ["ovos-pydantic-models>=0.1.0"]
-```
-
-Install with:
-
-```bash
-pip install ovoscope[pydantic]
-```
-
-The bridge functions (`to_bus_message`, `from_bus_message`, `validate_fixture`) live in
-`ovoscope.pydantic_helpers` and guard their imports conditionally — the module can be imported
-without `ovos-pydantic-models` installed, but calling any function raises a clear `ImportError`
-pointing to the extras install command:
+`ovos-pydantic-models` is a pure Pydantic v2 package with no OVOS runtime dependencies. OvoScope depends on `ovos-core>=2.0.4a2`. Adding `ovos-pydantic-models` as an optional dependency of OvoScope would be safe:
 
 ```python
-# safe to import regardless of whether pydantic extras are installed
-from ovoscope.pydantic_helpers import to_bus_message  # ImportError only on call, not import
+# in setup.py
+extras_require={
+    "pydantic": ["ovos-pydantic-models>=0.1.0"],
+}
 ```
+
+The bridge functions (`to_bus_message`, `from_bus_message`) could live in `ovoscope.pydantic` and only import if the optional dependency is installed.
 
 ---
 
 ## Summary
 
-| Pattern | What you get | Status |
+| Pattern | What you get | OvoScope changes needed |
 |---|---|---|
-| Typed source messages via `to_bus_message()` | Validation at construction | ✅ `ovoscope.pydantic_helpers` |
-| Typed expected messages via `to_bus_message()` | Field name validation | ✅ `ovoscope.pydantic_helpers` |
-| Typed assertions via `from_bus_message()` | IDE autocomplete, field contracts | ✅ `ovoscope.pydantic_helpers` |
-| Fixture validation via `validate_fixture()` | Clear errors on malformed JSON | ✅ `ovoscope.pydantic_helpers` |
-| Native pydantic in `End2EndTest` | Seamless API (no `to_bus_message` call) | 💡 Future: `__post_init__` auto-conversion |
-| Schema validation in assertions | Catch malformed skill messages | 💡 Future: `validate_schemas=True` flag |
+| Typed source messages via `to_bus_message()` | Validation at construction | None |
+| Typed expected messages via `to_bus_message()` | Field name validation | None |
+| Typed assertions via `from_bus_message()` | IDE autocomplete, field contracts | None |
+| Typed helpers | Reusable, readable test utilities | None |
+| Native pydantic in `End2EndTest` | Seamless API | `__post_init__` auto-conversion |
+| Schema validation in assertions | Catch malformed skill messages | New toggle flag |
 
-Install the extras to use the implemented patterns: `pip install ovoscope[pydantic]`
+The bridge functions are the immediate, zero-dependency entry point. The deeper ideas require a small OvoScope PR but offer substantially better test ergonomics.

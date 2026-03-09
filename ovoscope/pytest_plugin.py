@@ -57,6 +57,10 @@ def minicroft(request) -> Iterator[MiniCroft]:
     skill_ids: Union[List[str], str] = getattr(request.cls, "skill_ids", [])
     if isinstance(skill_ids, str):
         skill_ids = [skill_ids]
+    mc: MiniCroft = None
     mc = get_minicroft(skill_ids)
-    yield mc
-    mc.stop()
+    try:
+        yield mc
+    finally:
+        if mc is not None:
+            mc.stop()

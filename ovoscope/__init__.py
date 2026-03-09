@@ -2,11 +2,13 @@ import dataclasses
 import json
 import threading
 from copy import deepcopy
-from time import sleep
+from time import sleep, time
 from typing import Union, List, Dict, Any, Optional
 
 from ovos_bus_client.message import Message
 from ovos_bus_client.session import SessionManager, Session
+from ovos_config.config import Configuration
+from ovos_config.models import LocalConf
 from ovos_core.intent_services import IntentService
 from ovos_core.skill_manager import SkillManager
 from ovos_plugin_manager.skills import find_skill_plugins
@@ -30,6 +32,55 @@ DEFAULT_KEEP_SRC = ["ovos.skills.fallback.ping"]
 DEFAULT_ACTIVATION = []
 DEFAULT_DEACTIVATION = ["intent.service.skills.deactivate"]
 
+# ---------------------------------------------------------------------------
+# Pipeline stage groups — combine as needed for test scenarios
+# ---------------------------------------------------------------------------
+STOP_PIPELINE = [
+    "ovos-stop-pipeline-plugin-high",
+    "ovos-stop-pipeline-plugin-medium",
+    "ovos-stop-pipeline-plugin-low",
+]
+CONVERSE_PIPELINE = ["ovos-converse-pipeline-plugin"]
+ADAPT_PIPELINE = [
+    "ovos-adapt-pipeline-plugin-high",
+    "ovos-adapt-pipeline-plugin-medium",
+    "ovos-adapt-pipeline-plugin-low",
+]
+PADATIOUS_PIPELINE = [
+    "ovos-padatious-pipeline-plugin-high",
+    "ovos-padatious-pipeline-plugin-medium",
+    "ovos-padatious-pipeline-plugin-low",
+]
+FALLBACK_PIPELINE = [
+    "ovos-fallback-pipeline-plugin-high",
+    "ovos-fallback-pipeline-plugin-medium",
+    "ovos-fallback-pipeline-plugin-low",
+]
+COMMON_QUERY_PIPELINE = ["ovos-common-query-pipeline-plugin"]
+PERSONA_PIPELINE = [
+    "ovos-persona-pipeline-plugin-high",
+    "ovos-persona-pipeline-plugin-low",
+]
+
+# Deterministic test pipeline — all standard built-in stages, no AI/LLM/persona/OCP.
+# This is the default when isolate_config=True so test results are reproducible
+# regardless of which AI or media plugins happen to be installed in the environment.
+DEFAULT_TEST_PIPELINE = [
+    "ovos-stop-pipeline-plugin-high",
+    "ovos-converse-pipeline-plugin",
+    "ovos-adapt-pipeline-plugin-high",
+    "ovos-padatious-pipeline-plugin-high",
+    "ovos-adapt-pipeline-plugin-medium",
+    "ovos-padatious-pipeline-plugin-medium",
+    "ovos-common-query-pipeline-plugin",
+    "ovos-adapt-pipeline-plugin-low",
+    "ovos-padatious-pipeline-plugin-low",
+    "ovos-fallback-pipeline-plugin-high",
+    "ovos-fallback-pipeline-plugin-medium",
+    "ovos-fallback-pipeline-plugin-low",
+    "ovos-stop-pipeline-plugin-medium",
+]
+
 
 class MiniCroft(SkillManager):
     def __init__(self, skill_ids,
@@ -39,7 +90,29 @@ class MiniCroft(SkillManager):
                  enable_file_watcher=False,
                  enable_skill_api=True,
                  extra_skills: Optional[Dict[str, OVOSSkill]] = None,
+                 isolate_config: bool = True,
+                 default_pipeline: Optional[List[str]] = DEFAULT_TEST_PIPELINE,
                  *args, **kwargs):
+        self._isolated_config = isolate_config
+        self._original_xdg_configs: Optional[List[LocalConf]] = None
+        self._default_pipeline = default_pipeline
+        self._original_pipeline: Optional[List[str]] = None
+        self._original_cfg_pipeline: Optional[List[str]] = None
+        self._original_blacklisted_skills: Optional[List[str]] = None
+        self._original_blacklisted_intents: Optional[List[str]] = None
+
+        if isolate_config:
+            # Replace user XDG configs (e.g. ~/.config/mycroft/mycroft.conf) with
+            # an empty list so the user's installed pipeline, locale, and other
+            # preferences do not affect test results.  System config
+            # (/etc/mycroft/mycroft.conf) and built-in defaults are still used.
+            # Note: LocalConf(None) cannot be used here — its reload() calls
+            # os.stat(None) and raises TypeError.  An empty list is safe.
+            self._original_xdg_configs = Configuration.xdg_configs[:]
+            Configuration.xdg_configs = []
+            Configuration.reload()
+            LOG.debug("ovoscope: user config isolated (xdg_configs cleared)")
+
         self.boot_messages: List[Message] = []
         bus = FakeBus()
         bus.on("message", self.handle_boot_message)
@@ -82,22 +155,107 @@ class MiniCroft(SkillManager):
         """Load skills and mark core as ready to start tests"""
         self.status.set_alive()
         self.load_plugin_skills()
+        if self._default_pipeline is not None:
+            # Two-pronged pipeline override:
+            #
+            # 1. SessionManager.default_session — controls sessions created from
+            #    messages that carry NO explicit session context (e.g. bare
+            #    `Message("recognizer_loop:utterance", ...)` without session).
+            #
+            # 2. Configuration()["intents"]["pipeline"] — controls sessions
+            #    created via `Session()` constructor, which reads
+            #    `Configuration().get('intents', {}).get('pipeline')`.
+            #    Note: Configuration.reload() does NOT invalidate the dict cache
+            #    in-place, so we must patch the live singleton directly.
+            self._original_pipeline = SessionManager.default_session.pipeline[:]
+            SessionManager.default_session.pipeline = self._default_pipeline
+            cfg = Configuration()
+            self._original_cfg_pipeline = cfg.get("intents", {}).get("pipeline")
+            if "intents" not in cfg:
+                cfg["intents"] = {}
+            cfg["intents"]["pipeline"] = self._default_pipeline
+            LOG.debug(f"ovoscope: default session pipeline set "
+                      f"({len(self._default_pipeline)} stages, "
+                      f"was {len(self._original_pipeline)})")
+        if self._isolated_config:
+            # Session.__init__ reads Configuration()["skills"]["blacklisted_skills"]
+            # and Configuration()["intents"]["blacklisted_intents"] from the live
+            # singleton dict cache (not invalidated by reload()), so we must patch
+            # the cache directly — same pattern as the pipeline patch above.
+            cfg = Configuration()
+            skills_cfg = cfg.setdefault("skills", {})
+            intents_cfg = cfg.setdefault("intents", {})
+            self._original_blacklisted_skills = skills_cfg.get("blacklisted_skills")
+            self._original_blacklisted_intents = intents_cfg.get("blacklisted_intents")
+            skills_cfg["blacklisted_skills"] = []
+            intents_cfg["blacklisted_intents"] = []
+            LOG.debug("ovoscope: blacklisted_skills and blacklisted_intents cleared")
         LOG.info("Skills all loaded!")
         self.status.set_ready()
         self.bus.remove("message", self.handle_boot_message)
 
+    def inject_message(self, msg: Message) -> None:
+        """Emit an arbitrary message onto the FakeBus during a test.
+
+        Use this to trigger non-utterance skill handlers — e.g., timer events,
+        GUI events, or skill API calls — without going through the utterance pipeline.
+        """
+        self.bus.emit(msg)
+
     def stop(self):
         super().stop()
         self.bus.close()
+        if self._default_pipeline is not None and self._original_pipeline is not None:
+            SessionManager.default_session.pipeline = self._original_pipeline
+            cfg = Configuration()
+            if "intents" in cfg:
+                if self._original_cfg_pipeline is not None:
+                    cfg["intents"]["pipeline"] = self._original_cfg_pipeline
+                else:
+                    cfg["intents"].pop("pipeline", None)
+            LOG.debug("ovoscope: default session pipeline restored")
+        if self._isolated_config:
+            cfg = Configuration()
+            skills_cfg = cfg.get("skills", {})
+            intents_cfg = cfg.get("intents", {})
+            if self._original_blacklisted_skills is not None:
+                skills_cfg["blacklisted_skills"] = self._original_blacklisted_skills
+            else:
+                skills_cfg.pop("blacklisted_skills", None)
+            if self._original_blacklisted_intents is not None:
+                intents_cfg["blacklisted_intents"] = self._original_blacklisted_intents
+            else:
+                intents_cfg.pop("blacklisted_intents", None)
+            LOG.debug("ovoscope: blacklisted_skills and blacklisted_intents restored")
+        if self._isolated_config and self._original_xdg_configs is not None:
+            Configuration.xdg_configs = self._original_xdg_configs
+            Configuration.reload()
+            LOG.debug("ovoscope: user config restored")
 
 
-def get_minicroft(skill_ids: Union[List[str], str], *args, **kwargs):
+def get_minicroft(skill_ids: Union[List[str], str], *args,
+                  max_wait: float = 60, **kwargs) -> MiniCroft:
+    """Create a MiniCroft, start it, and block until it reaches READY state.
+
+    Args:
+        skill_ids: One or more skill plugin IDs to load.
+        max_wait: Maximum seconds to wait for READY before raising TimeoutError.
+
+    Raises:
+        TimeoutError: If MiniCroft does not reach READY within ``max_wait`` seconds.
+    """
     if isinstance(skill_ids, str):
         skill_ids = [skill_ids]
     assert isinstance(skill_ids, list)
     croft = MiniCroft(skill_ids, *args, **kwargs)
     croft.start()
+    deadline = time() + max_wait
     while croft.status.state != ProcessState.READY:
+        if time() > deadline:
+            raise TimeoutError(
+                f"MiniCroft did not reach READY in {max_wait}s — "
+                f"check skill startup logs (skill_ids={skill_ids})"
+            )
         sleep(0.1)
     return croft
 
@@ -213,7 +371,7 @@ class End2EndTest:
         if self.ignore_gui:
             self.ignore_messages += GUI_IGNORED
 
-    def execute(self, timeout=30):
+    def execute(self, timeout: int = 30) -> List[Message]:
         if self.minicroft is None:
             self.minicroft = get_minicroft(self.skill_ids)
             self.managed = True
@@ -390,6 +548,8 @@ class End2EndTest:
             del self.minicroft
             self.minicroft = None
 
+        return messages
+
     @staticmethod
     def anonymize_message(message: Message) -> Message:
         msg = Message(message.msg_type, message.data, message.context)
@@ -479,6 +639,31 @@ class End2EndTest:
         with open(path) as f:
             return End2EndTest.deserialize(f.read())
 
-    def save(self, path: str, anonymize=True):
+    def save(self, path: str, anonymize: bool = True) -> None:
         with open(path, "w") as f:
             json.dump(self.serialize(anonymize=anonymize), f, ensure_ascii=False, indent=2)
+
+    def assert_spoke(self, text: str, lang: str = "en-US", timeout: int = 30) -> None:
+        """Run the test and assert that a ``speak`` message with the given utterance was emitted.
+
+        Sugar for simple speak-assertion tests that don't need to check the full message sequence.
+        Internally calls ``execute()`` and scans the returned messages for a matching ``speak``.
+
+        Args:
+            text: The exact ``utterance`` string expected in a ``speak`` message.
+            lang: The ``lang`` field expected in the ``speak`` message data.
+            timeout: Forwarded to ``execute()``.
+
+        Raises:
+            AssertionError: If no ``speak`` message with the given text (and lang) was emitted.
+        """
+        messages = self.execute(timeout=timeout)
+        speak_utterances = [
+            m.data.get("utterance")
+            for m in messages
+            if m.msg_type == "speak" and m.data.get("lang") == lang
+        ]
+        assert text in speak_utterances, (
+            f"❌ speak '{text}' (lang={lang}) not found. "
+            f"Received speak utterances: {speak_utterances}"
+        )

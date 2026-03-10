@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.2a3](https://github.com/TigreGotico/ovoscope/tree/0.9.2a3) (2026-03-10)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.9.2a2...0.9.2a3)
+
 ## [0.9.2a2](https://github.com/TigreGotico/ovoscope/tree/0.9.2a2) (2026-03-10)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.9.2a1...0.9.2a2)

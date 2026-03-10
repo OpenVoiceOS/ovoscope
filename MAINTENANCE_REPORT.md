@@ -34,7 +34,7 @@ Last Edit: Claude Opus 4.6 - 2026-03-10 - Motive: Improved test coverage from 78
 ### Changes
 - Created `.github/workflows/unit_tests.yml` — runs 58 unit tests with `pytest --cov=ovoscope` on PRs/pushes to `dev`, posts coverage comment via `py-cov-action/python-coverage-comment-action@v3`
 - Created `.github/workflows/build_tests.yml` — matrix build (Python 3.10, 3.11) with `python -m build`, tests sdist/wheel creation and package install
-- Created `.github/workflows/license_tests.yml` — calls `TigreGotico/gh-automations/.github/workflows/license-check.yml@master` reusable workflow
+- Created `.github/workflows/license_tests.yml` — calls `OpenVoiceOS/gh-automations/.github/workflows/license-check.yml@master` reusable workflow
 - Created `.github/workflows/pipaudit.yml` — CVE scanning via `pypa/gh-action-pip-audit@v1.0.0` on Python 3.10/3.11 matrix
 - Updated `.github/workflows/release_workflow.yml` — added `build_tests` job that runs full test suite; `publish_alpha` now depends on `build_tests` via `needs:`, gating alpha releases on test success
 - Updated `docs/ci-integration.md` — documented ovoscope's own CI workflow table

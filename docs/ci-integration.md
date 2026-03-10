@@ -150,7 +150,7 @@ jobs:
   publish_alpha:
     needs: build_tests
     if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
-    uses: TigreGotico/gh-automations/.github/workflows/publish-alpha.yml@master
+    uses: OpenVoiceOS/gh-automations/.github/workflows/publish-alpha.yml@master
     with:
       propose_release: true
     secrets: inherit

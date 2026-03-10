@@ -37,3 +37,6 @@ version = {attr = "ovoscope.version.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+
+[tool.coverage.run]
+relative_files = true

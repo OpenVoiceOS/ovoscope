@@ -8,3 +8,6 @@ jobs:
   release_preview:
     uses: OpenVoiceOS/gh-automations/.github/workflows/release-preview.yml@dev
     secrets: inherit
+    with:
+      package_name: "ovoscope"
+      version_file: "ovoscope/version.py"

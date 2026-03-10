@@ -3,23 +3,6 @@ on:
   pull_request:
     branches:
       - dev
-    paths-ignore:
-      - 'ovoscope/version.py'
-      - '.gitignore'
-      - 'LICENSE'
-      - 'CHANGELOG.md'
-      - 'README.md'
-      - 'docs/**'
-  push:
-    branches:
-      - dev
-    paths-ignore:
-      - 'ovoscope/version.py'
-      - '.gitignore'
-      - 'LICENSE'
-      - 'CHANGELOG.md'
-      - 'README.md'
-      - 'docs/**'
   workflow_dispatch:
 
 jobs:
@@ -28,6 +11,6 @@ jobs:
     secrets: inherit
     with:
       python_version: "3.14"
-      install_extras: "-e .[pydantic]"
+      install_extras: "[pydantic]"
       test_path: "test/unittests/"
       coverage_source: "ovoscope"

@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
   pull-requests: write
 
 jobs:
@@ -25,7 +24,9 @@ jobs:
     needs: build_tests
     if: always() && (needs.build_tests.result == 'success' || needs.build_tests.result == 'skipped') && (github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch')
     uses: OpenVoiceOS/gh-automations/.github/workflows/publish-alpha.yml@dev
-    secrets: inherit
+    secrets:
+      PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+      MATRIX_TOKEN: ${{ secrets.MATRIX_TOKEN }}
     with:
       branch: 'dev'
       version_file: 'ovoscope/version.py'

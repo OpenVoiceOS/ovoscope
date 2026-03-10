@@ -6,6 +6,10 @@ on:
     types: [closed]
     branches: [dev]
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   build_tests:
     if: github.event_name == 'workflow_dispatch'

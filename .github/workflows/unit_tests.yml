@@ -16,7 +16,6 @@ on:
       - dev
     paths-ignore:
       - 'ovoscope/version.py'
-      - 'requirements/**'
       - '.github/**'
       - '.gitignore'
       - 'LICENSE'

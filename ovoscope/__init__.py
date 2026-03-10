@@ -92,6 +92,8 @@ class MiniCroft(SkillManager):
                  extra_skills: Optional[Dict[str, OVOSSkill]] = None,
                  isolate_config: bool = True,
                  default_pipeline: Optional[List[str]] = DEFAULT_TEST_PIPELINE,
+                 lang: Optional[str] = None,
+                 secondary_langs: Optional[List[str]] = None,
                  *args, **kwargs):
         self._isolated_config = isolate_config
         self._original_xdg_configs: Optional[List[LocalConf]] = None
@@ -100,6 +102,10 @@ class MiniCroft(SkillManager):
         self._original_cfg_pipeline: Optional[List[str]] = None
         self._original_blacklisted_skills: Optional[List[str]] = None
         self._original_blacklisted_intents: Optional[List[str]] = None
+        self._lang = lang
+        self._secondary_langs = secondary_langs
+        self._original_lang: Optional[str] = None
+        self._original_secondary_langs: Optional[List[str]] = None
 
         if isolate_config:
             # Replace user XDG configs (e.g. ~/.config/mycroft/mycroft.conf) with
@@ -112,6 +118,22 @@ class MiniCroft(SkillManager):
             Configuration.xdg_configs = []
             Configuration.reload()
             LOG.debug("ovoscope: user config isolated (xdg_configs cleared)")
+
+        # Patch lang / secondary_langs BEFORE super().__init__() because
+        # IntentService (and thus Adapt/Padatious) reads Configuration()
+        # during construction and creates per-language engines at that time.
+        if self._lang is not None or self._secondary_langs is not None:
+            cfg = Configuration()
+            if self._lang is not None:
+                self._original_lang = cfg.get("lang")
+                cfg["lang"] = self._lang
+                LOG.debug(f"ovoscope: lang set to '{self._lang}' "
+                          f"(was '{self._original_lang}')")
+            if self._secondary_langs is not None:
+                self._original_secondary_langs = cfg.get("secondary_langs")
+                cfg["secondary_langs"] = self._secondary_langs
+                LOG.debug(f"ovoscope: secondary_langs set to "
+                          f"{self._secondary_langs}")
 
         self.boot_messages: List[Message] = []
         bus = FakeBus()
@@ -177,6 +199,8 @@ class MiniCroft(SkillManager):
             LOG.debug(f"ovoscope: default session pipeline set "
                       f"({len(self._default_pipeline)} stages, "
                       f"was {len(self._original_pipeline)})")
+        if self._lang is not None:
+            SessionManager.default_session.lang = self._lang
         if self._isolated_config:
             # Session.__init__ reads Configuration()["skills"]["blacklisted_skills"]
             # and Configuration()["intents"]["blacklisted_intents"] from the live
@@ -227,6 +251,15 @@ class MiniCroft(SkillManager):
             else:
                 intents_cfg.pop("blacklisted_intents", None)
             LOG.debug("ovoscope: blacklisted_skills and blacklisted_intents restored")
+        if self._original_lang is not None:
+            cfg = Configuration()
+            cfg["lang"] = self._original_lang
+            SessionManager.default_session.lang = self._original_lang
+            LOG.debug(f"ovoscope: lang restored to '{self._original_lang}'")
+        if self._original_secondary_langs is not None:
+            cfg = Configuration()
+            cfg["secondary_langs"] = self._original_secondary_langs
+            LOG.debug("ovoscope: secondary_langs restored")
         if self._isolated_config and self._original_xdg_configs is not None:
             Configuration.xdg_configs = self._original_xdg_configs
             Configuration.reload()
@@ -605,6 +638,7 @@ class End2EndTest:
                      eof_msgs: Optional[List[str]] = None,
                      flip_points: Optional[List[str]] = None,
                      ignore_messages: Optional[List[str]] = None,
+                     ignore_gui: bool = True,
                      async_messages: Optional[List[str]] = None,
                      timeout=20, *args, **kwargs) -> 'End2EndTest':
         if not isinstance(message, list):
@@ -612,6 +646,9 @@ class End2EndTest:
         eof_msgs = eof_msgs or DEFAULT_EOF
         flip_points = flip_points or DEFAULT_FLIP_POINTS
         ignore_messages = ignore_messages or DEFAULT_IGNORED
+        if ignore_gui:
+            ignore_messages = ignore_messages + GUI_IGNORED
+        async_messages = async_messages or []
 
         minicroft = get_minicroft(skill_ids, *args, **kwargs)
         capture = CaptureSession(minicroft,
@@ -631,7 +668,10 @@ class End2EndTest:
             skill_ids=skill_ids,
             source_message=message,
             expected_messages=expected_messages,
-            flip_points=flip_points
+            flip_points=flip_points,
+            ignore_messages=ignore_messages,
+            eof_msgs=eof_msgs,
+            async_messages=async_messages,
         )
 
     @staticmethod

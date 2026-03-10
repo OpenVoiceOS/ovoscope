@@ -21,6 +21,10 @@ MiniCroft(
     enable_file_watcher: bool = False,
     enable_skill_api: bool = True,
     extra_skills: dict[str, OVOSSkill] | None = None,
+    isolate_config: bool = True,
+    default_pipeline: list[str] | None = DEFAULT_TEST_PIPELINE,
+    lang: str | None = None,
+    secondary_langs: list[str] | None = None,
     *args, **kwargs,
 )
 ```
@@ -34,6 +38,10 @@ MiniCroft(
 | `enable_file_watcher` | `False` | Enable settings file watcher |
 | `enable_skill_api` | `True` | Enable skill API exposure |
 | `extra_skills` | `None` | Inject skill instances directly (useful for testing a skill class before packaging) |
+| `isolate_config` | `True` | Clear user XDG configs so tests are reproducible |
+| `default_pipeline` | `DEFAULT_TEST_PIPELINE` | Override the session pipeline for deterministic intent matching |
+| `lang` | `None` | Override the system default language (`Configuration()["lang"]`). Patched before Adapt/Padatious init so vocab is registered for this language. |
+| `secondary_langs` | `None` | Set `Configuration()["secondary_langs"]`. Adapt and Padatious create per-language engines for each language in this list, enabling multilingual intent matching. |
 
 ### Key attributes
 
@@ -87,6 +95,31 @@ croft = get_minicroft(
 ```
 
 The skill ID key must match what the skill would normally register under.
+
+---
+
+## Multilingual Testing
+
+By default, Adapt and Padatious only register vocab/intents for the system's configured default language. To test skills in other languages, pass `secondary_langs`:
+
+```python
+croft = get_minicroft(
+    ["my-skill.openvoiceos"],
+    secondary_langs=["pt-PT", "de-DE", "es-ES"],
+)
+```
+
+This patches `Configuration()["secondary_langs"]` before `IntentService` initializes, so Adapt creates per-language engines and registers vocab from all locale directories.
+
+To also change the primary language:
+
+```python
+croft = get_minicroft(
+    ["my-skill.openvoiceos"],
+    lang="pt-PT",
+    secondary_langs=["en-US", "de-DE"],
+)
+```
 
 ---
 

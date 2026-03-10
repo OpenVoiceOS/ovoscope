@@ -1,6 +1,51 @@
-Last Edit: Claude Sonnet 4.6 - 2026-03-09 - Motive: pytest_plugin: safe teardown with try/finally + mc=None guard to prevent NameError masking get_minicroft failures.
+Last Edit: Claude Opus 4.6 - 2026-03-10 - Motive: Improved test coverage from 78% to 89% (58 → 104 tests), added routing/active skills/session/recording tests.
 
 # Maintenance Report — `ovoscope`
+
+## [2026-03-10] — Test coverage improvement (78% → 89%)
+
+### Changes
+- Created `test/unittests/test_end2end_extended.py` — 46 new tests covering:
+  - **Routing internals**: flip_points, entry_points, keep_original_src assertions
+  - **Active skills**: inject_active, activation_points, deactivation_points, disallow_extra_active_skills
+  - **Boot sequence**: correct/incorrect boot message assertions
+  - **Final session**: lang mismatch raises, matching session passes
+  - **Async messages**: captured separately, missing raises, count mismatch raises
+  - **Context assertions**: wrong context raises
+  - **GUI filtering**: ignore_gui=True/False behavior
+  - **Serialization**: JSON string input, flip_points/flags preservation, anonymize_message
+  - **from_message recording**: captures sequence, wraps single message
+  - **Pipeline constants**: composition validation
+  - **MiniCroft lang config**: override and restore
+  - **Verbose output**: exercises all print branches
+  - **Message count verbose**: first differing message output
+- Created `test/unittests/test_pytest_plugin.py` — 6 new tests for minicroft fixture logic via `__wrapped__`
+- Updated `FAQ.md` — added coverage FAQ entry
+
+### AI Transparency Report
+- **AI Model**: Claude Opus 4.6
+- **Actions Taken**: Created 2 new test files with 52 total new tests
+- **Oversight**: All tests verified passing. Coverage: 78% → 89% overall, `__init__.py` 54% → 68%, `pytest_plugin.py` 0% → 64%
+
+---
+
+## [2026-03-09] — CI workflows and test-gated releases
+
+### Changes
+- Created `.github/workflows/unit_tests.yml` — runs 58 unit tests with `pytest --cov=ovoscope` on PRs/pushes to `dev`, posts coverage comment via `py-cov-action/python-coverage-comment-action@v3`
+- Created `.github/workflows/build_tests.yml` — matrix build (Python 3.10, 3.11) with `python -m build`, tests sdist/wheel creation and package install
+- Created `.github/workflows/license_tests.yml` — calls `TigreGotico/gh-automations/.github/workflows/license-check.yml@master` reusable workflow
+- Created `.github/workflows/pipaudit.yml` — CVE scanning via `pypa/gh-action-pip-audit@v1.0.0` on Python 3.10/3.11 matrix
+- Updated `.github/workflows/release_workflow.yml` — added `build_tests` job that runs full test suite; `publish_alpha` now depends on `build_tests` via `needs:`, gating alpha releases on test success
+- Updated `docs/ci-integration.md` — documented ovoscope's own CI workflow table
+- Updated `FAQ.md` — added 3 new CI-related Q&A entries
+
+### AI Transparency Report
+- **AI Model**: Claude Opus 4.6
+- **Actions Taken**: Created 4 new workflow files, updated 1 existing workflow, updated docs and FAQ
+- **Oversight**: All workflows follow established OVOS conventions (actions/checkout@v4, actions/setup-python@v5, python-version 3.11, python -m build). 58 existing tests verified passing.
+
+---
 
 ## [2026-03-09] — pytest_plugin: safe teardown guard
 

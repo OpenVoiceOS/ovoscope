@@ -1,4 +1,4 @@
-Last Edit: Claude Sonnet 4.6 - 2026-03-09 - Motive: Updated pydantic_helpers module name (pydantic.py → pydantic_helpers.py) in all FAQ entries.
+Last Edit: Claude Opus 4.6 - 2026-03-10 - Motive: Added test coverage improvement FAQ entries (78% → 89%, 58 → 104 tests).
 
 # FAQ — `ovoscope`
 
@@ -27,6 +27,18 @@ uv run pytest ovoscope/test/ --cov=ovoscope
 2. Write tests for your changes.
 3. Open a PR targeting the `dev` branch.
 4. Ensure CI passes before requesting review.
+
+## What CI workflows does ovoscope run?
+Seven workflows: `unit_tests.yml` (pytest + coverage on PRs), `build_tests.yml` (sdist/wheel matrix build), `license_tests.yml` (dependency license audit via gh-automations), `pipaudit.yml` (CVE scanning), `release_workflow.yml` (test-gated alpha release), `publish_stable.yml` (stable release), and `conventional-label.yaml` (PR label automation).
+
+## Does the release workflow run tests before publishing?
+Yes. The `release_workflow.yml` has a `build_tests` job that runs the full test suite. The `publish_alpha` job depends on it via `needs: build_tests`, so a failing test blocks the alpha release.
+
+## How does ovoscope's coverage reporting work in CI?
+The `unit_tests.yml` workflow runs `pytest --cov=ovoscope --cov-report xml` and uses `py-cov-action/python-coverage-comment-action@v3` to post a coverage summary as a PR comment.
+
+## What test coverage does ovoscope have?
+104 tests across 6 test files achieving 89% overall coverage. Key areas tested: End2EndTest execute/assertions/serialization/routing/active skills/boot sequence/final session/from_message recording, CaptureSession lifecycle, MiniCroft config isolation/lang/pipeline, pytest_plugin fixture logic, pydantic_helpers bridge.
 
 ## What Python versions are supported?
 See `QUICK_FACTS.md` — currently `>=3.10`.
@@ -286,3 +298,30 @@ def setUp(self):
 
 The `skill_ids=[]` parameter tells MiniCroft to load no skills — only pipeline plugins.
 See `ovos-persona/test/end2end/test_persona.py` for a full working example.
+
+---
+
+## How do I test skills in non-English languages?
+
+Pass `secondary_langs` to `get_minicroft()`:
+
+```python
+croft = get_minicroft(
+    [SKILL_ID],
+    secondary_langs=["pt-PT", "de-DE", "es-ES"],
+)
+```
+
+This patches `Configuration()["secondary_langs"]` before Adapt/Padatious initialize, so they create per-language engines and register vocab for all specified languages. Without this, only the system's default language has vocab registered.
+
+## Why does `End2EndTest.from_message()` crash with `TypeError: argument of type 'NoneType' is not iterable`?
+
+This was a bug where `async_messages` defaulted to `None` and was passed to `CaptureSession`, which tried `msg.msg_type in None`. Fixed by defaulting to `[]`.
+
+## Why do JSON fixture replays fail on session context?
+
+Session context includes timestamps (e.g., `active_skills` activation time) that differ between recording and replay. Set `test_msg_context=False` on fixture tests. For skills with random dialog rendering (like quote pools), also set `test_msg_data=False`.
+
+## Does `from_message()` filter GUI messages during recording?
+
+Yes — `from_message()` now accepts `ignore_gui=True` (default), which adds `GUI_IGNORED` messages to the capture filter. This prevents GUI namespace messages from appearing in recorded fixtures.

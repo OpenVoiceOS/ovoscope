@@ -208,5 +208,117 @@ class TestMiniCroftInjectMessage(unittest.TestCase):
             self.mc.bus.remove("message", on_ping)
 
 
+class TestMiniCroftPipelineConfig(unittest.TestCase):
+    """Tests for MiniCroft pipeline_config parameter."""
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+
+    def tearDown(self):
+        LOG.set_level("CRITICAL")
+
+    def test_pipeline_config_patches_intents_config(self):
+        """pipeline_config must be visible under Configuration()['intents'] while running."""
+        from ovos_config.config import Configuration
+
+        captured_config = {}
+
+        # We can only inspect the live config after MiniCroft starts.
+        mc = get_minicroft(
+            [],
+            pipeline_config={"test_plugin": {"key": "patched_value"}},
+        )
+        try:
+            cfg = Configuration()
+            captured_config = cfg.get("intents", {}).get("test_plugin", {})
+        finally:
+            mc.stop()
+
+        self.assertEqual(captured_config.get("key"), "patched_value",
+                         "pipeline_config entry should appear in Configuration()['intents']")
+
+    def test_pipeline_config_restored_after_stop(self):
+        """After stop(), Configuration()['intents']['test_plugin'] is removed."""
+        from ovos_config.config import Configuration
+
+        mc = get_minicroft(
+            [],
+            pipeline_config={"test_plugin_restore": {"key": "value"}},
+        )
+        mc.stop()
+
+        cfg = Configuration()
+        remaining = cfg.get("intents", {}).get("test_plugin_restore")
+        self.assertIsNone(remaining,
+                          "pipeline_config entry should be removed after stop()")
+
+    def test_pipeline_config_preserves_existing_key(self):
+        """If the plugin key already existed, it is restored (not deleted) after stop()."""
+        from ovos_config.config import Configuration
+
+        # Pre-seed the intents config with an existing entry
+        cfg = Configuration()
+        intents_cfg = cfg.setdefault("intents", {})
+        intents_cfg["pre_existing_plugin"] = {"key": "original"}
+
+        try:
+            mc = get_minicroft(
+                [],
+                pipeline_config={"pre_existing_plugin": {"key": "overridden"}},
+            )
+            # Confirm override is active
+            live_val = Configuration().get("intents", {}).get("pre_existing_plugin", {})
+            self.assertEqual(live_val.get("key"), "overridden")
+            mc.stop()
+            # Confirm original value is restored
+            restored_val = Configuration().get("intents", {}).get("pre_existing_plugin", {})
+            self.assertEqual(restored_val.get("key"), "original",
+                             "original pipeline config should be restored after stop()")
+        finally:
+            # Clean up the pre-seeded key so it doesn't leak into other tests
+            cfg.get("intents", {}).pop("pre_existing_plugin", None)
+
+    def test_pipeline_config_none_does_not_patch(self):
+        """pipeline_config=None must not modify Configuration()['intents']."""
+        from ovos_config.config import Configuration
+
+        before = dict(Configuration().get("intents", {}))
+        mc = get_minicroft([], pipeline_config=None)
+        try:
+            after = dict(Configuration().get("intents", {}))
+            # The intents dict may differ (pipeline key is patched by default_pipeline
+            # logic), but no new arbitrary keys should appear from pipeline_config=None
+            # Verify no unexpected keys were introduced compared to before
+            new_keys = set(after.keys()) - set(before.keys())
+            pipeline_keys = {"pipeline", "blacklisted_intents"}
+            unexpected = new_keys - pipeline_keys
+            self.assertEqual(unexpected, set(),
+                             f"pipeline_config=None introduced unexpected keys: {unexpected}")
+        finally:
+            mc.stop()
+
+    def test_pipeline_config_multiple_keys(self):
+        """Multiple pipeline_config entries are all patched and all restored."""
+        from ovos_config.config import Configuration
+
+        mc = get_minicroft(
+            [],
+            pipeline_config={
+                "plugin_a": {"model": "a"},
+                "plugin_b": {"threshold": 0.5},
+            },
+        )
+        try:
+            cfg = Configuration().get("intents", {})
+            self.assertEqual(cfg.get("plugin_a", {}).get("model"), "a")
+            self.assertEqual(cfg.get("plugin_b", {}).get("threshold"), 0.5)
+        finally:
+            mc.stop()
+
+        cfg_after = Configuration().get("intents", {})
+        self.assertIsNone(cfg_after.get("plugin_a"))
+        self.assertIsNone(cfg_after.get("plugin_b"))
+
+
 if __name__ == "__main__":
     unittest.main()

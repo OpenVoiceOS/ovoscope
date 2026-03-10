@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1a1](https://github.com/TigreGotico/ovoscope/tree/0.9.1a1) (2026-03-10)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.9.0a1...0.9.1a1)
+
+**Merged pull requests:**
+
+- fix: clean up CI/CD — remove release gate, fix pydantic install [\#36](https://github.com/TigreGotico/ovoscope/pull/36) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.9.0a1](https://github.com/TigreGotico/ovoscope/tree/0.9.0a1) (2026-03-10)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.7.2...0.9.0a1)

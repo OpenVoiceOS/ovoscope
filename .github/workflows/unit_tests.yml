@@ -26,37 +26,9 @@ on:
 
 jobs:
   unit_tests:
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install Build Tools
-        run: |
-          python -m pip install build wheel
-      - name: Install package
-        run: |
-          pip install -e .[pydantic]
-          pip install pytest pytest-cov
-      - name: Run tests
-        run: |
-          pytest --cov=ovoscope --cov-report xml test/unittests/ -v
-
-      - name: Coverage comment
-        id: coverage_comment
-        uses: py-cov-action/python-coverage-comment-action@v3
-        with:
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Store Pull Request comment to be posted
-        uses: actions/upload-artifact@v4
-        if: steps.coverage_comment.outputs.COMMENT_FILE_WRITTEN == 'true'
-        with:
-          name: python-coverage-comment-action
-          path: python-coverage-comment-action.txt
+    uses: OpenVoiceOS/gh-automations/.github/workflows/coverage.yml@dev
+    with:
+      python_version: "3.11"
+      install_extras: "-e .[pydantic]"
+      test_path: "test/unittests/"
+      coverage_source: "ovoscope"

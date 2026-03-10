@@ -1,0 +1,31 @@
+name: Run PipAudit
+on:
+  push:
+    branches:
+      - master
+      - dev
+  workflow_dispatch:
+
+jobs:
+  pip_audit:
+    strategy:
+      max-parallel: 2
+      matrix:
+        python-version: ["3.10", "3.11"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Build Tools
+        run: |
+          python -m pip install build wheel
+      - name: Install package
+        run: |
+          pip install .
+      - uses: pypa/gh-action-pip-audit@v1.0.0
+        with:
+          ignore-vulns: |
+            GHSA-r9hx-vwmv-q579

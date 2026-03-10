@@ -10,6 +10,7 @@ on:
 jobs:
   python_support:
     uses: OpenVoiceOS/gh-automations/.github/workflows/python-support.yml@dev
+    secrets: inherit
     with:
       package_name: "ovoscope"
       install_extras: "[pydantic]"

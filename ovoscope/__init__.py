@@ -108,6 +108,7 @@ class MiniCroft(SkillManager):
         self._lang = lang
         self._secondary_langs = secondary_langs
         self._original_lang: Optional[str] = None
+        self._original_cfg_lang: Optional[str] = None
         self._had_lang: bool = False
         self._original_secondary_langs: Optional[List[str]] = None
         self._had_secondary_langs: bool = False
@@ -131,10 +132,10 @@ class MiniCroft(SkillManager):
             cfg = Configuration()
             if self._lang is not None:
                 self._had_lang = "lang" in cfg
-                self._original_lang = cfg.get("lang")
+                self._original_cfg_lang = cfg.get("lang")
                 cfg["lang"] = self._lang
                 LOG.debug(f"ovoscope: lang set to '{self._lang}' "
-                          f"(was '{self._original_lang}')")
+                          f"(was '{self._original_cfg_lang}')")
             if self._secondary_langs is not None:
                 self._had_secondary_langs = "secondary_langs" in cfg
                 self._original_secondary_langs = cfg.get("secondary_langs")
@@ -209,6 +210,7 @@ class MiniCroft(SkillManager):
                       f"({len(self._default_pipeline)} stages, "
                       f"was {len(self._original_pipeline)})")
         if self._lang is not None:
+            self._original_lang = SessionManager.default_session.lang
             SessionManager.default_session.lang = self._lang
         if self._isolated_config:
             # Session.__init__ reads Configuration()["skills"]["blacklisted_skills"]
@@ -265,10 +267,10 @@ class MiniCroft(SkillManager):
         if self._lang is not None:
             cfg = Configuration()
             if self._had_lang:
-                cfg["lang"] = self._original_lang
+                cfg["lang"] = self._original_cfg_lang
             else:
                 cfg.pop("lang", None)
-            SessionManager.default_session.lang = self._original_lang or "en-us"
+            SessionManager.default_session.lang = self._original_lang
             LOG.debug(f"ovoscope: lang restored to '{self._original_lang}'")
         if self._secondary_langs is not None:
             cfg = Configuration()

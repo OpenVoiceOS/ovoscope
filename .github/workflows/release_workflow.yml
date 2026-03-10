@@ -8,7 +8,7 @@ on:
 
 jobs:
   build_tests:
-    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     uses: OpenVoiceOS/gh-automations/.github/workflows/build-tests.yml@dev
     secrets: inherit
     with:
@@ -18,7 +18,7 @@ jobs:
 
   publish_alpha:
     needs: build_tests
-    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    if: always() && (needs.build_tests.result == 'success' || needs.build_tests.result == 'skipped') && (github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch')
     uses: OpenVoiceOS/gh-automations/.github/workflows/publish-alpha.yml@dev
     secrets: inherit
     with:

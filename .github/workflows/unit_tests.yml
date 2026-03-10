@@ -11,6 +11,6 @@ jobs:
     secrets: inherit
     with:
       python_version: "3.14"
-      install_extras: "[pydantic]"
+      install_extras: "ovoscope[pydantic]"
       test_path: "test/unittests/"
       coverage_source: "ovoscope"

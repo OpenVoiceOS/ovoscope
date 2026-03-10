@@ -9,19 +9,12 @@ on:
 jobs:
   build_tests:
     if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.14'
-      - name: Install dependencies
-        run: |
-          pip install build pytest pytest-cov
-          pip install -e .[pydantic]
-      - name: Run unit tests
-        run: pytest test/unittests/ -v --cov=ovoscope --cov-report xml
+    uses: OpenVoiceOS/gh-automations/.github/workflows/build-tests.yml@dev
+    secrets: inherit
+    with:
+      python_versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
+      install_extras: "pydantic"
+      test_path: "test/unittests/"
 
   publish_alpha:
     needs: build_tests

@@ -5,7 +5,6 @@ on:
       - dev
     paths-ignore:
       - 'ovoscope/version.py'
-      - '.github/**'
       - '.gitignore'
       - 'LICENSE'
       - 'CHANGELOG.md'
@@ -16,7 +15,6 @@ on:
       - dev
     paths-ignore:
       - 'ovoscope/version.py'
-      - '.github/**'
       - '.gitignore'
       - 'LICENSE'
       - 'CHANGELOG.md'

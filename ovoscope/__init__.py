@@ -419,6 +419,8 @@ class End2EndTest:
         if isinstance(self.source_message, Message):
             self.source_message = [self.source_message]
         if self.ignore_gui:
+            # ensure we don't mutate a shared default list
+            self.ignore_messages = list(self.ignore_messages)
             for m in GUI_IGNORED:
                 if m not in self.ignore_messages:
                     self.ignore_messages.append(m)
@@ -664,12 +666,22 @@ class End2EndTest:
                      timeout=20, *args, **kwargs) -> 'End2EndTest':
         if not isinstance(message, list):
             message = [message]
-        eof_msgs = eof_msgs or DEFAULT_EOF
-        flip_points = flip_points or DEFAULT_FLIP_POINTS
-        ignore_messages = ignore_messages or DEFAULT_IGNORED
+        if eof_msgs is None:
+            eof_msgs = DEFAULT_EOF
+        if flip_points is None:
+            flip_points = DEFAULT_FLIP_POINTS
+        if ignore_messages is None:
+            ignore_messages = list(DEFAULT_IGNORED)
+        else:
+            ignore_messages = list(ignore_messages)
+
         if ignore_gui:
-            ignore_messages = ignore_messages + GUI_IGNORED
-        async_messages = async_messages or []
+            for m in GUI_IGNORED:
+                if m not in ignore_messages:
+                    ignore_messages.append(m)
+
+        if async_messages is None:
+            async_messages = []
 
         minicroft = get_minicroft(skill_ids, *args, **kwargs)
         capture = CaptureSession(minicroft,

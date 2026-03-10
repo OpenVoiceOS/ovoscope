@@ -1,4 +1,15 @@
 # Maintenance Report — `ovoscope`
+## [2026-03-10] — Add `pipeline_config` parameter to `MiniCroft`
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - Added `pipeline_config: Optional[Dict[str, Dict]] = None` parameter to `MiniCroft.__init__` — `ovoscope/__init__.py:116`
+  - Patches `Configuration()["intents"][plugin_key]` before `super().__init__()` so pipeline plugins read overridden config in their own `__init__`
+  - Restores all overrides in `MiniCroft.stop()` — `ovoscope/__init__.py:350`
+  - Updated `docs/minicroft.md`: added `pipeline_config` to constructor table and added "Pipeline Plugin Config Overrides" section with usage example
+  - Updated `FAQ.md`: added Q&A for `pipeline_config` and M2V multilingual model skip behaviour
+- **Motivation**: Needed to force the M2V multilingual model in `TestConfuciusM2VEN` regardless of what `mycroft.conf` says locally. Language-specific models (e.g. Portuguese) don't contain English intent labels and always return no match.
+- **Oversight**: All ovoscope unit tests pass; confucius e2e suite: 20 passed, 2 skipped (M2V — multilingual model not cached locally).
+
 ## [2026-03-10] — Test coverage improvement (78% → 89%)
 ### Changes
 - Created `test/unittests/test_end2end_extended.py` — 46 new tests covering:

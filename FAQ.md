@@ -231,3 +231,22 @@ This was a bug where `async_messages` defaulted to `None` and was passed to `Cap
 Session context includes timestamps (e.g., `active_skills` activation time) that differ between recording and replay. Set `test_msg_context=False` on fixture tests. For skills with random dialog rendering (like quote pools), also set `test_msg_data=False`.
 ## Does `from_message()` filter GUI messages during recording?
 Yes — `from_message()` now accepts `ignore_gui=True` (default), which adds `GUI_IGNORED` messages to the capture filter. This prevents GUI namespace messages from appearing in recorded fixtures.
+## How do I override pipeline plugin config in a test (e.g. M2V model path)?
+Pass `pipeline_config` to `get_minicroft()`. It is a `dict` keyed by the plugin's config key under `Configuration()["intents"]`:
+```python
+croft = get_minicroft(
+    [SKILL_ID],
+    default_pipeline=M2V_PIPELINE,
+    pipeline_config={
+        "ovos_m2v_pipeline": {
+            "model": "Jarbas/ovos-model2vec-intents-distiluse-base-multilingual-cased-v2"
+        }
+    },
+)
+```
+The override is patched into `Configuration()["intents"]` before `super().__init__()`, so the pipeline plugin reads the test value in its `__init__`. It is restored in `stop()`. This is useful for forcing a specific model regardless of what `mycroft.conf` says locally.
+## Why do M2V tests skip when the multilingual model is not cached?
+`ovos-m2v-pipeline` classifies utterances using a pre-trained model whose `classes_` are fixed intent labels. A language-specific model (e.g. Portuguese-only) won't contain English intent names and will always return no match. The multilingual model (`Jarbas/ovos-model2vec-intents-distiluse-base-multilingual-cased-v2`) covers all OVOS skill intent names. Tests that use M2V should skip when this model is not cached locally (to avoid downloading a large model in CI). Download it once with:
+```bash
+python -c "from model2vec.inference import StaticModelPipeline; StaticModelPipeline.from_pretrained('Jarbas/ovos-model2vec-intents-distiluse-base-multilingual-cased-v2')"
+```

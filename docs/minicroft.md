@@ -19,6 +19,7 @@ MiniCroft(
     default_pipeline: list[str] | None = DEFAULT_TEST_PIPELINE,
     lang: str | None = None,
     secondary_langs: list[str] | None = None,
+    pipeline_config: dict[str, dict] | None = None,
     *args, **kwargs,
 )
 ```
@@ -35,6 +36,7 @@ MiniCroft(
 | `default_pipeline` | `DEFAULT_TEST_PIPELINE` | Override the session pipeline for deterministic intent matching |
 | `lang` | `None` | Override the system default language (`Configuration()["lang"]`). Patched before Adapt/Padatious init so vocab is registered for this language. |
 | `secondary_langs` | `None` | Set `Configuration()["secondary_langs"]`. Adapt and Padatious create per-language engines for each language in this list, enabling multilingual intent matching. |
+| `pipeline_config` | `None` | Per-pipeline plugin config overrides. A `dict` keyed by the plugin's config key under `Configuration()["intents"]` (e.g. `"ovos_m2v_pipeline"`). Patched before `super().__init__()` so pipeline plugins read overridden values during their `__init__`. Restored in `stop()`. |
 ### Key attributes
 | Attribute | Type | Description |
 |---|---|---|
@@ -88,6 +90,27 @@ croft = get_minicroft(
     secondary_langs=["en-US", "de-DE"],
 )
 ```
+---
+## Pipeline Plugin Config Overrides
+Use `pipeline_config` to override per-plugin configuration under `Configuration()["intents"]` before pipeline plugins initialize. This ensures tests are reproducible regardless of the user's local `mycroft.conf`.
+
+The key must match the plugin's config key (the key it reads under `Configuration()["intents"]`):
+
+```python
+# Force M2V to use the multilingual model regardless of mycroft.conf
+croft = get_minicroft(
+    ["my-skill.openvoiceos"],
+    default_pipeline=M2V_PIPELINE,
+    pipeline_config={
+        "ovos_m2v_pipeline": {
+            "model": "Jarbas/ovos-model2vec-intents-distiluse-base-multilingual-cased-v2",
+        }
+    },
+)
+```
+
+All overrides are restored to their original values in `MiniCroft.stop()`.
+
 ---
 ## Boot Sequence
 On startup, MiniCroft captures all messages emitted during skill loading into `boot_messages`. These can be asserted in `End2EndTest.expected_boot_sequence`. The typical boot sequence includes:

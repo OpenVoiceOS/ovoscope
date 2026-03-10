@@ -114,6 +114,7 @@ class MiniCroft(SkillManager):
                  default_pipeline: Optional[List[str]] = DEFAULT_TEST_PIPELINE,
                  lang: Optional[str] = None,
                  secondary_langs: Optional[List[str]] = None,
+                 pipeline_config: Optional[Dict[str, Dict]] = None,
                  *args, **kwargs):
         self._isolated_config = isolate_config
         self._original_xdg_configs: Optional[List[LocalConf]] = None
@@ -132,6 +133,9 @@ class MiniCroft(SkillManager):
         self._had_lang: bool = False
         self._original_secondary_langs: Optional[List[str]] = None
         self._had_secondary_langs: bool = False
+        self._pipeline_config: Optional[Dict[str, Dict]] = pipeline_config
+        self._original_pipeline_configs: Dict[str, Optional[Dict]] = {}
+        self._had_pipeline_configs: Dict[str, bool] = {}
 
         if isolate_config:
             # Replace user XDG configs (e.g. ~/.config/mycroft/mycroft.conf) with
@@ -162,6 +166,20 @@ class MiniCroft(SkillManager):
                 cfg["secondary_langs"] = self._secondary_langs
                 LOG.debug(f"ovoscope: secondary_langs set to "
                           f"{self._secondary_langs}")
+
+        # Patch per-pipeline config BEFORE super().__init__() so that pipeline
+        # plugins read the overridden values during their __init__.
+        # pipeline_config is a dict keyed by pipeline plugin config key
+        # (the key used under Configuration()["intents"]), e.g.:
+        #   {"ovos_m2v_pipeline": {"model": "Jarbas/ovos-model2vec-..."}}
+        if self._pipeline_config:
+            cfg = Configuration()
+            intents_cfg = cfg.setdefault("intents", {})
+            for plugin_key, plugin_cfg in self._pipeline_config.items():
+                self._had_pipeline_configs[plugin_key] = plugin_key in intents_cfg
+                self._original_pipeline_configs[plugin_key] = intents_cfg.get(plugin_key)
+                intents_cfg[plugin_key] = plugin_cfg
+                LOG.debug(f"ovoscope: pipeline_config patched '{plugin_key}'")
 
         self.boot_messages: List[Message] = []
         bus = FakeBus()
@@ -332,6 +350,15 @@ class MiniCroft(SkillManager):
             else:
                 cfg.pop("secondary_langs", None)
             LOG.debug("ovoscope: secondary_langs restored")
+        if self._pipeline_config:
+            cfg = Configuration()
+            intents_cfg = cfg.get("intents", {})
+            for plugin_key in self._pipeline_config:
+                if self._had_pipeline_configs.get(plugin_key):
+                    intents_cfg[plugin_key] = self._original_pipeline_configs[plugin_key]
+                else:
+                    intents_cfg.pop(plugin_key, None)
+            LOG.debug("ovoscope: pipeline_config restored")
         if self._isolated_config and self._original_xdg_configs is not None:
             Configuration.xdg_configs = self._original_xdg_configs
             Configuration.reload()

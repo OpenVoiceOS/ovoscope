@@ -1,19 +1,22 @@
-name: Run Tests
+name: Coverage Pages
 on:
-  pull_request:
+  push:
     branches:
       - dev
   workflow_dispatch:
 
 permissions:
-  pull-requests: write
   contents: read
+  pages: write
+  id-token: write
 
 jobs:
-  unit_tests:
+  coverage_pages:
     uses: OpenVoiceOS/gh-automations/.github/workflows/coverage.yml@dev
     secrets: inherit
     with:
       python_version: "3.14"
       test_path: "test/unittests/"
       coverage_source: "ovoscope"
+      pr_comment: false
+      publish_to_gh_pages: true

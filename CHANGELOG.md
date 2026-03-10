@@ -1,12 +1,22 @@
 # Changelog
 
-## [0.7.2a1](https://github.com/TigreGotico/ovoscope/tree/0.7.2a1) (2025-06-17)
+## [0.9.1a1](https://github.com/TigreGotico/ovoscope/tree/0.9.1a1) (2026-03-10)
 
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.7.1...0.7.2a1)
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.9.0a1...0.9.1a1)
 
 **Merged pull requests:**
 
-- feat: async messages support [\#27](https://github.com/TigreGotico/ovoscope/pull/27) ([JarbasAl](https://github.com/JarbasAl))
+- fix: clean up CI/CD — remove release gate, fix pydantic install [\#36](https://github.com/TigreGotico/ovoscope/pull/36) ([JarbasAl](https://github.com/JarbasAl))
+
+## [0.9.0a1](https://github.com/TigreGotico/ovoscope/tree/0.9.0a1) (2026-03-10)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.7.2...0.9.0a1)
+
+**Merged pull requests:**
+
+- feat: Add language customization and expanded test coverage [\#35](https://github.com/TigreGotico/ovoscope/pull/35) ([JarbasAl](https://github.com/JarbasAl))
+- feat: docs, tests and some tiny improvements [\#30](https://github.com/TigreGotico/ovoscope/pull/30) ([JarbasAl](https://github.com/JarbasAl))
+- chore: Configure Renovate [\#29](https://github.com/TigreGotico/ovoscope/pull/29) ([renovate[bot]](https://github.com/apps/renovate))
 
 
 

@@ -1,0 +1,20 @@
+name: Coverage Pages
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  coverage_pages:
+    uses: OpenVoiceOS/gh-automations/.github/workflows/coverage-pages.yml@dev
+    secrets: inherit
+    with:
+      python_version: "3.14"
+      test_path: "test/unittests/"
+      coverage_source: "ovoscope"

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ovoscope"
+dynamic = ["version"]
+description = "End-to-end test framework for OpenVoiceOS skills"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "JarbasAI", email = "jarbasai@mailfence.com"},
+]
+requires-python = ">=3.10"
+dependencies = [
+    "ovos-core>=2.0.4a2",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.optional-dependencies]
+pydantic = ["ovos-pydantic-models>=0.1.0"]
+
+[project.urls]
+Homepage = "https://github.com/TigreGotico/ovoscope"
+
+[project.entry-points."pytest11"]
+ovoscope = "ovoscope.pytest_plugin"
+
+[tool.setuptools.dynamic]
+version = {attr = "ovoscope.version.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+
+[tool.coverage.run]
+relative_files = true

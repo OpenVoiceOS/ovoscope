@@ -1,4 +1,4 @@
-Last Edit: Claude Sonnet 4.6 - 2026-03-08 - Motive: CI integration guide for gh-automations and standalone use.
+Last Edit: Claude Opus 4.6 - 2026-03-09 - Motive: Document ovoscope's own CI workflows (unit_tests, build_tests, license_tests, pipaudit) and test-gated releases.
 
 # CI Integration — ovoscope
 
@@ -233,6 +233,24 @@ session = Session(str(uuid.uuid4()))
 By default `ignore_gui=True` strips GUI namespace messages from the captured sequence. If you see
 unexpected messages related to `gui.*`, check whether a skill emits GUI messages unconditionally
 and whether your `expected_messages` list accounts for them.
+
+---
+
+## ovoscope's Own CI Workflows
+
+The ovoscope repository itself uses the standard OVOS workflow set:
+
+| Workflow | File | Trigger | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Unit Tests** | `unit_tests.yml` | PR/push to `dev` | Runs `pytest --cov=ovoscope` on 58 tests, posts coverage comment |
+| **Build Tests** | `build_tests.yml` | PR to `dev`, push to `master` | Matrix build (Python 3.10, 3.11) with `python -m build` |
+| **License Check** | `license_tests.yml` | PR to `dev`, push to `master` | Calls `gh-automations/license-check.yml` reusable |
+| **Pip Audit** | `pipaudit.yml` | Push to `dev`/`master` | CVE scanning via `pypa/gh-action-pip-audit` |
+| **Release Alpha** | `release_workflow.yml` | PR merge to `dev` | Runs tests first, then calls `publish-alpha.yml` |
+| **Stable Release** | `publish_stable.yml` | Push to `master` | Calls `publish-stable.yml` with bot loop guard |
+| **Labels** | `conventional-label.yaml` | PR open/edit | Auto-labels PRs with conventional commit types |
+
+The release workflow gates alpha publishing on test success — a failing test blocks the release.
 
 ---
 

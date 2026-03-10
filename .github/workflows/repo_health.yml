@@ -7,5 +7,3 @@ on:
 jobs:
   repo_health:
     uses: OpenVoiceOS/gh-automations/.github/workflows/repo-health.yml@dev
-    with:
-      version_file: "ovoscope/version.py"

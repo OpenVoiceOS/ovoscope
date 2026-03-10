@@ -7,5 +7,3 @@ on:
 jobs:
   release_preview:
     uses: OpenVoiceOS/gh-automations/.github/workflows/release-preview.yml@dev
-    with:
-      version_file: "ovoscope/version.py"

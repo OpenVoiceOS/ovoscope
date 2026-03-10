@@ -1,4 +1,32 @@
 # Maintenance Report — `ovoscope`
+## [2026-03-10] — Add Audio Testing Harnesses
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - Created `ovoscope/ovoscope/audio.py` — 5 new classes:
+    - `MockAudioBackend` (inherits `AudioBackend`) — no-op backend tracking state
+    - `AudioServiceHarness` — context manager wrapping `AudioService` with `MockAudioBackend`
+    - `MockTTS` (inherits `TTS`) — writes 44-byte silent WAV, records spoken utterances
+    - `PlaybackServiceHarness` — context manager wrapping `PlaybackService` with `MockTTS`
+    - `AudioCaptureSession` — records bus messages matching configurable prefix list
+  - Updated `ovoscope/ovoscope/__init__.py` — guarded import of audio harness classes
+  - Updated `ovoscope/pyproject.toml` — added `[audio]` optional dependency
+  - Created `ovoscope/test/unittests/test_audio_harness.py` — 38 unit tests (all passing)
+  - Created `ovos-audio/test/end2end/__init__.py` — empty marker
+  - Created `ovos-audio/test/end2end/test_audio_service_e2e.py` — 11 E2E tests (all passing)
+  - Created `ovos-audio/test/end2end/test_playback_service_e2e.py` — 7 E2E tests (all passing)
+  - Created `ovoscope/docs/audio-testing.md` — full API reference with source citations
+  - Updated `ovoscope/docs/index.md` — link to audio-testing.md
+  - Updated `ovoscope/FAQ.md` — 3 new Q&As for audio testing
+  - Updated `ovoscope/QUICK_FACTS.md` — new audio harness classes, updated test count
+- **Key design decisions**:
+  - `AudioServiceHarness` uses `autoload=False` then manually injects `MockAudioBackend`
+  - `PlaybackServiceHarness` patches `ovos_audio.playback.play_audio` to prevent real audio
+  - `TTS.queue` is class-level; harness drains it before each `PlaybackService` construction
+  - `stop()` MUST return `True` to trigger `mycroft.stop.handled` in `AudioService`
+  - `FakeBus.wait_for_response()` does not work in-process; subscribe-emit-wait pattern used
+- **Oversight**: All 38 ovoscope unit tests + 18 ovos-audio E2E tests pass
+
 ## [2026-03-10] — Add `pipeline_config` parameter to `MiniCroft`
 - **AI Model**: Claude Sonnet 4.6
 - **Actions Taken**:
@@ -7,6 +35,8 @@
   - Restores all overrides in `MiniCroft.stop()` — `ovoscope/__init__.py:350`
   - Updated `docs/minicroft.md`: added `pipeline_config` to constructor table and added "Pipeline Plugin Config Overrides" section with usage example
   - Updated `FAQ.md`: added Q&A for `pipeline_config` and M2V multilingual model skip behaviour
+  - Added 5 unit tests in `test/unittests/test_minicroft.py::TestMiniCroftPipelineConfig`: patch active, restore after stop, existing key preserved, None is no-op, multiple keys
+- **Oversight**: 18/18 minicroft unit tests pass; confucius e2e suite: 20 passed, 2 skipped.
 - **Motivation**: Needed to force the M2V multilingual model in `TestConfuciusM2VEN` regardless of what `mycroft.conf` says locally. Language-specific models (e.g. Portuguese) don't contain English intent labels and always return no match.
 - **Oversight**: All ovoscope unit tests pass; confucius e2e suite: 20 passed, 2 skipped (M2V — multilingual model not cached locally).
 

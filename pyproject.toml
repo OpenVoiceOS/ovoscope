@@ -34,6 +34,7 @@ dev = [
 
 [project.scripts]
 ovoscope = "ovoscope.cli:main"
+ovoscope-setup = "ovoscope.setup_skill:main"
 
 [project.urls]
 Homepage = "https://github.com/TigreGotico/ovoscope"
@@ -43,6 +44,13 @@ ovoscope = "ovoscope.pytest_plugin"
 
 [tool.setuptools.dynamic]
 version = {attr = "ovoscope.version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ovoscope*"]
+
+[tool.setuptools.package-data]
+"ovoscope.skill_data" = ["**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]

@@ -1,4 +1,17 @@
 # Maintenance Report — `ovoscope`
+## [2026-03-11] — Add ovoscope-setup entrypoint for AI assistant skill installation
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - Created `ovoscope/setup_skill.py` — `ovoscope-setup` CLI with install/uninstall for Claude, Gemini, OpenCode; auto-detect mode; `--list`, `--path`, `--uninstall` flags.
+  - Created `ovoscope/skill_data/` package with bundled skill definitions:
+    - `claude/SKILL.md` + `claude/scripts/ovoscope.sh` + `claude/assets/docs/` + `claude/assets/FAQ.md|QUICK_FACTS.md`
+    - `gemini/` — identical structure (Gemini uses same SKILL.md format, project-level install)
+    - `opencode/ovoscope.md` — YAML frontmatter agent definition for OpenCode
+  - Updated `pyproject.toml`: added `ovoscope-setup` script entrypoint, `[tool.setuptools.packages.find]`, and `[tool.setuptools.package-data]` to bundle `skill_data/`.
+  - Added 26 unit tests in `test/unittests/test_setup_skill.py` — all passing.
+- **Oversight**: 269 unit tests pass locally.
+
 ## [2026-03-11] — Docs Gap Review and Fixes
 
 - **AI Model**: Claude Sonnet 4.6

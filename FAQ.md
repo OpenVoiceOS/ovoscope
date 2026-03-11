@@ -1,4 +1,21 @@
 # FAQ — `ovoscope`
+## How do I test AudioService or PlaybackService without real audio hardware?
+Use `AudioServiceHarness` or `PlaybackServiceHarness` from `ovoscope.audio`. Both run on a
+`FakeBus` with `MockAudioBackend`/`MockTTS` respectively — no real audio device, TTS engine,
+or network required. See [docs/audio-testing.md](docs/audio-testing.md) for the full API
+reference. Requires `pip install ovoscope[audio]` (or `ovos-audio` installed separately).
+
+## Why does AudioService.stop() silently ignore my stop() call in tests?
+`AudioService._stop()` — `ovos-audio/ovos_audio/audio.py:298` — has a 1-second stop guard:
+it does nothing if called within 1 second of `play()`. Tests must `time.sleep(1.1)` after
+`play()` before calling `stop()`.
+
+## Why doesn't FakeBus.wait_for_response() work in audio harness tests?
+`FakeBus.wait_for_response()` does not work for synchronous in-process handlers because the
+reply is emitted before the internal listener is registered. Use subscribe-emit-wait with a
+`threading.Event` instead. `AudioServiceHarness.get_track_info()` and `list_backends()`
+implement this pattern — `ovoscope/ovoscope/audio.py:258`.
+
 ## What is `ovoscope`?
 `ovoscope` is End-to-end test framework for OpenVoiceOS skills.
 ## How do I install it?

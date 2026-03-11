@@ -10,7 +10,8 @@
 | [end2end-test.md](end2end-test.md) | `End2EndTest` — full test runner reference |
 | [pydantic-integration.md](pydantic-integration.md) | Using `ovos-pydantic-models` with OvoScope |
 | [audio-testing.md](audio-testing.md) | `AudioServiceHarness`, `PlaybackServiceHarness` — testing audio services |
-| [listener.md](listener.md) | `MiniListener`, `get_mini_listener`, `ListenerTest` — testing audio transformer plugins and STT pipeline |
+| [listener.md](listener.md) | `MiniListener`, `get_mini_listener`, `ListenerTest`, `MockVADEngine`, `MockHotWordEngine`, `VADTest`, `WakeWordTest` — testing audio transformer plugins, STT pipeline, VAD, and wake-word |
+| [gui-testing.md](gui-testing.md) | `GUICaptureSession` — asserting GUI page navigation and namespace values |
 ## Conceptual Model
 ```
 Test                         FakeBus
@@ -66,13 +67,21 @@ test.execute()
 All primary classes and the factory function are importable from `ovoscope` directly:
 ```python
 from ovoscope import (
-    MiniCroft,         # in-process skill runtime
-    get_minicroft,     # factory: create + wait for READY
-    CaptureSession,    # message recorder for a single interaction
-    End2EndTest,       # declarative test runner
-    MiniListener,      # in-process audio transformer pipeline
-    get_mini_listener, # factory: create MiniListener with plugins
-    ListenerTest,      # declarative listener test runner
+    MiniCroft,           # in-process skill runtime
+    get_minicroft,       # factory: create + wait for READY
+    CaptureSession,      # message recorder for a single interaction
+    End2EndTest,         # declarative test runner
+    GUICaptureSession,   # capture gui.* messages for GUI assertions
+    MiniListener,        # in-process audio transformer / VAD / WakeWord pipeline
+    get_mini_listener,   # factory: create MiniListener with plugins
+    ListenerTest,        # declarative audio transformer test runner
+)
+# VAD / WakeWord helpers (from ovoscope.listener)
+from ovoscope.listener import (
+    MockVADEngine,       # silence = all-zero bytes; speech = any non-zero
+    MockHotWordEngine,   # fires after trigger_after update() calls
+    VADTest,             # declarative VAD test runner
+    WakeWordTest,        # declarative WakeWord test runner
 )
 ```
 Type aliases also exported:
@@ -110,7 +119,7 @@ listener.shutdown()
 - Does not load PHAL plugins or the audio service — only skills and the intent pipeline.
 - Does not test GUI rendering — GUI namespace messages are ignored by default (`ignore_gui=True`).
 - Does not test TTS — operates at the `recognizer_loop:utterance` level (see [audio-testing.md](audio-testing.md) for TTS lifecycle testing).
-- `MiniListener` covers `AudioTransformersService` and the STT pipeline — not VAD, wake-word, or the full DinkumVoiceLoop.
+- `MiniListener` covers `AudioTransformersService`, the STT pipeline, and mock VAD/WakeWord engines — not the full `DinkumVoiceLoop` state machine.
 ## Quick Links
 | Resource | Path |
 |---|---|

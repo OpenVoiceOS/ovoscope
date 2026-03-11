@@ -1,4 +1,31 @@
 # Maintenance Report — `ovoscope`
+## [2026-03-11] — Docs Gap Review and Fixes
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - `docs/ocp.md`: Documented `execute()` return type (`List[Message]`), clarified `patch_targets` format (dotted Python path where symbol is used), added aiohttp example.
+  - `docs/pipeline.md`: Documented `assert_matches(intent_type=...)` as substring check with example; added `ovoscope/pipeline.py:LINE` citations to all methods.
+  - `docs/cli.md`: Corrected `--ignore-context` → `--include-context`, explained when/why to use it; clarified `validate` pydantic fallback trigger.
+  - `docs/end2end-test.md`, `docs/minicroft.md`, `docs/capture-session.md`: Added `ovoscope/__init__.py:LINE` source citations to class and key method definitions.
+  - `docs/capture-session.md`: Documented `finish()` idempotency.
+  - `docs/listener.md`: Added full VAD/WakeWord API section (`MockVADEngine`, `MockHotWordEngine`, `is_silence`, `extract_speech`, `detect_wakeword`, `scan_for_wakeword`, `VADTest`, `WakeWordTest`) with examples and `ovoscope/listener.py:LINE` citations. Updated constructor parameter table. Fixed stale line references.
+  - `docs/index.md`: Added `gui-testing.md` link; updated Public API section with `GUICaptureSession`, VAD/WW helpers; fixed "Does NOT Do" section for VAD/WW.
+  - `QUICK_FACTS.md`: Added entry-point groups table; updated test count (243) and coverage note.
+- **Oversight**: No new code changes — docs only.
+
+## [2026-03-11] — Add VAD and WakeWord Support to MiniListener
+
+- **AI Model**: Claude Haiku 4.5
+- **Actions Taken**:
+  - Extended `ovoscope/listener.py` with `MockVADEngine`, `MockHotWordEngine`, `VADTest`, `WakeWordTest`.
+  - Extended `MiniListener` with `vad_instance` / `ww_instances` constructor params.
+  - Added `is_silence()`, `extract_speech()`, `detect_wakeword()`, `scan_for_wakeword()` methods to `MiniListener` — `listener.py:466–600`.
+  - Extended `get_mini_listener()` factory with `vad_plugin`, `vad_instance`, `ww_plugin`, `ww_instances` params.
+  - Made `ovos_dinkum_listener` import lazy (graceful `ImportError`) so VAD/WW tests work without the full listener stack installed.
+  - Added 41 unit tests in `test/unittests/test_listener_vad_ww.py`.
+  - Updated `FAQ.md` with VAD and WakeWord testing Q&A.
+- **Oversight**: 243 unit tests pass locally.
+
 ## [2026-03-11] — Enhance Audio Testing Robustness and CI
 
 - **AI Model**: Claude Sonnet 4.6
@@ -301,7 +328,48 @@ level where every OVOS repo can adopt ovoscope end-to-end testing without readin
 - **Actions Taken**: Read `ovoscope/__init__.py` (485 lines), `test/test_helloworld.py`,
   `ovos-core/test/end2end/test_adapt.py`, and all existing docs; then generated enriched content.
 - **Oversight**: Code examples are illustrative but not executed. Verify against live skill install before treating as runnable.
+
 ---
+
+## 2026-03-11 — Phase 1–3 Feature Additions
+
+**AI Model**: claude-sonnet-4-6
+**Oversight**: Human review pending
+
+### Actions Taken
+
+Added CLI, PHAL harness, fixture differ, OCP harness, pipeline harness,
+ecosystem coverage scanner, GUI capture session, and remote recorder.
+
+**New modules:**
+- `ovoscope/cli.py` — `ovoscope` CLI with `record`, `run`, `diff`, `validate`, `coverage`
+- `ovoscope/diff.py` — `MessageDiff`, `FixtureDiffResult`, `diff_fixtures`
+- `ovoscope/phal.py` — `MiniPHAL`, `PHALTest`
+- `ovoscope/ocp.py` — `OCPTest`, `assert_ocp_query_response`
+- `ovoscope/pipeline.py` — `PipelineHarness`
+- `ovoscope/coverage.py` — `RepoCoverage`, `EcosystemCoverageReport`, `scan_workspace`
+- `ovoscope/remote_recorder.py` — `RemoteRecorder`
+
+**Extended modules:**
+- `ovoscope/__init__.py` — added `GUICaptureSession`
+
+**New docs:**
+- `docs/cli.md`, `docs/phal.md`, `docs/ocp.md`, `docs/pipeline.md`
+- `docs/usage-guide.md` — Patterns 9–12 appended
+
+**New tests:**
+- `test/unittests/test_diff.py` — 7 test methods
+- `test/unittests/test_phal.py` — 8 test methods
+- `test/unittests/test_coverage.py` — 11 test methods
+- `test/unittests/test_cli.py` — 14 test methods
+
+**pyproject.toml changes:**
+- Added `[project.scripts] ovoscope = "ovoscope.cli:main"`
+
+All 202 tests pass. No regressions introduced.
+
+---
+
 ## [2026-03-08] — Initial compliance scaffold
 ### Changes
 - Created `QUICK_FACTS.md` with machine-readable package metadata.

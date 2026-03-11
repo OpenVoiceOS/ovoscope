@@ -18,6 +18,7 @@ import urllib.error
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from ovoscope.setup_skill import (
     _ASSET_FILES,
@@ -191,8 +192,8 @@ class TestInstallClaude(unittest.TestCase):
                 install_claude(fetch_docs=False, verbose=False)
 
             self.assertTrue(
-                any("raw.githubusercontent.com" in u for u in fetched_urls),
-                f"Expected GitHub URL in fetched URLs, got: {fetched_urls}",
+                any(urlparse(u).hostname == "raw.githubusercontent.com" for u in fetched_urls),
+                f"Expected GitHub raw.githubusercontent.com URL in fetched URLs, got: {fetched_urls}",
             )
 
 

@@ -3,7 +3,7 @@
 
 - **AI Model**: Claude Sonnet 4.6
 - **Actions Taken**:
-  - Created `ovoscope/ovoscope/audio.py` — 5 new classes:
+  - Created `ovoscope/audio.py` — 5 new classes:
     - `MockAudioBackend` (inherits `AudioBackend`) — no-op backend tracking state
     - `AudioServiceHarness` — context manager wrapping `AudioService` with `MockAudioBackend`
     - `MockTTS` (inherits `TTS`) — writes 44-byte silent WAV, records spoken utterances
@@ -30,9 +30,9 @@
 ## [2026-03-10] — Add `pipeline_config` parameter to `MiniCroft`
 - **AI Model**: Claude Sonnet 4.6
 - **Actions Taken**:
-  - Added `pipeline_config: Optional[Dict[str, Dict]] = None` parameter to `MiniCroft.__init__` — `ovoscope/__init__.py:116`
+  - Added `pipeline_config: Optional[Dict[str, Dict]] = None` parameter to `MiniCroft.__init__` — `ovoscope/__init__.py`
   - Patches `Configuration()["intents"][plugin_key]` before `super().__init__()` so pipeline plugins read overridden config in their own `__init__`
-  - Restores all overrides in `MiniCroft.stop()` — `ovoscope/__init__.py:350`
+  - Restores all overrides in `MiniCroft.stop()` — `ovoscope/__init__.py`
   - Updated `docs/minicroft.md`: added `pipeline_config` to constructor table and added "Pipeline Plugin Config Overrides" section with usage example
   - Updated `FAQ.md`: added Q&A for `pipeline_config` and M2V multilingual model skip behaviour
   - Added 5 unit tests in `test/unittests/test_minicroft.py::TestMiniCroftPipelineConfig`: patch active, restore after stop, existing key preserved, None is no-op, multiple keys

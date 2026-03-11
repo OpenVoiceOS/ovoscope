@@ -12,13 +12,14 @@
 ---
 ## Technical Debt & Issues
 ### ~~[CRITICAL] No unit tests for ovoscope itself~~ ✅ FIXED
-58 unit tests across `test/unittests/test_capture_session.py`, `test/unittests/test_end2end.py`,
-`test/unittests/test_minicroft.py`, and `test/unittests/test_pydantic_helpers.py`.
-All pass (58 passed, 0 failed).
+62 unit tests across `test/unittests/test_capture_session.py`, `test/unittests/test_end2end.py`,
+`test/unittests/test_minicroft.py`, `test/unittests/test_pydantic_helpers.py`, and
+`test/unittests/test_audio_harness.py`.
+All pass (62 passed, 0 failed).
 ---
 ### [MAJOR] Missing LICENSE file
-**Evidence**: `ovoscope/setup.py` line 11 declares `license="Apache-2.0"` but no `LICENSE` file
-exists at the repo root. The Apache-2.0 license text is not included.
+**Evidence**: `pyproject.toml` declares `license={text = "Apache-2.0"}` but no `LICENSE` file
+exists at the repo root.
 **Impact**: Legal ambiguity for downstream users and packagers. PyPI classifiers and SPDX tooling
 expect the file to be present.
 **Recommended fix**: Add `LICENSE` file containing the Apache-2.0 full text.

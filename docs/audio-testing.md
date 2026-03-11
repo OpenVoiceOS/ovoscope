@@ -3,6 +3,9 @@
 This document describes how to test `ovos-audio` services using the harness
 classes provided in `ovoscope.audio`.
 
+> **Prerequisite:** Audio testing harnesses require the `audio` extra.
+> Install it with: `pip install ovoscope[audio]` (or `ovos-audio` which includes it).
+
 ## When to Use Which Harness
 
 | Scenario | Harness |
@@ -13,7 +16,7 @@ classes provided in `ovoscope.audio`.
 
 ### AudioServiceHarness
 
-`AudioServiceHarness` — `ovoscope/ovoscope/audio.py:175`
+`AudioServiceHarness` — `ovoscope/audio.py`
 
 Wraps `AudioService` (from `ovos_audio.audio`) with a `MockAudioBackend` on a
 `FakeBus`. Use it when your test exercises the audio routing layer — backend
@@ -22,6 +25,7 @@ guard, or session-source validation.
 
 ```python
 from ovoscope.audio import AudioServiceHarness
+from ovos_bus_client.message import Message
 
 with AudioServiceHarness() as h:
     h.play(["http://example.com/track.mp3"])
@@ -33,7 +37,7 @@ with AudioServiceHarness() as h:
 
 ### PlaybackServiceHarness
 
-`PlaybackServiceHarness` — `ovoscope/ovoscope/audio.py:356`
+`PlaybackServiceHarness` — `ovoscope/audio.py`
 
 Wraps `PlaybackService` (from `ovos_audio.service`) with a `MockTTS` on a
 `FakeBus`. Use it when testing TTS execution flow: `speak` messages, the
@@ -51,13 +55,16 @@ with PlaybackServiceHarness() as h:
 
 ## Stop Guard Pitfall
 
-`AudioService._stop()` — `ovos-audio/ovos_audio/audio.py:291` — checks
+`AudioService._stop()` — `ovos-audio/ovos_audio/audio.py` — checks
 `time.monotonic() - self.play_start_time > 1`. If stop is called within 1
 second of `play()`, the stop command is silently ignored.
 
 **Tests that call `stop()` must sleep at least 1.1 seconds after `play()`:**
 
 ```python
+import time
+from ovoscope.audio import AudioServiceHarness
+
 with AudioServiceHarness() as h:
     h.play(["http://example.com/song.mp3"])
     time.sleep(1.1)   # bypass stop guard
@@ -67,7 +74,7 @@ with AudioServiceHarness() as h:
 
 ## play_audio Patch Rationale
 
-`PlaybackThread._play()` — `ovos-audio/ovos_audio/playback.py:123` — calls
+`PlaybackThread._play()` — `ovos-audio/ovos_audio/playback.py` — calls
 `play_audio(data)` then waits on the returned process object. Without patching,
 this would invoke a real audio player binary (sox, aplay, paplay, mpg123).
 
@@ -86,6 +93,8 @@ Use the subscribe-emit-wait pattern instead:
 
 ```python
 import threading
+from ovos_bus_client.message import Message
+
 reply_data = {}
 done = threading.Event()
 
@@ -100,13 +109,13 @@ h.bus.remove("mycroft.audio.service.track_info_reply", _on_reply)
 ```
 
 `AudioServiceHarness.get_track_info()` and `list_backends()` already implement
-this pattern internally — `ovoscope/ovoscope/audio.py:258`.
+this pattern internally — `ovoscope/audio.py`.
 
 ## API Reference
 
 ### MockAudioBackend
 
-`MockAudioBackend` — `ovoscope/ovoscope/audio.py:51`
+`MockAudioBackend` — `ovoscope/audio.py`
 
 | Attribute / Method | Type | Description |
 |---|---|---|
@@ -121,7 +130,7 @@ this pattern internally — `ovoscope/ovoscope/audio.py:258`.
 
 ### AudioServiceHarness
 
-`AudioServiceHarness` — `ovoscope/ovoscope/audio.py:175`
+`AudioServiceHarness` — `ovoscope/audio.py`
 
 | Method | Description |
 |---|---|
@@ -140,7 +149,7 @@ this pattern internally — `ovoscope/ovoscope/audio.py:258`.
 
 ### MockTTS
 
-`MockTTS` — `ovoscope/ovoscope/audio.py:296`
+`MockTTS` — `ovoscope/audio.py`
 
 | Attribute / Method | Description |
 |---|---|
@@ -151,7 +160,7 @@ this pattern internally — `ovoscope/ovoscope/audio.py:258`.
 
 ### PlaybackServiceHarness
 
-`PlaybackServiceHarness` — `ovoscope/ovoscope/audio.py:356`
+`PlaybackServiceHarness` — `ovoscope/audio.py`
 
 | Method | Description |
 |---|---|
@@ -164,7 +173,7 @@ this pattern internally — `ovoscope/ovoscope/audio.py:258`.
 
 ### AudioCaptureSession
 
-`AudioCaptureSession` — `ovoscope/ovoscope/audio.py:457`
+`AudioCaptureSession` — `ovoscope/audio.py`
 
 | Method / Property | Description |
 |---|---|
@@ -179,9 +188,9 @@ Default `track_prefixes` captures: `"mycroft.audio."`,
 
 ## Cross-References
 
-- `AudioService` — `ovos-audio/ovos_audio/audio.py:63`
-- `PlaybackService` — `ovos-audio/ovos_audio/service.py:55`
-- `PlaybackThread` — `ovos-audio/ovos_audio/playback.py:18`
+- `AudioService` — `ovos-audio/ovos_audio/audio.py`
+- `PlaybackService` — `ovos-audio/ovos_audio/service.py`
+- `PlaybackThread` — `ovos-audio/ovos_audio/playback.py`
 - `AudioBackend` (base class) — `ovos_plugin_manager.templates.audio.AudioBackend`
 - `TTS` (base class) — `ovos_plugin_manager.templates.tts.TTS`
 - End-to-end tests — `ovos-audio/test/end2end/`

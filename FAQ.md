@@ -6,7 +6,7 @@ or network required. See [docs/audio-testing.md](docs/audio-testing.md) for the 
 reference. Requires `pip install ovoscope[audio]` (or `ovos-audio` installed separately).
 
 ## Why does AudioService.stop() silently ignore my stop() call in tests?
-`AudioService._stop()` — `ovos-audio/ovos_audio/audio.py:298` — has a 1-second stop guard:
+`AudioService._stop()` — `ovos-audio/ovos_audio/audio.py` — has a 1-second stop guard:
 it does nothing if called within 1 second of `play()`. Tests must `time.sleep(1.1)` after
 `play()` before calling `stop()`.
 
@@ -14,7 +14,7 @@ it does nothing if called within 1 second of `play()`. Tests must `time.sleep(1.
 `FakeBus.wait_for_response()` does not work for synchronous in-process handlers because the
 reply is emitted before the internal listener is registered. Use subscribe-emit-wait with a
 `threading.Event` instead. `AudioServiceHarness.get_track_info()` and `list_backends()`
-implement this pattern — `ovoscope/ovoscope/audio.py:258`.
+implement this pattern — `ovoscope/audio.py`.
 
 ## What is `ovoscope`?
 `ovoscope` is End-to-end test framework for OpenVoiceOS skills.

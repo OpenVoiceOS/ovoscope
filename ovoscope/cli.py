@@ -94,18 +94,20 @@ def _record_inprocess(args: argparse.Namespace) -> int:
     except TimeoutError:
         _die("MiniCroft did not reach READY state in time.")
 
-    src_msg = Message(
-        "recognizer_loop:utterance",
-        data={"utterances": [args.utterance], "lang": lang},
-    )
+    try:
+        src_msg = Message(
+            "recognizer_loop:utterance",
+            data={"utterances": [args.utterance], "lang": lang},
+        )
 
-    print(f"[record] Sending utterance: {args.utterance!r}")
-    test = End2EndTest.from_message(src_msg, mc, timeout=timeout)
-    mc.stop()
+        print(f"[record] Sending utterance: {args.utterance!r}")
+        test = End2EndTest.from_message(src_msg, mc, timeout=timeout)
 
-    test.save(args.output)
-    print(f"[record] Fixture saved to {args.output}")
-    return 0
+        test.save(args.output)
+        print(f"[record] Fixture saved to {args.output}")
+        return 0
+    finally:
+        mc.stop()
 
 
 def _record_live(args: argparse.Namespace) -> int:
@@ -131,17 +133,19 @@ def _record_live(args: argparse.Namespace) -> int:
     recorder = RemoteRecorder(bus_url=bus_url)
     recorder.connect()
 
-    skill_id = skill_ids[0] if skill_ids else None
-    test = recorder.record(
-        utterance=args.utterance,
-        skill_id=skill_id,
-        lang=lang,
-        timeout=timeout,
-    )
-    recorder.disconnect()
-    test.save(args.output)
-    print(f"[record --live] Fixture saved to {args.output}")
-    return 0
+    try:
+        skill_id = skill_ids[0] if skill_ids else None
+        test = recorder.record(
+            utterance=args.utterance,
+            skill_id=skill_id,
+            lang=lang,
+            timeout=timeout,
+        )
+        test.save(args.output)
+        print(f"[record --live] Fixture saved to {args.output}")
+        return 0
+    finally:
+        recorder.disconnect()
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -167,40 +171,34 @@ def cmd_run(args: argparse.Namespace) -> int:
     except Exception as exc:
         _die(f"Could not load fixture: {exc}")
 
-    skill_ids = list(test.expected_messages[0].context.get("skill_id", "").split()) if test.expected_messages else []
+    # Use skill_ids from the test fixture
+    skill_ids = test.skill_ids or []
 
-    # Use all skills referenced in context
-    all_skill_ids: List[str] = []
-    for msg in test.expected_messages:
-        sid = msg.context.get("skill_id") or msg.data.get("skill_id")
-        if sid and sid not in all_skill_ids:
-            all_skill_ids.append(sid)
-
-    print(f"[run] Starting MiniCroft with skills: {all_skill_ids}")
+    print(f"[run] Starting MiniCroft with skills: {skill_ids}")
     try:
-        mc = get_minicroft(all_skill_ids, max_wait=60)
+        mc = get_minicroft(skill_ids, max_wait=60)
     except TimeoutError:
         _die("MiniCroft did not reach READY state in time.")
 
     try:
         test.execute(timeout=timeout)
-        mc.stop()
         print("[run] PASS")
         return 0
     except AssertionError as exc:
-        mc.stop()
         if args.verbose:
             print(f"[run] FAIL: {exc}")
         else:
             print("[run] FAIL")
         return 1
+    finally:
+        mc.stop()
 
 
 def cmd_diff(args: argparse.Namespace) -> int:
     """Compare two fixture files with colored output.
 
     Args:
-        args: Parsed CLI arguments with expected, actual, no_color, ignore_context.
+        args: Parsed CLI arguments with expected, actual, no_color, include_context.
 
     Returns:
         Exit code (0 = identical, 1 = differences found).
@@ -213,7 +211,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
     result = diff_fixtures(
         expected_path=args.expected,
         actual_path=args.actual,
-        ignore_context=args.ignore_context,
+        ignore_context=not args.include_context,
     )
     result.print_report(color=not args.no_color)
     return 0 if result.is_identical else 1
@@ -325,8 +323,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("expected", metavar="EXPECTED", help="Reference fixture file.")
     p_diff.add_argument("actual", metavar="ACTUAL", help="Fixture file to compare.")
     p_diff.add_argument("--no-color", action="store_true", help="Disable ANSI colors.")
-    p_diff.add_argument("--ignore-context", action="store_true", default=True,
-                        help="Skip context field comparison (default: True).")
+    p_diff.add_argument(
+        "--include-context",
+        action="store_true",
+        help="Include context field in comparison (default: skip context).",
+    )
 
     # --- validate ---
     p_validate = sub.add_parser("validate", help="Schema-validate fixture files.")

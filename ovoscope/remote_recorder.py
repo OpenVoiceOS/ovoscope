@@ -159,13 +159,15 @@ class RemoteRecorder:
         completed = self._done_event.wait(timeout=timeout)
         self._client.remove("message", self._on_message)
 
-        if not completed and not self._captured:
+        if not completed:
             raise TimeoutError(
-                f"No messages captured within {timeout}s for utterance {utterance!r}"
+                f"Interaction did not complete within {timeout}s for utterance {utterance!r}"
             )
 
         # Build End2EndTest from captured messages
+        skill_ids = [skill_id] if skill_id else []
         test = End2EndTest(
+            skill_ids=skill_ids,
             source_message=src,
             expected_messages=list(self._captured),
         )

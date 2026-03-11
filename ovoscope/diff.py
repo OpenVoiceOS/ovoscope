@@ -149,7 +149,6 @@ def _load_messages(path: str) -> List[Dict[str, Any]]:
 
     Raises:
         FileNotFoundError: If *path* does not exist.
-        KeyError: If ``expected_messages`` key is absent.
     """
     with open(path, "r", encoding="utf-8") as fh:
         payload = json.load(fh)
@@ -161,13 +160,12 @@ def diff_fixtures(
     actual_path: str,
     *,
     ignore_context: bool = True,
-    strict_order: bool = True,
 ) -> FixtureDiffResult:
     """Compare two fixture JSON files and return a structured diff.
 
     Algorithm:
     1. Load ``expected_messages`` from both files.
-    2. Align by index (strict_order=True) or by first-match (strict_order=False).
+    2. Align by index (messages must match in order).
     3. For each pair: compare type, then data, then (optionally) context.
     4. Flag trailing messages in the longer list as missing/extra.
 
@@ -175,7 +173,6 @@ def diff_fixtures(
         expected_path: Path to the reference fixture file.
         actual_path: Path to the fixture file being validated.
         ignore_context: Skip context comparison (default True).
-        strict_order: Align messages by index (default True).
 
     Returns:
         A :class:`FixtureDiffResult` describing all differences found.

@@ -127,13 +127,16 @@ class MiniPHAL:
             The instantiated plugin object, or None if loading fails.
         """
         try:
-            from ovos_plugin_manager.phal import OVOSPHALPlugin  # type: ignore
+            from ovos_plugin_manager.templates.phal import PHALPlugin  # type: ignore
             cfg = self.config.get(plugin_id, {})
-            plugin = OVOSPHALPlugin(bus=self._bus, config=cfg, plugin_id=plugin_id)
+            plugin = PHALPlugin(bus=self._bus, config=cfg, plugin_id=plugin_id)
             return plugin
         except Exception as exc:
             import warnings
-            warnings.warn(f"Failed to load PHAL plugin {plugin_id!r}: {exc}")
+            warnings.warn(
+                f"Failed to load PHAL plugin {plugin_id!r}: {exc}",
+                stacklevel=2,
+            )
             return None
 
     # ------------------------------------------------------------------

@@ -40,6 +40,7 @@ def _write_fixture(msgs: List[Dict[str, Any]]) -> str:
     json.dump({"source_message": {"type": "recognizer_loop:utterance", "data": {}, "context": {}},
                "expected_messages": msgs}, tmp)
     tmp.flush()
+    tmp.close()
     return tmp.name
 
 

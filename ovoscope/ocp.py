@@ -158,6 +158,11 @@ def _build_mock_response(mock_responses: Dict[str, Any]) -> MagicMock:
     mock = MagicMock()
 
     def json_side_effect(*_args: Any, **_kwargs: Any) -> Any:
+        # Match URL against mock_responses keys (as substrings)
+        url = str(mock.url) if hasattr(mock, 'url') else ""
+        for key, value in mock_responses.items():
+            if key in url:
+                return value
         return {}
 
     mock.json.side_effect = json_side_effect

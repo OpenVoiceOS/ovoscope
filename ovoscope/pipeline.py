@@ -104,12 +104,22 @@ class PipelineHarness:
     def __enter__(self) -> "PipelineHarness":
         """Start MiniCroft with the specified pipeline and no skills."""
         from ovoscope import get_minicroft
+
+        # Inject internal sink skill to capture matched intents
+        sink_skill = _SinkSkill(bus=None)  # bus set after MiniCroft creation
+
         self._mc = get_minicroft(
             skill_ids=[],
             lang=self.lang,
-            pipeline=self.pipeline or None,
+            default_pipeline=self.pipeline or None,
+            extra_skills={"__ovoscope_sink__": sink_skill},
             max_wait=60,
         )
+
+        # Update sink skill's bus reference now that MiniCroft is created
+        if self._mc is not None:
+            sink_skill.bus = self._mc.bus
+
         return self
 
     def __exit__(self, *_: Any) -> None:

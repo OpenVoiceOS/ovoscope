@@ -1,4 +1,17 @@
 # Maintenance Report — `ovoscope`
+## [2026-03-11] — Add VAD and WakeWord Support to MiniListener
+
+- **AI Model**: Claude Haiku 4.5
+- **Actions Taken**:
+  - Extended `ovoscope/listener.py` with `MockVADEngine`, `MockHotWordEngine`, `VADTest`, `WakeWordTest`.
+  - Extended `MiniListener` with `vad_instance` / `ww_instances` constructor params.
+  - Added `is_silence()`, `extract_speech()`, `detect_wakeword()`, `scan_for_wakeword()` methods to `MiniListener` — `listener.py:466–600`.
+  - Extended `get_mini_listener()` factory with `vad_plugin`, `vad_instance`, `ww_plugin`, `ww_instances` params.
+  - Made `ovos_dinkum_listener` import lazy (graceful `ImportError`) so VAD/WW tests work without the full listener stack installed.
+  - Added 41 unit tests in `test/unittests/test_listener_vad_ww.py`.
+  - Updated `FAQ.md` with VAD and WakeWord testing Q&A.
+- **Oversight**: 243 unit tests pass locally.
+
 ## [2026-03-11] — Enhance Audio Testing Robustness and CI
 
 - **AI Model**: Claude Sonnet 4.6

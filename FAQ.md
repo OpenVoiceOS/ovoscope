@@ -16,6 +16,33 @@ reply is emitted before the internal listener is registered. Use subscribe-emit-
 `threading.Event` instead. `AudioServiceHarness.get_track_info()` and `list_backends()`
 implement this pattern — `ovoscope/audio.py`.
 
+## How do I test VAD (Voice Activity Detection) without a real microphone?
+
+Use `MockVADEngine` from `ovoscope.listener`. It classifies all-zero bytes as silence and
+any non-zero byte as speech. Inject it into `MiniListener(config, vad_instance=MockVADEngine())`
+or use the declarative `VADTest` dataclass. No microphone, audio driver, or OPM plugin required.
+
+```python
+from ovoscope.listener import MockVADEngine, VADTest
+VADTest(vad_instance=MockVADEngine(), audio_input=b"\\x01" * 512, expect_silence=False).execute()
+```
+
+## How do I test Wake Word detection without loading a real model?
+
+Use `MockHotWordEngine(trigger_after=N)` from `ovoscope.listener`. It fires after exactly N
+`update()` calls and auto-resets. Inject via `MiniListener(config, ww_instances={"hey_mycroft": engine})`
+or use the declarative `WakeWordTest` dataclass.
+
+```python
+from ovoscope.listener import MockHotWordEngine, WakeWordTest
+WakeWordTest(
+    ww_instances={"hey_mycroft": MockHotWordEngine(trigger_after=2)},
+    audio_chunks=[b"\\x00" * 512] * 4,
+    expect_detected=True,
+    expected_detection_frame=1,
+).execute()
+```
+
 ## What is `ovoscope`?
 `ovoscope` is End-to-end test framework for OpenVoiceOS skills.
 ## How do I install it?

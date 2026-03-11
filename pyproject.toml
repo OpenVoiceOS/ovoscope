@@ -32,6 +32,9 @@ dev = [
     "pytest-cov",
 ]
 
+[project.scripts]
+ovoscope = "ovoscope.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/TigreGotico/ovoscope"
 

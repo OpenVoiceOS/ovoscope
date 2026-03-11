@@ -945,3 +945,142 @@ except ImportError as e:
         pass
     else:
         raise
+
+
+@dataclasses.dataclass
+class GUICaptureSession:
+    """Capture ``gui.*`` bus messages emitted during a skill interaction.
+
+    Unlike :class:`CaptureSession` (which filters out ``gui.*`` messages by
+    default), this session records *only* GUI-related messages so tests can
+    assert page navigation, namespace values, and namespace teardown without
+    cluttering the main message capture.
+
+    Args:
+        bus: The :class:`FakeBus` to subscribe to.
+        prefixes: List of message-type prefixes to capture.
+            Defaults to ``["gui.", "mycroft.gui."]``.
+
+    Example::
+
+        from ovoscope import get_minicroft, GUICaptureSession
+        from ovos_utils.messagebus import Message
+
+        mc = get_minicroft(["ovos-skill-hello-world.openvoiceos"])
+        with GUICaptureSession(mc.bus) as gui:
+            mc.bus.emit(Message("recognizer_loop:utterance",
+                                data={"utterances": ["hello"], "lang": "en-US"}))
+            import time; time.sleep(2)
+            gui.assert_page_shown("helloworldskill", "hello.qml")
+        mc.stop()
+    """
+
+    bus: Any
+    prefixes: List[str] = dataclasses.field(
+        default_factory=lambda: ["gui.", "mycroft.gui."]
+    )
+    messages: List[Message] = dataclasses.field(default_factory=list)
+
+    def _on_message(self, raw: Any) -> None:
+        """Capture GUI-prefixed messages from the bus.
+
+        Args:
+            raw: Raw message string or :class:`Message` object.
+        """
+        if isinstance(raw, str):
+            try:
+                msg = Message.deserialize(raw)
+            except Exception:
+                return
+        else:
+            msg = raw
+        if any(msg.msg_type.startswith(p) for p in self.prefixes):
+            self.messages.append(msg)
+
+    def start(self) -> None:
+        """Subscribe to the bus and begin capturing."""
+        self.bus.on("message", self._on_message)
+
+    def stop(self) -> None:
+        """Unsubscribe from the bus and stop capturing."""
+        self.bus.remove("message", self._on_message)
+
+    def __enter__(self) -> "GUICaptureSession":
+        """Start capturing on context-manager entry."""
+        self.start()
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        """Stop capturing on context-manager exit."""
+        self.stop()
+
+    def assert_page_shown(self, namespace: str, page: str, timeout: float = 2.0) -> None:
+        """Assert that a GUI page was shown in the given namespace.
+
+        Polls the captured messages for up to *timeout* seconds.
+
+        Args:
+            namespace: GUI namespace (typically the skill ID slug).
+            page: QML page filename (e.g. ``"hello.qml"``).
+            timeout: Maximum seconds to wait.
+
+        Raises:
+            AssertionError: If no matching ``gui.page.show`` message is found.
+        """
+        import time
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for msg in self.messages:
+                if "page.show" in msg.msg_type:
+                    data_ns = msg.data.get("namespace", "") or msg.context.get("skill_id", "")
+                    pages = msg.data.get("pages", []) or [msg.data.get("page", "")]
+                    if namespace in data_ns and any(page in str(p) for p in pages):
+                        return
+            time.sleep(0.05)
+        captured = [(m.msg_type, m.data) for m in self.messages]
+        raise AssertionError(
+            f"Expected page {page!r} in namespace {namespace!r} to be shown, "
+            f"but no matching gui.page.show message was captured.\nGot: {captured}"
+        )
+
+    def assert_namespace_value(self, namespace: str, key: str, value: Any) -> None:
+        """Assert that a namespace key was set to a specific value.
+
+        Args:
+            namespace: GUI namespace to check.
+            key: Data key within the namespace.
+            value: Expected value.
+
+        Raises:
+            AssertionError: If no matching ``gui.value.set`` message is found.
+        """
+        for msg in self.messages:
+            if "value.set" in msg.msg_type or "namespace.update" in msg.msg_type:
+                data_ns = msg.data.get("namespace", "") or msg.context.get("skill_id", "")
+                if namespace in data_ns:
+                    data = msg.data.get("data", msg.data)
+                    if data.get(key) == value:
+                        return
+        raise AssertionError(
+            f"Expected namespace {namespace!r} key {key!r}={value!r} not found.\n"
+            f"Captured GUI messages: {[m.msg_type for m in self.messages]}"
+        )
+
+    def assert_namespace_cleared(self, namespace: str) -> None:
+        """Assert that a namespace was cleared/removed.
+
+        Args:
+            namespace: GUI namespace that should have been cleared.
+
+        Raises:
+            AssertionError: If no matching namespace-clear message is found.
+        """
+        for msg in self.messages:
+            if "namespace.remove" in msg.msg_type or "namespace.clear" in msg.msg_type:
+                data_ns = msg.data.get("namespace", "") or msg.context.get("skill_id", "")
+                if namespace in data_ns:
+                    return
+        raise AssertionError(
+            f"Expected namespace {namespace!r} to be cleared, "
+            f"but no matching message was captured."
+        )

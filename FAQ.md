@@ -267,3 +267,76 @@ The override is patched into `Configuration()["intents"]` before `super().__init
 ```bash
 python -c "from model2vec.inference import StaticModelPipeline; StaticModelPipeline.from_pretrained('Jarbas/ovos-model2vec-intents-distiluse-base-multilingual-cased-v2')"
 ```
+
+---
+
+## CLI
+
+### How do I record a fixture from the command line?
+```bash
+ovoscope record --skill-id ovos-skill-hello-world.openvoiceos \
+    --utterance "hello" --output fixture.json
+```
+
+### How do I replay a fixture?
+```bash
+ovoscope run fixture.json --verbose
+```
+
+### How do I compare two fixture files?
+```bash
+ovoscope diff expected.json actual.json
+```
+Exit code 0 = identical, 1 = differences found.
+
+### How do I scan my workspace for E2E coverage gaps?
+```bash
+ovoscope coverage "OpenVoiceOS Workspace/" --format table
+```
+
+---
+
+## PHAL Testing
+
+### Can I test PHAL plugins with ovoscope?
+Yes — any PHAL plugin that communicates only via the MessageBus (no physical
+hardware) is testable with `MiniPHAL` or `PHALTest` from `ovoscope.phal`.
+
+### Which PHAL plugins require real hardware?
+`ovos-PHAL-plugin-alsa`, `ovos-PHAL-plugin-mk1`, `ovos-PHAL-plugin-dotstar`.
+These should use hardware-in-the-loop integration tests instead.
+
+---
+
+## OCP Testing
+
+### How do I test an OCP skill without a real HTTP server?
+Use `OCPTest` with `mock_responses` — keys are URL substrings matched
+against actual requests, values are the JSON bodies returned.
+
+### What message flow does OCP testing drive?
+`recognizer_loop:utterance` → `ovos.common_play.query` → `ovos.common_play.query.response` → `ovos.common_play.start`
+
+---
+
+## GUI Assertions
+
+### How do I assert that a skill showed a GUI page?
+```python
+from ovoscope import GUICaptureSession
+with GUICaptureSession(mc.bus) as gui:
+    # ... trigger interaction ...
+    gui.assert_page_shown("my_skill", "main.qml")
+```
+
+---
+
+## Coverage Scanner
+
+### What entry-point groups does the scanner detect?
+`opm.skill`, `opm.pipeline`, `opm.phal`, `opm.plugin.tts`, `opm.plugin.stt`,
+`opm.plugin.audio`, `opm.common_play`, `opm.solver`.
+
+### How is "covered" defined?
+A repo is considered covered when `test/end2end/` (or `tests/end2end/`)
+exists and contains at least one `.py` file (excluding `__init__.py`).

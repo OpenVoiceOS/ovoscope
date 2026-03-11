@@ -1,0 +1,371 @@
+# Copyright 2024 Jarbas AI
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""CLI entry point for ovoscope.
+
+Provides the ``ovoscope`` command with the following subcommands:
+
+* ``record``     — In-process fixture recording (or live via ``--live``).
+* ``run``        — Replay a fixture file and exit 1 on failure.
+* ``diff``       — Compare two fixture files with colored output.
+* ``validate``   — Schema-validate one or more fixture files.
+* ``coverage``   — Scan a workspace root and report E2E test coverage.
+
+Usage::
+
+    ovoscope record --skill-id ovos-skill-hello-world.openvoiceos \\
+        --utterance "hello" --output fixture.json
+    ovoscope run fixture.json
+    ovoscope diff expected.json actual.json
+    ovoscope validate fixture.json
+    ovoscope coverage path/to/OpenVoiceOS/
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from typing import List, NoReturn, Optional
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _die(message: str, code: int = 1) -> NoReturn:
+    """Print *message* to stderr and exit with *code*."""
+    print(f"ERROR: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+# ---------------------------------------------------------------------------
+# Sub-command implementations
+# ---------------------------------------------------------------------------
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    """Record a fixture: in-process (default) or live (``--live``).
+
+    Args:
+        args: Parsed CLI arguments.
+
+    Returns:
+        Exit code (0 = success).
+    """
+    if args.live:
+        return _record_live(args)
+    return _record_inprocess(args)
+
+
+def _record_inprocess(args: argparse.Namespace) -> int:
+    """Record a fixture using in-process MiniCroft.
+
+    Args:
+        args: Parsed CLI arguments with skill_id, utterance, output, lang, pipeline, timeout.
+
+    Returns:
+        Exit code (0 = success, 1 = failure).
+    """
+    try:
+        from ovoscope import End2EndTest, get_minicroft
+        from ovos_utils.messagebus import Message
+    except ImportError as exc:
+        _die(f"ovoscope import failed: {exc}")
+
+    skill_ids: List[str] = args.skill_id if args.skill_id else []
+    lang: str = args.lang or "en-US"
+    pipeline: Optional[List[str]] = args.pipeline.split(",") if args.pipeline else None
+    timeout: float = args.timeout
+
+    print(f"[record] Loading skills: {skill_ids}")
+    try:
+        mc = get_minicroft(skill_ids, lang=lang, pipeline=pipeline, max_wait=60)
+    except TimeoutError:
+        _die("MiniCroft did not reach READY state in time.")
+
+    src_msg = Message(
+        "recognizer_loop:utterance",
+        data={"utterances": [args.utterance], "lang": lang},
+    )
+
+    print(f"[record] Sending utterance: {args.utterance!r}")
+    test = End2EndTest.from_message(src_msg, mc, timeout=timeout)
+    mc.stop()
+
+    test.save(args.output)
+    print(f"[record] Fixture saved to {args.output}")
+    return 0
+
+
+def _record_live(args: argparse.Namespace) -> int:
+    """Record a fixture from a running OVOS instance.
+
+    Args:
+        args: Parsed CLI arguments with bus_url, skill_id, utterance, output, lang, timeout.
+
+    Returns:
+        Exit code (0 = success, 1 = failure).
+    """
+    try:
+        from ovoscope.remote_recorder import RemoteRecorder
+    except ImportError as exc:
+        _die(f"RemoteRecorder import failed: {exc}")
+
+    bus_url: str = args.bus_url or "ws://localhost:8181/core"
+    lang: str = args.lang or "en-US"
+    skill_ids: List[str] = args.skill_id if args.skill_id else []
+    timeout: float = args.timeout
+
+    print(f"[record --live] Connecting to {bus_url}")
+    recorder = RemoteRecorder(bus_url=bus_url)
+    recorder.connect()
+
+    skill_id = skill_ids[0] if skill_ids else None
+    test = recorder.record(
+        utterance=args.utterance,
+        skill_id=skill_id,
+        lang=lang,
+        timeout=timeout,
+    )
+    recorder.disconnect()
+    test.save(args.output)
+    print(f"[record --live] Fixture saved to {args.output}")
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Replay a fixture file.  Exit 1 on failure.
+
+    Args:
+        args: Parsed CLI arguments with fixture (path), verbose, timeout.
+
+    Returns:
+        Exit code (0 = pass, 1 = fail).
+    """
+    try:
+        from ovoscope import End2EndTest, get_minicroft
+    except ImportError as exc:
+        _die(f"ovoscope import failed: {exc}")
+
+    fixture_path: str = args.fixture
+    timeout: float = args.timeout
+
+    print(f"[run] Loading fixture: {fixture_path}")
+    try:
+        test = End2EndTest.from_path(fixture_path)
+    except Exception as exc:
+        _die(f"Could not load fixture: {exc}")
+
+    skill_ids = list(test.expected_messages[0].context.get("skill_id", "").split()) if test.expected_messages else []
+
+    # Use all skills referenced in context
+    all_skill_ids: List[str] = []
+    for msg in test.expected_messages:
+        sid = msg.context.get("skill_id") or msg.data.get("skill_id")
+        if sid and sid not in all_skill_ids:
+            all_skill_ids.append(sid)
+
+    print(f"[run] Starting MiniCroft with skills: {all_skill_ids}")
+    try:
+        mc = get_minicroft(all_skill_ids, max_wait=60)
+    except TimeoutError:
+        _die("MiniCroft did not reach READY state in time.")
+
+    try:
+        test.execute(timeout=timeout)
+        mc.stop()
+        print("[run] PASS")
+        return 0
+    except AssertionError as exc:
+        mc.stop()
+        if args.verbose:
+            print(f"[run] FAIL: {exc}")
+        else:
+            print("[run] FAIL")
+        return 1
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    """Compare two fixture files with colored output.
+
+    Args:
+        args: Parsed CLI arguments with expected, actual, no_color, ignore_context.
+
+    Returns:
+        Exit code (0 = identical, 1 = differences found).
+    """
+    try:
+        from ovoscope.diff import diff_fixtures
+    except ImportError as exc:
+        _die(f"ovoscope.diff import failed: {exc}")
+
+    result = diff_fixtures(
+        expected_path=args.expected,
+        actual_path=args.actual,
+        ignore_context=args.ignore_context,
+    )
+    result.print_report(color=not args.no_color)
+    return 0 if result.is_identical else 1
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Schema-validate one or more fixture JSON files.
+
+    Runs basic structural validation on every fixture file.
+
+    Args:
+        args: Parsed CLI arguments with fixtures (list of paths).
+
+    Returns:
+        Exit code (0 = all valid, 1 = validation failure).
+    """
+    all_ok = True
+    for path in args.fixtures:
+        try:
+            _basic_validate(path)
+            print(f"[validate] OK  {path}")
+        except Exception as exc:
+            print(f"[validate] FAIL  {path}: {exc}")
+            all_ok = False
+
+    return 0 if all_ok else 1
+
+
+def _basic_validate(path: str) -> None:
+    """Basic JSON structure validation for a fixture file.
+
+    Args:
+        path: Path to the fixture JSON file.
+
+    Raises:
+        ValueError: If required keys are missing or types are wrong.
+    """
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    required_keys = {"source_message", "expected_messages"}
+    missing = required_keys - data.keys()
+    if missing:
+        raise ValueError(f"Missing required keys: {missing}")
+    if not isinstance(data["expected_messages"], list):
+        raise ValueError("'expected_messages' must be a list")
+
+
+def cmd_coverage(args: argparse.Namespace) -> int:
+    """Scan a workspace root and report E2E test coverage.
+
+    Args:
+        args: Parsed CLI arguments with workspace (root path), format.
+
+    Returns:
+        Exit code (0 = success).
+    """
+    try:
+        from ovoscope.coverage import scan_workspace
+    except ImportError as exc:
+        _die(f"ovoscope.coverage import failed: {exc}")
+
+    report = scan_workspace(args.workspace)
+
+    if args.format == "json":
+        print(json.dumps(report.to_json(), indent=2))
+    else:
+        report.print_table()
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Build and return the top-level argument parser.
+
+    Returns:
+        Configured :class:`argparse.ArgumentParser` instance.
+    """
+    parser = argparse.ArgumentParser(
+        prog="ovoscope",
+        description="End-to-end test framework for OpenVoiceOS skills.",
+    )
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+    sub.required = True
+
+    # --- record ---
+    p_record = sub.add_parser("record", help="Record a fixture file.")
+    p_record.add_argument("--skill-id", nargs="*", metavar="ID", help="OPM skill IDs to load.")
+    p_record.add_argument("--utterance", required=True, metavar="TEXT", help="Utterance to send.")
+    p_record.add_argument("--output", required=True, metavar="FILE", help="Output fixture path.")
+    p_record.add_argument("--lang", default="en-US", metavar="LANG", help="Language tag (default: en-US).")
+    p_record.add_argument("--pipeline", default=None, metavar="STAGES", help="Comma-separated pipeline stages.")
+    p_record.add_argument("--timeout", type=float, default=20.0, metavar="SEC", help="Capture timeout seconds.")
+    p_record.add_argument("--live", action="store_true", help="Record from a running OVOS instance.")
+    p_record.add_argument("--bus-url", default=None, metavar="URL", help="MessageBus URL for --live mode.")
+
+    # --- run ---
+    p_run = sub.add_parser("run", help="Replay a fixture and exit 1 on failure.")
+    p_run.add_argument("fixture", metavar="FIXTURE", help="Path to fixture JSON file.")
+    p_run.add_argument("--verbose", "-v", action="store_true", help="Show failure details.")
+    p_run.add_argument("--timeout", type=float, default=30.0, metavar="SEC", help="Execution timeout seconds.")
+
+    # --- diff ---
+    p_diff = sub.add_parser("diff", help="Compare two fixture files.")
+    p_diff.add_argument("expected", metavar="EXPECTED", help="Reference fixture file.")
+    p_diff.add_argument("actual", metavar="ACTUAL", help="Fixture file to compare.")
+    p_diff.add_argument("--no-color", action="store_true", help="Disable ANSI colors.")
+    p_diff.add_argument("--ignore-context", action="store_true", default=True,
+                        help="Skip context field comparison (default: True).")
+
+    # --- validate ---
+    p_validate = sub.add_parser("validate", help="Schema-validate fixture files.")
+    p_validate.add_argument("fixtures", nargs="+", metavar="FILE", help="Fixture JSON files to validate.")
+
+    # --- coverage ---
+    p_coverage = sub.add_parser("coverage", help="Scan workspace for E2E test coverage.")
+    p_coverage.add_argument("workspace", metavar="WORKSPACE", help="Path to workspace root.")
+    p_coverage.add_argument("--format", choices=["table", "json"], default="table",
+                            help="Output format (default: table).")
+
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """CLI entry point for the ``ovoscope`` command."""
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    dispatch = {
+        "record": cmd_record,
+        "run": cmd_run,
+        "diff": cmd_diff,
+        "validate": cmd_validate,
+        "coverage": cmd_coverage,
+    }
+
+    handler = dispatch.get(args.command)
+    if handler is None:
+        parser.print_help()
+        sys.exit(1)
+
+    sys.exit(handler(args))
+
+
+if __name__ == "__main__":
+    main()

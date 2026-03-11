@@ -302,6 +302,47 @@ level where every OVOS repo can adopt ovoscope end-to-end testing without readin
   `ovos-core/test/end2end/test_adapt.py`, and all existing docs; then generated enriched content.
 - **Oversight**: Code examples are illustrative but not executed. Verify against live skill install before treating as runnable.
 ---
+---
+
+## 2026-03-11 — Phase 1–3 Feature Additions
+
+**AI Model**: claude-sonnet-4-6
+**Oversight**: Human review pending
+
+### Actions Taken
+
+Added CLI, PHAL harness, fixture differ, OCP harness, pipeline harness,
+ecosystem coverage scanner, GUI capture session, and remote recorder.
+
+**New modules:**
+- `ovoscope/cli.py` — `ovoscope` CLI with `record`, `run`, `diff`, `validate`, `coverage`
+- `ovoscope/diff.py` — `MessageDiff`, `FixtureDiffResult`, `diff_fixtures`
+- `ovoscope/phal.py` — `MiniPHAL`, `PHALTest`
+- `ovoscope/ocp.py` — `OCPTest`, `assert_ocp_query_response`
+- `ovoscope/pipeline.py` — `PipelineHarness`
+- `ovoscope/coverage.py` — `RepoCoverage`, `EcosystemCoverageReport`, `scan_workspace`
+- `ovoscope/remote_recorder.py` — `RemoteRecorder`
+
+**Extended modules:**
+- `ovoscope/__init__.py` — added `GUICaptureSession`
+
+**New docs:**
+- `docs/cli.md`, `docs/phal.md`, `docs/ocp.md`, `docs/pipeline.md`
+- `docs/usage-guide.md` — Patterns 9–12 appended
+
+**New tests:**
+- `test/unittests/test_diff.py` — 7 test methods
+- `test/unittests/test_phal.py` — 8 test methods
+- `test/unittests/test_coverage.py` — 11 test methods
+- `test/unittests/test_cli.py` — 14 test methods
+
+**pyproject.toml changes:**
+- Added `[project.scripts] ovoscope = "ovoscope.cli:main"`
+
+All 202 tests pass. No regressions introduced.
+
+---
+
 ## [2026-03-08] — Initial compliance scaffold
 ### Changes
 - Created `QUICK_FACTS.md` with machine-readable package metadata.

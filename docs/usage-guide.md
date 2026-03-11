@@ -522,3 +522,99 @@ non-deterministic — they are intentionally excluded from `DEFAULT_TEST_PIPELIN
 - [ci-integration.md](ci-integration.md) — wiring ovoscope into GitHub Actions CI
 - Canonical examples: `Skills/ovos-skill-hello-world/test/test_helloworld.py`
 - Core examples: `ovos-core/test/end2end/`
+
+---
+
+## Pattern 9: Multi-Skill Interactions
+
+When testing skill interactions where one skill hands off to another, load all
+involved skills and emit a single utterance.  `CaptureSession` records messages
+from all loaded skills simultaneously.
+
+```python
+from ovoscope import get_minicroft, CaptureSession
+from ovos_utils.messagebus import Message
+
+mc = get_minicroft([
+    "ovos-skill-hello-world.openvoiceos",
+    "ovos-skill-fallback-unknown.openvoiceos",
+])
+session = CaptureSession(mc)
+session.capture(Message(
+    "recognizer_loop:utterance",
+    data={"utterances": ["something unknown"], "lang": "en-US"},
+))
+responses = session.finish()
+mc.stop()
+```
+
+---
+
+## Pattern 10: PHAL Plugin Testing
+
+PHAL plugins communicate via the MessageBus and accept `bus` directly, so
+`FakeBus` injection works without hardware.
+
+```python
+from ovos_utils.messagebus import Message
+from ovoscope.phal import MiniPHAL, PHALTest
+
+# Context-manager style
+with MiniPHAL(plugin_ids=["ovos-PHAL-plugin-connectivity-events.openvoiceos"]) as phal:
+    phal.emit(Message("network.connected"))
+    phal.assert_emitted("mycroft.internet.connected", timeout=2.0)
+
+# Declarative style
+PHALTest(
+    plugin_ids=["ovos-PHAL-plugin-system.openvoiceos"],
+    trigger_message=Message("system.reboot"),
+    expected_types=["system.reboot.confirmed"],
+).execute()
+```
+
+See [phal.md](phal.md) for the full reference.
+
+---
+
+## Pattern 11: OCP / Common Play Testing
+
+OCP skills respond to `ovos.common_play.query` with a media list.  `OCPTest`
+drives the full flow with optional HTTP mocking.
+
+```python
+from ovoscope.ocp import OCPTest
+
+OCPTest(
+    skill_ids=["ovos-skill-youtube.openvoiceos"],
+    utterance="play lofi hip hop",
+    mock_responses={"youtube.com": {"items": [{"title": "Lofi Radio", "url": "..."}]}},
+    expected_media=[{"title": "Lofi Radio"}],
+).execute()
+```
+
+See [ocp.md](ocp.md) for the full reference.
+
+---
+
+## Pattern 12: GUI Message Assertion
+
+`GUICaptureSession` captures `gui.*` messages so tests can assert page
+navigation and namespace values without polluting the main message capture.
+
+```python
+from ovoscope import get_minicroft, GUICaptureSession
+from ovos_utils.messagebus import Message
+import time
+
+mc = get_minicroft(["ovos-skill-hello-world.openvoiceos"])
+with GUICaptureSession(mc.bus) as gui:
+    mc.bus.emit(Message(
+        "recognizer_loop:utterance",
+        data={"utterances": ["hello"], "lang": "en-US"},
+    ))
+    time.sleep(2)
+    gui.assert_page_shown("helloworldskill", "hello.qml")
+mc.stop()
+```
+
+See [ovoscope/__init__.py](../ovoscope/__init__.py) for `GUICaptureSession` API.

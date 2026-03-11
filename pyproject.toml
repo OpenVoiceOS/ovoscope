@@ -45,12 +45,6 @@ ovoscope = "ovoscope.pytest_plugin"
 [tool.setuptools.dynamic]
 version = {attr = "ovoscope.version.__version__"}
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["ovoscope*"]
-
-[tool.setuptools.package-data]
-"ovoscope.skill_data" = ["**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]

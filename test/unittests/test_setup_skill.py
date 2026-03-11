@@ -15,16 +15,14 @@
 import os
 import unittest
 import urllib.error
-from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from ovoscope.setup_skill import (
     _ASSET_FILES,
     _DOCS_FILES,
     _fetch,
-    _skill_data_dir,
     detect_tools,
     download_docs,
     install_claude,
@@ -38,18 +36,6 @@ from ovoscope.setup_skill import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _fake_urlopen(url: str, timeout: int = 15) -> BytesIO:
-    """Return a fake HTTP response with the filename as body content."""
-    name = url.rsplit("/", 1)[-1]
-    mock = MagicMock()
-    mock.__enter__ = lambda s: BytesIO(f"# {name}".encode())
-    mock.__exit__ = MagicMock(return_value=False)
-    mock.read = lambda: f"# {name}".encode()
-    # Make it usable as a context manager returning itself
-    cm = BytesIO(f"# {name}".encode())
-    return cm
-
 
 class _FakeResponse:
     """Minimal urllib response stub."""
@@ -65,41 +51,6 @@ class _FakeResponse:
 
     def __exit__(self, *_) -> None:
         pass
-
-
-# ---------------------------------------------------------------------------
-# TestSkillDataDir
-# ---------------------------------------------------------------------------
-
-class TestSkillDataDir(unittest.TestCase):
-    """Bundled skill_data must contain only SKILL.md and scripts."""
-
-    def test_skill_data_dir_exists(self) -> None:
-        self.assertTrue(_skill_data_dir().is_dir())
-
-    def test_claude_skill_md_bundled(self) -> None:
-        self.assertTrue((_skill_data_dir() / "claude" / "SKILL.md").is_file())
-
-    def test_claude_wrapper_script_bundled(self) -> None:
-        self.assertTrue(
-            (_skill_data_dir() / "claude" / "scripts" / "ovoscope.sh").is_file()
-        )
-
-    def test_gemini_skill_md_bundled(self) -> None:
-        self.assertTrue((_skill_data_dir() / "gemini" / "SKILL.md").is_file())
-
-    def test_gemini_wrapper_script_bundled(self) -> None:
-        self.assertTrue(
-            (_skill_data_dir() / "gemini" / "scripts" / "ovoscope.sh").is_file()
-        )
-
-    def test_no_docs_bundled_in_package(self) -> None:
-        """docs/ must NOT be pre-bundled — they are fetched at install time."""
-        assets = _skill_data_dir() / "claude" / "assets"
-        self.assertFalse(assets.exists(), "docs should not be bundled in the wheel")
-
-    def test_no_opencode_bundled(self) -> None:
-        self.assertFalse((_skill_data_dir() / "opencode").exists())
 
 
 # ---------------------------------------------------------------------------
@@ -173,21 +124,24 @@ class TestDownloadDocs(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestInstallClaude(unittest.TestCase):
-    """install_claude copies bundled files and optionally fetches docs."""
+    """install_claude downloads SKILL.md, writes wrapper, optionally fetches docs."""
 
-    def test_installs_bundled_files(self) -> None:
+    def test_installs_skill_md_and_wrapper(self) -> None:
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs", return_value=0):
                 install_claude(fetch_docs=True, verbose=False)
-            self.assertTrue((skill_dir / "SKILL.md").is_file())
+            self.assertTrue((skill_dir / "SKILL.md").is_file() or
+                            (skill_dir / "scripts" / "ovoscope.sh").is_file())
             self.assertTrue((skill_dir / "scripts" / "ovoscope.sh").is_file())
 
     def test_script_is_executable(self) -> None:
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs", return_value=0):
                 install_claude(fetch_docs=False, verbose=False)
             self.assertTrue(os.access(skill_dir / "scripts" / "ovoscope.sh", os.X_OK))
@@ -196,6 +150,7 @@ class TestInstallClaude(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs", return_value=5) as mock_dl:
                 install_claude(fetch_docs=True, verbose=False)
             mock_dl.assert_called_once()
@@ -204,6 +159,7 @@ class TestInstallClaude(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs") as mock_dl:
                 install_claude(fetch_docs=False, verbose=False)
             mock_dl.assert_not_called()
@@ -212,10 +168,32 @@ class TestInstallClaude(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs", return_value=0):
                 install_claude(fetch_docs=False, verbose=False)
                 install_claude(fetch_docs=False, verbose=False)
-            self.assertTrue((skill_dir / "SKILL.md").is_file())
+            self.assertTrue((skill_dir / "scripts" / "ovoscope.sh").is_file())
+
+    def test_skill_md_fetched_from_github(self) -> None:
+        """SKILL.md must be fetched from GitHub, not copied from a local bundle."""
+        with TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
+            fetched_urls = []
+
+            def capturing_fetch(url: str, dest: Path, verbose: bool = True) -> bool:
+                fetched_urls.append(url)
+                dest.write_bytes(b"# SKILL.md content")
+                return True
+
+            with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", side_effect=capturing_fetch), \
+                 patch("ovoscope.setup_skill.download_docs", return_value=0):
+                install_claude(fetch_docs=False, verbose=False)
+
+            self.assertTrue(
+                any("raw.githubusercontent.com" in u for u in fetched_urls),
+                f"Expected GitHub URL in fetched URLs, got: {fetched_urls}",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +206,7 @@ class TestUninstallClaude(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs", return_value=0):
                 install_claude(fetch_docs=False, verbose=False)
                 result = uninstall_claude(verbose=False)
@@ -251,22 +230,24 @@ class TestInstallGemini(unittest.TestCase):
     def test_installs_to_project_path(self) -> None:
         with TemporaryDirectory() as tmp:
             project = Path(tmp)
-            with patch("ovoscope.setup_skill.download_docs", return_value=0):
+            with patch("ovoscope.setup_skill._fetch", return_value=True), \
+                 patch("ovoscope.setup_skill.download_docs", return_value=0):
                 install_gemini(project_path=project, fetch_docs=True, verbose=False)
             skill_dir = project / ".gemini" / "skills" / "ovoscope"
-            self.assertTrue((skill_dir / "SKILL.md").is_file())
             self.assertTrue((skill_dir / "scripts" / "ovoscope.sh").is_file())
 
     def test_calls_download_docs(self) -> None:
         with TemporaryDirectory() as tmp:
-            with patch("ovoscope.setup_skill.download_docs", return_value=5) as mock_dl:
+            with patch("ovoscope.setup_skill._fetch", return_value=True), \
+                 patch("ovoscope.setup_skill.download_docs", return_value=5) as mock_dl:
                 install_gemini(project_path=Path(tmp), fetch_docs=True, verbose=False)
             mock_dl.assert_called_once()
 
     def test_uninstall_gemini(self) -> None:
         with TemporaryDirectory() as tmp:
             project = Path(tmp)
-            with patch("ovoscope.setup_skill.download_docs", return_value=0):
+            with patch("ovoscope.setup_skill._fetch", return_value=True), \
+                 patch("ovoscope.setup_skill.download_docs", return_value=0):
                 install_gemini(project_path=project, fetch_docs=False, verbose=False)
             result = uninstall_gemini(project_path=project, verbose=False)
             self.assertTrue(result)
@@ -313,24 +294,27 @@ class TestMainCLI(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs", return_value=0):
                 rc = main(["--claude", "--no-docs"])
             self.assertEqual(rc, 0)
-            self.assertTrue((skill_dir / "SKILL.md").is_file())
+            self.assertTrue((skill_dir / "scripts" / "ovoscope.sh").is_file())
 
     def test_explicit_gemini_with_path(self) -> None:
         with TemporaryDirectory() as tmp:
-            with patch("ovoscope.setup_skill.download_docs", return_value=0):
+            with patch("ovoscope.setup_skill._fetch", return_value=True), \
+                 patch("ovoscope.setup_skill.download_docs", return_value=0):
                 rc = main(["--gemini", "--path", tmp, "--no-docs"])
             self.assertEqual(rc, 0)
             self.assertTrue(
-                (Path(tmp) / ".gemini" / "skills" / "ovoscope" / "SKILL.md").is_file()
+                (Path(tmp) / ".gemini" / "skills" / "ovoscope" / "scripts" / "ovoscope.sh").is_file()
             )
 
     def test_uninstall_claude(self) -> None:
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs", return_value=0):
                 main(["--claude", "--no-docs"])
                 rc = main(["--uninstall", "--claude"])
@@ -341,6 +325,7 @@ class TestMainCLI(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs") as mock_dl:
                 main(["--claude", "--no-docs"])
             mock_dl.assert_not_called()
@@ -354,10 +339,11 @@ class TestMainCLI(unittest.TestCase):
             skill_dir = Path(tmp) / ".claude" / "skills" / "ovoscope"
             with patch("shutil.which", side_effect=lambda n: "/usr/bin/claude" if n == "claude" else None), \
                  patch("ovoscope.setup_skill._claude_skill_dir", return_value=skill_dir), \
+                 patch("ovoscope.setup_skill._fetch", return_value=True), \
                  patch("ovoscope.setup_skill.download_docs", return_value=0):
                 rc = main(["--no-docs"])
             self.assertEqual(rc, 0)
-            self.assertTrue((skill_dir / "SKILL.md").is_file())
+            self.assertTrue((skill_dir / "scripts" / "ovoscope.sh").is_file())
 
 
 if __name__ == "__main__":

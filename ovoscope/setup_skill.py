@@ -13,12 +13,13 @@
 # limitations under the License.
 """ovoscope-setup — install the ovoscope skill into AI coding assistants.
 
-Supports Claude Code and Gemini CLI.  Running without flags auto-detects
-which tools are installed and installs for all of them.
+Supports Claude Code and Gemini CLI.  All skill files (SKILL.md, docs,
+FAQ.md, QUICK_FACTS.md) are downloaded from the ovoscope GitHub repository
+at install time.  The only thing generated locally is the tiny shell wrapper
+that invokes the ``ovoscope`` CLI.
 
-The ``SKILL.md`` and wrapper script are bundled with the package.
-Documentation is downloaded from the ovoscope GitHub repository so the
-installed assets always reflect the latest docs without bloating the wheel.
+Nothing is bundled in the wheel beyond this module itself, so the package
+stays small and the installed skill always reflects the current docs.
 
 Usage::
 
@@ -27,8 +28,8 @@ Usage::
     ovoscope-setup --gemini            # Gemini CLI only (project-level)
     ovoscope-setup --gemini --path /my/workspace
     ovoscope-setup --list              # show detected tools without installing
+    ovoscope-setup --no-docs           # skip docs download (offline / CI)
     ovoscope-setup --uninstall --claude
-    ovoscope-setup --no-docs           # skip doc download (offline / CI use)
 """
 from __future__ import annotations
 
@@ -38,21 +39,23 @@ import stat
 import sys
 import urllib.error
 import urllib.request
-from importlib import resources
 from pathlib import Path
 from typing import List, Optional
 
 
 # ---------------------------------------------------------------------------
-# GitHub source for docs
+# GitHub source URLs
 # ---------------------------------------------------------------------------
 
-#: Raw-content base URL for ovoscope docs on the master branch.
+#: Raw-content base for the ovoscope master branch.
 GITHUB_RAW_BASE = (
     "https://raw.githubusercontent.com/TigreGotico/ovoscope/master"
 )
 
-#: Files to download into ``assets/docs/``.
+#: SKILL.md is shared between Claude and Gemini — same file, same format.
+_SKILL_MD_URL = f"{GITHUB_RAW_BASE}/SKILL.md"
+
+#: Docs files to download into ``assets/docs/``.
 _DOCS_FILES = [
     "docs/audio-testing.md",
     "docs/capture-session.md",
@@ -70,100 +73,30 @@ _DOCS_FILES = [
     "docs/usage-guide.md",
 ]
 
-#: Extra root-level files to download into ``assets/``.
+#: Root-level files to download into ``assets/``.
 _ASSET_FILES = [
     "FAQ.md",
     "QUICK_FACTS.md",
 ]
 
-
-# ---------------------------------------------------------------------------
-# Skill data helpers
-# ---------------------------------------------------------------------------
-
-def _skill_data_dir() -> Path:
-    """Return the path to the bundled ``skill_data`` package directory."""
-    with resources.path("ovoscope.skill_data", "__init__.py") as p:
-        return p.parent
-
-
-def _copy_tree(src: Path, dst: Path) -> List[Path]:
-    """Recursively copy *src* into *dst*.
-
-    Args:
-        src: Source directory.
-        dst: Destination directory (created if absent).
-
-    Returns:
-        List of destination paths written.
-    """
-    written: List[Path] = []
-    for item in src.rglob("*"):
-        if item.is_file():
-            rel = item.relative_to(src)
-            dest = dst / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(item, dest)
-            written.append(dest)
-    return written
-
-
-def _make_executable(path: Path) -> None:
-    """Add execute bits (owner + group + other) to *path*."""
-    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+#: Shell wrapper written into ``scripts/``.  Just delegates to the CLI.
+_WRAPPER_SCRIPT = "#!/bin/bash\nexec ovoscope \"$@\"\n"
 
 
 # ---------------------------------------------------------------------------
-# Documentation download
+# Network helper
 # ---------------------------------------------------------------------------
-
-def download_docs(assets_dir: Path, verbose: bool = True) -> int:
-    """Download ovoscope docs from GitHub into *assets_dir*.
-
-    Downloads each file listed in :data:`_DOCS_FILES` into
-    ``assets_dir/docs/`` and each file in :data:`_ASSET_FILES` into
-    ``assets_dir/``.  Files that cannot be fetched (network error, 404)
-    are skipped with a warning rather than aborting the whole install.
-
-    Args:
-        assets_dir: Destination ``assets/`` directory.
-        verbose: Print progress messages.
-
-    Returns:
-        Number of files successfully downloaded.
-    """
-    downloaded = 0
-
-    # docs/ subdirectory
-    docs_dst = assets_dir / "docs"
-    docs_dst.mkdir(parents=True, exist_ok=True)
-    for rel_path in _DOCS_FILES:
-        url = f"{GITHUB_RAW_BASE}/{rel_path}"
-        dest = docs_dst / Path(rel_path).name
-        if _fetch(url, dest, verbose=verbose):
-            downloaded += 1
-
-    # root-level assets (FAQ.md, QUICK_FACTS.md)
-    assets_dir.mkdir(parents=True, exist_ok=True)
-    for rel_path in _ASSET_FILES:
-        url = f"{GITHUB_RAW_BASE}/{rel_path}"
-        dest = assets_dir / rel_path
-        if _fetch(url, dest, verbose=verbose):
-            downloaded += 1
-
-    return downloaded
-
 
 def _fetch(url: str, dest: Path, verbose: bool = True) -> bool:
     """Download *url* to *dest*.
 
     Args:
         url: Full URL to fetch.
-        dest: Destination file path.
+        dest: Destination file path (parent must exist).
         verbose: Print per-file status.
 
     Returns:
-        True on success, False on any error.
+        True on success, False on any error (warning is printed to stderr).
     """
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:  # noqa: S310
@@ -174,6 +107,85 @@ def _fetch(url: str, dest: Path, verbose: bool = True) -> bool:
     except (urllib.error.URLError, OSError) as exc:
         print(f"  ! skipped {dest.name}: {exc}", file=sys.stderr)
         return False
+
+
+def download_docs(assets_dir: Path, verbose: bool = True) -> int:
+    """Download ovoscope docs from GitHub into *assets_dir*.
+
+    Downloads :data:`_DOCS_FILES` into ``assets_dir/docs/`` and
+    :data:`_ASSET_FILES` into ``assets_dir/``.  Individual failures are
+    warned and skipped — they do not abort the install.
+
+    Args:
+        assets_dir: Destination ``assets/`` directory (created if absent).
+        verbose: Print progress messages.
+
+    Returns:
+        Number of files successfully downloaded.
+    """
+    downloaded = 0
+
+    docs_dst = assets_dir / "docs"
+    docs_dst.mkdir(parents=True, exist_ok=True)
+    for rel_path in _DOCS_FILES:
+        if _fetch(f"{GITHUB_RAW_BASE}/{rel_path}", docs_dst / Path(rel_path).name, verbose):
+            downloaded += 1
+
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    for rel_path in _ASSET_FILES:
+        if _fetch(f"{GITHUB_RAW_BASE}/{rel_path}", assets_dir / rel_path, verbose):
+            downloaded += 1
+
+    return downloaded
+
+
+# ---------------------------------------------------------------------------
+# Shared install helpers
+# ---------------------------------------------------------------------------
+
+def _install_skill(
+    skill_dir: Path,
+    tool_name: str,
+    fetch_docs: bool,
+    verbose: bool,
+) -> bool:
+    """Create a skill directory, download SKILL.md, write the wrapper script.
+
+    Args:
+        skill_dir: Target directory for the skill.
+        tool_name: Display name for log messages (e.g. ``"claude"``).
+        fetch_docs: Whether to download docs into ``assets/``.
+        verbose: Print progress messages.
+
+    Returns:
+        True on success.
+    """
+    scripts_dir = skill_dir / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    # SKILL.md — downloaded from GitHub
+    skill_md = skill_dir / "SKILL.md"
+    if verbose:
+        print(f"[{tool_name}]  downloading SKILL.md …")
+    _fetch(_SKILL_MD_URL, skill_md, verbose=False)
+    if verbose and skill_md.exists():
+        print(f"[{tool_name}]  SKILL.md → {skill_md}")
+
+    # Wrapper script — generated inline
+    wrapper = scripts_dir / "ovoscope.sh"
+    wrapper.write_text(_WRAPPER_SCRIPT)
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    if fetch_docs:
+        if verbose:
+            print(f"[{tool_name}]  downloading docs from GitHub …")
+        n = download_docs(skill_dir / "assets", verbose=verbose)
+        if verbose:
+            print(f"[{tool_name}]  {n} doc files downloaded")
+
+    if verbose:
+        print(f"[{tool_name}]  installed → {skill_dir}")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -193,9 +205,8 @@ def _claude_is_installed() -> bool:
 def install_claude(fetch_docs: bool = True, verbose: bool = True) -> bool:
     """Install the ovoscope skill for Claude Code.
 
-    Copies the bundled ``SKILL.md`` and wrapper script into
-    ``~/.claude/skills/ovoscope/``, then optionally downloads
-    documentation from GitHub into ``assets/``.
+    Downloads ``SKILL.md`` from GitHub, writes the wrapper script, and
+    optionally downloads docs into ``~/.claude/skills/ovoscope/assets/``.
 
     Args:
         fetch_docs: Download docs from GitHub (default True).
@@ -204,26 +215,7 @@ def install_claude(fetch_docs: bool = True, verbose: bool = True) -> bool:
     Returns:
         True on success.
     """
-    src = _skill_data_dir() / "claude"
-    dst = _claude_skill_dir()
-    dst.mkdir(parents=True, exist_ok=True)
-
-    written = _copy_tree(src, dst)
-
-    for script in (dst / "scripts").glob("*.sh"):
-        _make_executable(script)
-
-    if verbose:
-        print(f"[claude]  installed {len(written)} bundled files → {dst}")
-
-    if fetch_docs:
-        if verbose:
-            print("[claude]  downloading docs from GitHub …")
-        n = download_docs(dst / "assets", verbose=verbose)
-        if verbose:
-            print(f"[claude]  {n} doc files downloaded")
-
-    return True
+    return _install_skill(_claude_skill_dir(), "claude", fetch_docs, verbose)
 
 
 def uninstall_claude(verbose: bool = True) -> bool:
@@ -271,12 +263,11 @@ def install_gemini(
 ) -> bool:
     """Install the ovoscope skill for Gemini CLI.
 
-    Copies the bundled ``SKILL.md`` and wrapper script into
-    ``<project>/.gemini/skills/ovoscope/``, then optionally downloads
-    documentation from GitHub into ``assets/``.
+    Downloads ``SKILL.md`` from GitHub, writes the wrapper script, and
+    optionally downloads docs into ``<project>/.gemini/skills/ovoscope/assets/``.
 
-    Gemini skills are project-level.  Run from your workspace root or
-    pass *project_path* explicitly.
+    Gemini skills are project-level.  Run from your workspace root or pass
+    *project_path* explicitly.
 
     Args:
         project_path: Project root. Defaults to ``Path.cwd()``.
@@ -286,26 +277,9 @@ def install_gemini(
     Returns:
         True on success.
     """
-    src = _skill_data_dir() / "gemini"
-    dst = _gemini_skill_dir(project_path)
-    dst.mkdir(parents=True, exist_ok=True)
-
-    written = _copy_tree(src, dst)
-
-    for script in (dst / "scripts").glob("*.sh"):
-        _make_executable(script)
-
-    if verbose:
-        print(f"[gemini]  installed {len(written)} bundled files → {dst}")
-
-    if fetch_docs:
-        if verbose:
-            print("[gemini]  downloading docs from GitHub …")
-        n = download_docs(dst / "assets", verbose=verbose)
-        if verbose:
-            print(f"[gemini]  {n} doc files downloaded")
-
-    return True
+    return _install_skill(
+        _gemini_skill_dir(project_path), "gemini", fetch_docs, verbose
+    )
 
 
 def uninstall_gemini(
@@ -367,11 +341,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         prog="ovoscope-setup",
         description=(
             "Install the ovoscope skill into AI coding assistants.\n\n"
-            "Run without flags to auto-detect and install for all tools found\n"
-            "on PATH.  Gemini installs are project-level (written to the\n"
-            "current directory or the path given by --path).\n\n"
-            "Documentation is fetched from GitHub at install time so the\n"
-            "bundled wheel stays small.  Pass --no-docs to skip the download."
+            "Everything (SKILL.md, docs, FAQ.md) is downloaded from GitHub\n"
+            "at install time — nothing extra is bundled in the wheel.\n\n"
+            "Run without flags to auto-detect and install for all tools on PATH.\n"
+            "Gemini installs are project-level (current directory or --path)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -415,10 +388,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.list_only:
         found = detect_tools()
-        if found:
-            print("Detected AI tools on PATH: " + ", ".join(found))
-        else:
-            print("No supported AI tools detected on PATH (claude, gemini).")
+        print(
+            "Detected AI tools on PATH: " + ", ".join(found)
+            if found else
+            "No supported AI tools detected on PATH (claude, gemini)."
+        )
         return 0
 
     explicit = args.claude or args.gemini
@@ -441,19 +415,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             uninstall_gemini(project_path)
         return 0
 
-    installed = 0
     if args.claude:
         install_claude(fetch_docs=fetch_docs)
-        installed += 1
     if args.gemini:
         install_gemini(project_path, fetch_docs=fetch_docs)
-        installed += 1
 
-    if installed:
-        print(
-            "\nInstallation complete. Restart your AI assistant or open a new\n"
-            "session for the ovoscope skill to be available."
-        )
+    print(
+        "\nInstallation complete. Restart your AI assistant or open a new\n"
+        "session for the ovoscope skill to be available."
+    )
     return 0
 
 

@@ -13,32 +13,68 @@
 # limitations under the License.
 """ovoscope-setup — install the ovoscope skill into AI coding assistants.
 
-Supports Claude Code, Gemini CLI, and OpenCode. Running without flags
-auto-detects which tools are installed and installs for all of them.
+Supports Claude Code and Gemini CLI.  Running without flags auto-detects
+which tools are installed and installs for all of them.
+
+The ``SKILL.md`` and wrapper script are bundled with the package.
+Documentation is downloaded from the ovoscope GitHub repository so the
+installed assets always reflect the latest docs without bloating the wheel.
 
 Usage::
 
     ovoscope-setup                     # auto-detect and install all
     ovoscope-setup --claude            # Claude Code only
     ovoscope-setup --gemini            # Gemini CLI only (project-level)
-    ovoscope-setup --opencode          # OpenCode only (project-level)
     ovoscope-setup --gemini --path /my/workspace
     ovoscope-setup --list              # show detected tools without installing
     ovoscope-setup --uninstall --claude
-
-Each tool installs skill/agent definition files so the AI assistant can
-discover the ovoscope CLI commands and documentation automatically.
+    ovoscope-setup --no-docs           # skip doc download (offline / CI use)
 """
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import stat
 import sys
+import urllib.error
+import urllib.request
 from importlib import resources
 from pathlib import Path
 from typing import List, Optional
+
+
+# ---------------------------------------------------------------------------
+# GitHub source for docs
+# ---------------------------------------------------------------------------
+
+#: Raw-content base URL for ovoscope docs on the master branch.
+GITHUB_RAW_BASE = (
+    "https://raw.githubusercontent.com/TigreGotico/ovoscope/master"
+)
+
+#: Files to download into ``assets/docs/``.
+_DOCS_FILES = [
+    "docs/audio-testing.md",
+    "docs/capture-session.md",
+    "docs/ci-integration.md",
+    "docs/cli.md",
+    "docs/end2end-test.md",
+    "docs/gui-testing.md",
+    "docs/index.md",
+    "docs/listener.md",
+    "docs/minicroft.md",
+    "docs/ocp.md",
+    "docs/phal.md",
+    "docs/pipeline.md",
+    "docs/pydantic-integration.md",
+    "docs/usage-guide.md",
+]
+
+#: Extra root-level files to download into ``assets/``.
+_ASSET_FILES = [
+    "FAQ.md",
+    "QUICK_FACTS.md",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -46,15 +82,20 @@ from typing import List, Optional
 # ---------------------------------------------------------------------------
 
 def _skill_data_dir() -> Path:
-    """Return the path to the bundled skill_data package directory."""
+    """Return the path to the bundled ``skill_data`` package directory."""
     with resources.path("ovoscope.skill_data", "__init__.py") as p:
         return p.parent
 
 
 def _copy_tree(src: Path, dst: Path) -> List[Path]:
-    """Copy *src* directory tree into *dst*, creating dirs as needed.
+    """Recursively copy *src* into *dst*.
 
-    Returns list of destination paths written.
+    Args:
+        src: Source directory.
+        dst: Destination directory (created if absent).
+
+    Returns:
+        List of destination paths written.
     """
     written: List[Path] = []
     for item in src.rglob("*"):
@@ -68,9 +109,71 @@ def _copy_tree(src: Path, dst: Path) -> List[Path]:
 
 
 def _make_executable(path: Path) -> None:
-    """Add execute bits to *path* (owner + group + other)."""
-    current = path.stat().st_mode
-    path.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    """Add execute bits (owner + group + other) to *path*."""
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+# ---------------------------------------------------------------------------
+# Documentation download
+# ---------------------------------------------------------------------------
+
+def download_docs(assets_dir: Path, verbose: bool = True) -> int:
+    """Download ovoscope docs from GitHub into *assets_dir*.
+
+    Downloads each file listed in :data:`_DOCS_FILES` into
+    ``assets_dir/docs/`` and each file in :data:`_ASSET_FILES` into
+    ``assets_dir/``.  Files that cannot be fetched (network error, 404)
+    are skipped with a warning rather than aborting the whole install.
+
+    Args:
+        assets_dir: Destination ``assets/`` directory.
+        verbose: Print progress messages.
+
+    Returns:
+        Number of files successfully downloaded.
+    """
+    downloaded = 0
+
+    # docs/ subdirectory
+    docs_dst = assets_dir / "docs"
+    docs_dst.mkdir(parents=True, exist_ok=True)
+    for rel_path in _DOCS_FILES:
+        url = f"{GITHUB_RAW_BASE}/{rel_path}"
+        dest = docs_dst / Path(rel_path).name
+        if _fetch(url, dest, verbose=verbose):
+            downloaded += 1
+
+    # root-level assets (FAQ.md, QUICK_FACTS.md)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    for rel_path in _ASSET_FILES:
+        url = f"{GITHUB_RAW_BASE}/{rel_path}"
+        dest = assets_dir / rel_path
+        if _fetch(url, dest, verbose=verbose):
+            downloaded += 1
+
+    return downloaded
+
+
+def _fetch(url: str, dest: Path, verbose: bool = True) -> bool:
+    """Download *url* to *dest*.
+
+    Args:
+        url: Full URL to fetch.
+        dest: Destination file path.
+        verbose: Print per-file status.
+
+    Returns:
+        True on success, False on any error.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:  # noqa: S310
+            dest.write_bytes(resp.read())
+        if verbose:
+            print(f"  ↓ {dest.name}")
+        return True
+    except (urllib.error.URLError, OSError) as exc:
+        print(f"  ! skipped {dest.name}: {exc}", file=sys.stderr)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -83,16 +186,19 @@ def _claude_skill_dir() -> Path:
 
 
 def _claude_is_installed() -> bool:
-    """Return True if ``claude`` binary is on PATH."""
+    """Return True if the ``claude`` binary is on PATH."""
     return shutil.which("claude") is not None
 
 
-def install_claude(verbose: bool = True) -> bool:
+def install_claude(fetch_docs: bool = True, verbose: bool = True) -> bool:
     """Install the ovoscope skill for Claude Code.
 
-    Copies ``skill_data/claude/`` into ``~/.claude/skills/ovoscope/``.
+    Copies the bundled ``SKILL.md`` and wrapper script into
+    ``~/.claude/skills/ovoscope/``, then optionally downloads
+    documentation from GitHub into ``assets/``.
 
     Args:
+        fetch_docs: Download docs from GitHub (default True).
         verbose: Print progress messages.
 
     Returns:
@@ -104,14 +210,19 @@ def install_claude(verbose: bool = True) -> bool:
 
     written = _copy_tree(src, dst)
 
-    # Ensure wrapper scripts are executable
-    scripts_dir = dst / "scripts"
-    if scripts_dir.is_dir():
-        for script in scripts_dir.glob("*.sh"):
-            _make_executable(script)
+    for script in (dst / "scripts").glob("*.sh"):
+        _make_executable(script)
 
     if verbose:
-        print(f"[claude]  installed {len(written)} files → {dst}")
+        print(f"[claude]  installed {len(written)} bundled files → {dst}")
+
+    if fetch_docs:
+        if verbose:
+            print("[claude]  downloading docs from GitHub …")
+        n = download_docs(dst / "assets", verbose=verbose)
+        if verbose:
+            print(f"[claude]  {n} doc files downloaded")
+
     return True
 
 
@@ -122,7 +233,7 @@ def uninstall_claude(verbose: bool = True) -> bool:
         verbose: Print progress messages.
 
     Returns:
-        True if the directory was removed, False if it did not exist.
+        True if removed, False if not found.
     """
     dst = _claude_skill_dir()
     if dst.exists():
@@ -143,25 +254,33 @@ def _gemini_skill_dir(project_path: Optional[Path] = None) -> Path:
     """Return ``<project>/.gemini/skills/ovoscope``.
 
     Args:
-        project_path: Project root. Defaults to the current working directory.
+        project_path: Project root. Defaults to ``Path.cwd()``.
     """
-    root = project_path or Path.cwd()
-    return root / ".gemini" / "skills" / "ovoscope"
+    return (project_path or Path.cwd()) / ".gemini" / "skills" / "ovoscope"
 
 
 def _gemini_is_installed() -> bool:
-    """Return True if ``gemini`` binary is on PATH."""
+    """Return True if the ``gemini`` binary is on PATH."""
     return shutil.which("gemini") is not None
 
 
-def install_gemini(project_path: Optional[Path] = None, verbose: bool = True) -> bool:
+def install_gemini(
+    project_path: Optional[Path] = None,
+    fetch_docs: bool = True,
+    verbose: bool = True,
+) -> bool:
     """Install the ovoscope skill for Gemini CLI.
 
-    Copies ``skill_data/gemini/`` into ``<project>/.gemini/skills/ovoscope/``.
-    Gemini skills are project-level; run this from your workspace root.
+    Copies the bundled ``SKILL.md`` and wrapper script into
+    ``<project>/.gemini/skills/ovoscope/``, then optionally downloads
+    documentation from GitHub into ``assets/``.
+
+    Gemini skills are project-level.  Run from your workspace root or
+    pass *project_path* explicitly.
 
     Args:
-        project_path: Project root to install into. Defaults to ``Path.cwd()``.
+        project_path: Project root. Defaults to ``Path.cwd()``.
+        fetch_docs: Download docs from GitHub (default True).
         verbose: Print progress messages.
 
     Returns:
@@ -173,17 +292,26 @@ def install_gemini(project_path: Optional[Path] = None, verbose: bool = True) ->
 
     written = _copy_tree(src, dst)
 
-    scripts_dir = dst / "scripts"
-    if scripts_dir.is_dir():
-        for script in scripts_dir.glob("*.sh"):
-            _make_executable(script)
+    for script in (dst / "scripts").glob("*.sh"):
+        _make_executable(script)
 
     if verbose:
-        print(f"[gemini]  installed {len(written)} files → {dst}")
+        print(f"[gemini]  installed {len(written)} bundled files → {dst}")
+
+    if fetch_docs:
+        if verbose:
+            print("[gemini]  downloading docs from GitHub …")
+        n = download_docs(dst / "assets", verbose=verbose)
+        if verbose:
+            print(f"[gemini]  {n} doc files downloaded")
+
     return True
 
 
-def uninstall_gemini(project_path: Optional[Path] = None, verbose: bool = True) -> bool:
+def uninstall_gemini(
+    project_path: Optional[Path] = None,
+    verbose: bool = True,
+) -> bool:
     """Remove the ovoscope skill from Gemini CLI.
 
     Args:
@@ -205,83 +333,20 @@ def uninstall_gemini(project_path: Optional[Path] = None, verbose: bool = True) 
 
 
 # ---------------------------------------------------------------------------
-# OpenCode
-# ---------------------------------------------------------------------------
-
-def _opencode_agent_dir(project_path: Optional[Path] = None) -> Path:
-    """Return ``<project>/.opencode/agents/``."""
-    root = project_path or Path.cwd()
-    return root / ".opencode" / "agents"
-
-
-def _opencode_is_installed() -> bool:
-    """Return True if ``opencode`` binary is on PATH."""
-    return shutil.which("opencode") is not None
-
-
-def install_opencode(project_path: Optional[Path] = None, verbose: bool = True) -> bool:
-    """Install the ovoscope agent for OpenCode.
-
-    Copies ``skill_data/opencode/ovoscope.md`` into
-    ``<project>/.opencode/agents/ovoscope.md``.
-
-    Args:
-        project_path: Project root. Defaults to ``Path.cwd()``.
-        verbose: Print progress messages.
-
-    Returns:
-        True on success.
-    """
-    src = _skill_data_dir() / "opencode" / "ovoscope.md"
-    dst_dir = _opencode_agent_dir(project_path)
-    dst_dir.mkdir(parents=True, exist_ok=True)
-    dst = dst_dir / "ovoscope.md"
-    shutil.copy2(src, dst)
-    if verbose:
-        print(f"[opencode] installed agent → {dst}")
-    return True
-
-
-def uninstall_opencode(project_path: Optional[Path] = None, verbose: bool = True) -> bool:
-    """Remove the ovoscope agent from OpenCode.
-
-    Args:
-        project_path: Project root. Defaults to ``Path.cwd()``.
-        verbose: Print progress messages.
-
-    Returns:
-        True if removed, False if not found.
-    """
-    dst = _opencode_agent_dir(project_path) / "ovoscope.md"
-    if dst.exists():
-        dst.unlink()
-        if verbose:
-            print(f"[opencode] removed {dst}")
-        return True
-    if verbose:
-        print(f"[opencode] not installed ({dst} not found)")
-    return False
-
-
-# ---------------------------------------------------------------------------
 # Auto-detect
 # ---------------------------------------------------------------------------
 
 def detect_tools() -> List[str]:
-    """Return list of AI tool names that appear to be installed.
-
-    Checks whether ``claude``, ``gemini``, and ``opencode`` are on PATH.
+    """Return names of AI tools whose binaries are on PATH.
 
     Returns:
-        List of strings from ``{"claude", "gemini", "opencode"}``.
+        Subset of ``["claude", "gemini"]``.
     """
     found = []
     if _claude_is_installed():
         found.append("claude")
     if _gemini_is_installed():
         found.append("gemini")
-    if _opencode_is_installed():
-        found.append("opencode")
     return found
 
 
@@ -296,15 +361,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         argv: Argument list (defaults to ``sys.argv[1:]``).
 
     Returns:
-        Exit code (0 = success, 1 = nothing installed).
+        Exit code: 0 = success, 1 = nothing installed.
     """
     parser = argparse.ArgumentParser(
         prog="ovoscope-setup",
         description=(
-            "Install the ovoscope skill/agent into AI coding assistants.\n\n"
-            "Run without flags to auto-detect and install for all tools found on PATH.\n"
-            "Gemini and OpenCode installs are project-level (written to the current\n"
-            "directory or the path given by --path)."
+            "Install the ovoscope skill into AI coding assistants.\n\n"
+            "Run without flags to auto-detect and install for all tools found\n"
+            "on PATH.  Gemini installs are project-level (written to the\n"
+            "current directory or the path given by --path).\n\n"
+            "Documentation is fetched from GitHub at install time so the\n"
+            "bundled wheel stays small.  Pass --no-docs to skip the download."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -319,22 +386,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Install for Gemini CLI (<path>/.gemini/skills/ovoscope/).",
     )
     parser.add_argument(
-        "--opencode",
-        action="store_true",
-        help="Install for OpenCode (<path>/.opencode/agents/ovoscope.md).",
-    )
-    parser.add_argument(
         "--path",
         metavar="DIR",
         default=None,
-        help=(
-            "Project root for Gemini and OpenCode installs (default: current directory)."
-        ),
+        help="Project root for Gemini install (default: current directory).",
+    )
+    parser.add_argument(
+        "--no-docs",
+        action="store_true",
+        dest="no_docs",
+        help="Skip downloading documentation from GitHub.",
     )
     parser.add_argument(
         "--uninstall",
         action="store_true",
-        help="Remove the skill/agent instead of installing it.",
+        help="Remove the skill instead of installing it.",
     )
     parser.add_argument(
         "--list",
@@ -345,58 +411,49 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parser.parse_args(argv)
     project_path = Path(args.path).resolve() if args.path else None
+    fetch_docs = not args.no_docs
 
-    # --list mode
     if args.list_only:
         found = detect_tools()
         if found:
             print("Detected AI tools on PATH: " + ", ".join(found))
         else:
-            print("No supported AI tools detected on PATH (claude, gemini, opencode).")
+            print("No supported AI tools detected on PATH (claude, gemini).")
         return 0
 
-    # Determine which tools to act on
-    explicit = args.claude or args.gemini or args.opencode
+    explicit = args.claude or args.gemini
     if not explicit:
-        # Auto-detect
         found = detect_tools()
         if not found:
             print(
                 "No supported AI tools detected on PATH.\n"
-                "Install claude, gemini, or opencode first, or use --claude/--gemini/--opencode explicitly."
+                "Install claude or gemini first, or use --claude/--gemini explicitly."
             )
             return 1
         args.claude = "claude" in found
         args.gemini = "gemini" in found
-        args.opencode = "opencode" in found
         print(f"Auto-detected: {', '.join(found)}")
-
-    installed = 0
 
     if args.uninstall:
         if args.claude:
             uninstall_claude()
         if args.gemini:
             uninstall_gemini(project_path)
-        if args.opencode:
-            uninstall_opencode(project_path)
-    else:
-        if args.claude:
-            install_claude()
-            installed += 1
-        if args.gemini:
-            install_gemini(project_path)
-            installed += 1
-        if args.opencode:
-            install_opencode(project_path)
-            installed += 1
+        return 0
 
-        if installed:
-            print(
-                "\nInstallation complete. Restart your AI assistant or open a new session\n"
-                "for the ovoscope skill to be available."
-            )
+    installed = 0
+    if args.claude:
+        install_claude(fetch_docs=fetch_docs)
+        installed += 1
+    if args.gemini:
+        install_gemini(project_path, fetch_docs=fetch_docs)
+        installed += 1
 
+    if installed:
+        print(
+            "\nInstallation complete. Restart your AI assistant or open a new\n"
+            "session for the ovoscope skill to be available."
+        )
     return 0
 
 

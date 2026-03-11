@@ -833,6 +833,7 @@ class End2EndTest:
             json.dump(self.serialize(anonymize=anonymize), f, ensure_ascii=False, indent=2)
 
     def assert_spoke(self, text: str, lang: str = "en-US", timeout: int = 30) -> None:
+
         """Run the test and assert that a ``speak`` message with the given utterance was emitted.
 
         Sugar for simple speak-assertion tests that don't need to check the full message sequence.
@@ -856,3 +857,24 @@ class End2EndTest:
             f"❌ speak '{text}' (lang={lang}) not found. "
             f"Received speak utterances: {speak_utterances}"
         )
+
+
+try:
+    from ovoscope.audio import (  # noqa: F401
+        MockAudioBackend,
+        AudioServiceHarness,
+        MockTTS,
+        PlaybackServiceHarness,
+        AudioCaptureSession,
+    )
+except ImportError:
+    pass
+
+try:
+    from ovoscope.listener import (  # noqa: F401
+        MiniListener,
+        get_mini_listener,
+        ListenerTest,
+    )
+except ImportError:
+    pass

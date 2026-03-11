@@ -171,21 +171,21 @@ class TestAudioServiceHarness(unittest.TestCase):
         with AudioServiceHarness() as h:
             h.play(["http://example.com/song.mp3"])
             h.assert_playing()
-            # AudioService._stop ignores stop if < 1 second since play_start_time
-            time.sleep(1.1)
+            # AudioService._stop ignores stop if < 1 second since play_start_time.
+            # Directly mutate play_start_time to bypass the real-time wait.
+            h.service.play_start_time = time.monotonic() - 2.0
             h.stop()
             h.assert_stopped()
 
     def test_stop_emits_stop_handled(self) -> None:
         """stop() must cause mycroft.stop.handled to be emitted."""
-        received = []
+        event = threading.Event()
         with AudioServiceHarness() as h:
-            h.bus.on("mycroft.stop.handled", lambda m: received.append(m))
+            h.bus.on("mycroft.stop.handled", lambda m: event.set())
             h.play(["http://example.com/song.mp3"])
-            time.sleep(1.1)
+            h.service.play_start_time = time.monotonic() - 2.0
             h.stop()
-            time.sleep(0.1)
-        self.assertTrue(len(received) > 0, "mycroft.stop.handled was not emitted")
+            self.assertTrue(event.wait(timeout=2.0), "mycroft.stop.handled was not emitted")
 
     def test_list_backends_returns_mock(self) -> None:
         """list_backends() response must include the mock backend by name."""
@@ -207,14 +207,17 @@ class TestAudioServiceHarness(unittest.TestCase):
         with AudioServiceHarness() as h:
             h.play(["http://example.com/song1.mp3"])
             h.queue(["http://example.com/song2.mp3"])
-        self.assertIn("http://example.com/song2.mp3", h.backend.played_tracks)
+            self.assertIn("http://example.com/song2.mp3", h.backend.played_tracks)
 
     def test_ducking_lowers_volume(self) -> None:
         """recognizer_loop:audio_output_start must invoke lower_volume."""
         with AudioServiceHarness() as h:
             h.play(["http://example.com/song.mp3"])
             h.bus.emit(Message("recognizer_loop:audio_output_start"))
-            time.sleep(0.05)
+            # Give service a moment to process the message
+            start = time.monotonic()
+            while h.backend.lower_volume_calls == 0 and time.monotonic() - start < 2.0:
+                time.sleep(0.01)
             h.assert_volume_lowered()
 
     def test_ducking_sets_volume_is_speaking(self) -> None:
@@ -222,7 +225,9 @@ class TestAudioServiceHarness(unittest.TestCase):
         with AudioServiceHarness() as h:
             h.play(["http://example.com/song.mp3"])
             h.bus.emit(Message("recognizer_loop:audio_output_start"))
-            time.sleep(0.05)
+            start = time.monotonic()
+            while not h.service.volume_is_speaking and time.monotonic() - start < 2.0:
+                time.sleep(0.01)
             self.assertTrue(h.service.volume_is_speaking)
 
     def test_ducking_restores_volume_on_end(self) -> None:
@@ -230,9 +235,10 @@ class TestAudioServiceHarness(unittest.TestCase):
         with AudioServiceHarness() as h:
             h.play(["http://example.com/song.mp3"])
             h.bus.emit(Message("recognizer_loop:audio_output_start"))
-            time.sleep(0.05)
             h.bus.emit(Message("recognizer_loop:audio_output_end"))
-            time.sleep(0.05)
+            start = time.monotonic()
+            while h.backend.restore_volume_calls == 0 and time.monotonic() - start < 2.0:
+                time.sleep(0.01)
             h.assert_volume_restored()
             self.assertFalse(h.service.volume_is_speaking)
 
@@ -246,6 +252,7 @@ class TestAudioServiceHarness(unittest.TestCase):
                           {"tracks": ["http://example.com/song.mp3"]},
                           {"session": custom_sess.serialize()})
             h.bus.emit(msg)
+            # Give a moment for it to be processed (or correctly ignored)
             time.sleep(0.1)
             # Backend should NOT have been called (source validation rejects it)
             self.assertFalse(h.backend.is_playing)
@@ -361,7 +368,9 @@ class TestPlaybackServiceHarness(unittest.TestCase):
             h.speak("first sentence")
             # Wait for PlaybackThread to fully finish the first sentence
             # and fire on_end before we queue the next one.
-            time.sleep(0.5)
+            # We use a small sleep here because we need to ensure the PlaybackThread
+            # loop has actually moved past the first item and cleared its queue.
+            time.sleep(0.1)
             h.speak("second sentence")
             self.assertIn("first sentence", h.mock_tts.spoken_utterances)
             self.assertIn("second sentence", h.mock_tts.spoken_utterances)
@@ -388,7 +397,10 @@ class TestAudioCaptureSession(unittest.TestCase):
         bus = FakeBus()
         with AudioCaptureSession(bus=bus) as cap:
             bus.emit(Message("mycroft.audio.playing_track", {"track": "x.mp3"}))
-            time.sleep(0.05)
+            # Wait for capture
+            start = time.monotonic()
+            while not cap.message_types and time.monotonic() - start < 2.0:
+                time.sleep(0.01)
         self.assertIn("mycroft.audio.playing_track", cap.message_types)
 
     def test_does_not_capture_unmatched_messages(self) -> None:
@@ -405,7 +417,10 @@ class TestAudioCaptureSession(unittest.TestCase):
         with AudioCaptureSession(bus=bus) as cap:
             bus.emit(Message("recognizer_loop:audio_output_start"))
             bus.emit(Message("recognizer_loop:audio_output_end"))
-            time.sleep(0.05)
+            # Wait for capture
+            start = time.monotonic()
+            while len(cap.message_types) < 2 and time.monotonic() - start < 2.0:
+                time.sleep(0.01)
         cap.assert_sequence(
             "recognizer_loop:audio_output_start",
             "recognizer_loop:audio_output_end",

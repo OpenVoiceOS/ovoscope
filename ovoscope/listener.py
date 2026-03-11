@@ -34,8 +34,8 @@ file and assert that a ``recognizer_loop:utterance`` is emitted::
     stt = MagicMock()
     stt.execute.return_value = "ask not what your country can do for you"
 
-    listener = get_mini_listener()
-    msgs = listener.listen("path/to/jfk.wav", language="en-us", stt_instance=stt)
+    listener = get_mini_listener(stt_instance=stt)
+    msgs = listener.listen("path/to/jfk.wav", language="en-us")
     assert any(m.msg_type == "recognizer_loop:utterance" for m in msgs)
     listener.shutdown()
 """
@@ -110,19 +110,22 @@ class MiniListener:
             {"listener": {"audio_transformers": {}}}
 
         plugin_instances: Optional mapping of plugin name → already-instantiated
-            audio transformer plugin object.  Use this when the plugin is not
-            (yet) registered via an OPM entry point, or when you need direct
-            control over the plugin config.  Each plugin will be bound to the
+            audio transformer plugin object.  Each plugin will be bound to the
             internal FakeBus and injected into the ``AudioTransformersService``.
+        stt_instance: Optional STT plugin object with an
+            ``execute(audio_data, language) -> str`` method. Stored as the
+            default STT provider for ``listen()``.
     """
 
     def __init__(
         self,
         config: Dict[str, Any],
         plugin_instances: Optional[Dict[str, Any]] = None,
+        stt_instance: Optional[Any] = None,
     ) -> None:
         self.bus: FakeBus = FakeBus()
         self._messages: List[Message] = []
+        self._stt_instance: Optional[Any] = stt_instance
 
         # Capture every message emitted on the bus.
         def _capture(msg: Any) -> None:
@@ -240,8 +243,9 @@ class MiniListener:
             stt_instance: Optional STT plugin object with an
                 ``execute(audio_data, language) -> str`` method.  When
                 provided, ``AudioData`` is built from the (transformed) audio
-                and passed to the plugin.  If ``None``, no STT step is
-                performed.
+                and passed to the plugin.  If ``None``, the ``stt_instance``
+                passed to the constructor is used. If both are ``None``, no
+                STT step is performed.
             sample_rate: Fallback sample rate used when *audio* is raw PCM
                 (i.e. has no WAV header).
             sample_width: Fallback sample width in bytes when *audio* is raw
@@ -260,10 +264,8 @@ class MiniListener:
             stt = MagicMock()
             stt.execute.return_value = "ask not what your country can do for you"
 
-            listener = get_mini_listener()
-            msgs = listener.listen(
-                "tests/jfk.wav", language="en-us", stt_instance=stt
-            )
+            listener = get_mini_listener(stt_instance=stt)
+            msgs = listener.listen("tests/jfk.wav", language="en-us")
             assert any(m.msg_type == "recognizer_loop:utterance" for m in msgs)
             utt = next(m for m in msgs if m.msg_type == "recognizer_loop:utterance")
             assert utt.data["lang"] == "en-us"
@@ -283,6 +285,7 @@ class MiniListener:
         transformed, ctx = self.transformers.transform(audio_bytes)
 
         # STT step (optional)
+        stt_instance = stt_instance or self._stt_instance
         if stt_instance is not None:
             # Convert (possibly transformer-modified) bytes to AudioData.
             # Use the WAV-aware helper so sample_rate / sample_width are
@@ -342,8 +345,9 @@ def get_mini_listener(
             keyed by plugin name.  Injected directly into the
             ``AudioTransformersService`` after it is initialised, bypassing
             OPM entry-point discovery.
-        stt_instance: Unused by the factory; kept for API symmetry.  Pass
-            ``stt_instance`` directly to :meth:`MiniListener.listen` instead.
+        stt_instance: STT plugin object with an
+            ``execute(audio_data, language) -> str`` method. Stored as the
+            default STT provider for the created ``MiniListener``.
 
     Returns:
         A fully initialised :class:`MiniListener` instance ready to receive
@@ -357,7 +361,9 @@ def get_mini_listener(
                 }
             }
         }
-    return MiniListener(config, plugin_instances=plugin_instances)
+    return MiniListener(config,
+                        plugin_instances=plugin_instances,
+                        stt_instance=stt_instance)
 
 
 @dataclass
@@ -403,6 +409,9 @@ class ListenerTest:
     forbidden_types: List[str] = field(default_factory=list)
     """Message types that MUST NOT appear in the captured output."""
 
+    stt_instance: Optional[Any] = None
+    """Optional STT plugin object for full pipeline testing."""
+
     def execute(self) -> List[Message]:
         """Run the test and assert expected / forbidden messages.
 
@@ -417,15 +426,20 @@ class ListenerTest:
             transformer_plugins=self.transformer_plugins or None,
             config=self.config or None,
             plugin_instances=self.plugin_instances or None,
+            stt_instance=self.stt_instance,
         )
         try:
             method = getattr(listener, self.feed_method)
-            result = method(self.audio_input)
-            # transform() returns (audio, ctx, messages)
-            if self.feed_method == "transform":
-                messages: List[Message] = result[2]
+            # handle listen() signature
+            if self.feed_method == "listen":
+                messages = listener.listen(self.audio_input)
             else:
-                messages = result
+                result = method(self.audio_input)
+                # transform() returns (audio, ctx, messages)
+                if self.feed_method == "transform":
+                    messages: List[Message] = result[2]
+                else:
+                    messages = result
 
             captured_types = {m.msg_type for m in messages}
             for expected in self.expected_types:

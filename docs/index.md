@@ -109,8 +109,8 @@ listener.shutdown()
 - Does not start a real WebSocket MessageBus server — uses `FakeBus` (in-process pub/sub).
 - Does not load PHAL plugins or the audio service — only skills and the intent pipeline.
 - Does not test GUI rendering — GUI namespace messages are ignored by default (`ignore_gui=True`).
-- Does not test STT or TTS — operates at the `recognizer_loop:utterance` level.
-- `MiniListener` covers only `AudioTransformersService` — not VAD, wake-word, STT, or the full DinkumVoiceLoop.
+- Does not test TTS — operates at the `recognizer_loop:utterance` level (see [audio-testing.md](audio-testing.md) for TTS lifecycle testing).
+- `MiniListener` covers `AudioTransformersService` and the STT pipeline — not VAD, wake-word, or the full DinkumVoiceLoop.
 ## Quick Links
 | Resource | Path |
 |---|---|

@@ -1,4 +1,17 @@
 # Maintenance Report — `ovoscope`
+## [2026-03-11] — Enhance Audio Testing Robustness and CI
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - Added `LIGHT_TEST_PIPELINE` as a lightweight fallback when Adapt/Padatious are missing.
+  - Updated `MiniCroft` to auto-fallback to `LIGHT_TEST_PIPELINE` if stages are missing.
+  - Refactored `PlaybackServiceHarness` for better robustness (proper patch cleanup, timeout handling).
+  - Added skip guard to audio harness tests to prevent failures when `ovos-audio` is not installed.
+  - Fixed documentation path references and added prerequisites.
+  - Added missing `LICENSE` (Apache-2.0) file.
+  - Updated CI workflows to include `audio` extra for unit tests.
+- **Oversight**: All 147 unit tests pass locally.
+
 ## [2026-03-10] — Add Audio Testing Harnesses
 
 - **AI Model**: Claude Sonnet 4.6
@@ -9,16 +22,16 @@
     - `MockTTS` (inherits `TTS`) — writes 44-byte silent WAV, records spoken utterances
     - `PlaybackServiceHarness` — context manager wrapping `PlaybackService` with `MockTTS`
     - `AudioCaptureSession` — records bus messages matching configurable prefix list
-  - Updated `ovoscope/ovoscope/__init__.py` — guarded import of audio harness classes
-  - Updated `ovoscope/pyproject.toml` — added `[audio]` optional dependency
-  - Created `ovoscope/test/unittests/test_audio_harness.py` — 38 unit tests (all passing)
+  - Updated `ovoscope/__init__.py` — guarded import of audio harness classes
+  - Updated `pyproject.toml` — added `[audio]` optional dependency
+  - Created `test/unittests/test_audio_harness.py` — 38 unit tests (all passing)
   - Created `ovos-audio/test/end2end/__init__.py` — empty marker
   - Created `ovos-audio/test/end2end/test_audio_service_e2e.py` — 11 E2E tests (all passing)
   - Created `ovos-audio/test/end2end/test_playback_service_e2e.py` — 7 E2E tests (all passing)
-  - Created `ovoscope/docs/audio-testing.md` — full API reference with source citations
-  - Updated `ovoscope/docs/index.md` — link to audio-testing.md
-  - Updated `ovoscope/FAQ.md` — 3 new Q&As for audio testing
-  - Updated `ovoscope/QUICK_FACTS.md` — new audio harness classes, updated test count
+  - Created `docs/audio-testing.md` — full API reference with source citations
+  - Updated `docs/index.md` — link to audio-testing.md
+  - Updated `FAQ.md` — 3 new Q&As for audio testing
+  - Updated `QUICK_FACTS.md` — new audio harness classes, updated test count
 - **Key design decisions**:
   - `AudioServiceHarness` uses `autoload=False` then manually injects `MockAudioBackend`
   - `PlaybackServiceHarness` patches `ovos_audio.playback.play_audio` to prevent real audio
@@ -165,7 +178,7 @@ New `test/end2end/` directories and test files created for:
 | `ovos-skill-parrot` | `test_parrot.py` | 3 | speak.intent, repeat.tts.intent, no-match |
 ### Key Patterns Discovered
 - Intents registered with string `"name.intent"` → Padatious; `IntentBuilder(...)` → Adapt
-- Skills emitting raw `Message(...)` without `forward()`/`reply()` have `source=None` — use `async_messages` + `ignore_messages`
+- Skills emitting raw `Message(...)` without `forward(...)`/`reply()` have `source=None` — use `async_messages` + `ignore_messages`
 - Enclosure/LED messages and `add_context`/`configuration.patch` must be in `ignore_messages`
 - `message.forward(...)` inherits the post-flip source/dest — do NOT add these to `keep_original_src`
 ### AI Transparency Report

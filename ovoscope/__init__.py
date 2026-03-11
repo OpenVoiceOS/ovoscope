@@ -225,12 +225,19 @@ class MiniCroft(SkillManager):
         bus.on("message", self.handle_boot_message)
         self.skill_ids = skill_ids
         self.extra_skills = extra_skills or {}
-        super().__init__(bus, enable_installer=enable_installer,
-                         enable_skill_api=enable_skill_api,
-                         enable_file_watcher=enable_file_watcher,
-                         enable_intent_service=enable_intent_service,
-                         enable_event_scheduler=enable_event_scheduler,
-                         *args, **kwargs)
+
+        try:
+            super().__init__(bus, enable_installer=enable_installer,
+                             enable_skill_api=enable_skill_api,
+                             enable_file_watcher=enable_file_watcher,
+                             enable_intent_service=enable_intent_service,
+                             enable_event_scheduler=enable_event_scheduler,
+                             *args, **kwargs)
+        except Exception:
+            # If super().__init__ fails (e.g. plugin construction error),
+            # ensure global Configuration() is restored.
+            self.stop()
+            raise
 
     @property
     def pipeline(self) -> List[str]:
@@ -363,8 +370,15 @@ class MiniCroft(SkillManager):
         self.bus.emit(msg)
 
     def stop(self):
-        super().stop()
-        self.bus.close()
+        try:
+            super().stop()
+        except Exception:
+            pass
+        if hasattr(self, "bus") and self.bus:
+            try:
+                self.bus.close()
+            except Exception:
+                pass
         if self._default_pipeline is not None and self._original_pipeline is not None:
             SessionManager.default_session.pipeline = self._original_pipeline
             cfg = Configuration()
@@ -919,8 +933,13 @@ try:
         PlaybackServiceHarness,
         AudioCaptureSession,
     )
-except ImportError:
-    pass
+except ImportError as e:
+    # Only silence if it's missing the optional dependency itself.
+    # If ovoscope.audio has a logic error (e.g. broken import of a present lib), re-raise.
+    if isinstance(e, ModuleNotFoundError) and e.name in ("ovos_audio", "ovos_audio.audio"):
+        pass
+    else:
+        raise
 
 try:
     from ovoscope.listener import (  # noqa: F401
@@ -928,6 +947,11 @@ try:
         get_mini_listener,
         ListenerTest,
     )
+except ImportError as e:
+    if isinstance(e, ModuleNotFoundError) and e.name in ("ovos_dinkum_listener", "ovos_dinkum_listener.transformers"):
+        pass
+    else:
+        raise
 except ImportError:
     pass
 

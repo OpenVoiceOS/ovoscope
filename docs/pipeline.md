@@ -36,9 +36,25 @@ with PipelineHarness(
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `match(utterance, timeout=5.0)` | `Optional[Message]` | Send utterance; return matched message or `None`. |
-| `assert_matches(utterance, intent_type=None, timeout=5.0)` | `Message` | Assert match; optionally check intent type substring. |
-| `assert_no_match(utterance, timeout=2.0)` | `None` | Assert the utterance is NOT matched. |
+| `match(utterance, timeout=5.0)` — `ovoscope/pipeline.py:135` | `Optional[Message]` | Send utterance; return matched `Message` or `None` if no pipeline stage matched within `timeout` seconds. |
+| `assert_matches(utterance, intent_type=None, timeout=5.0)` — `ovoscope/pipeline.py:183` | `Message` | Assert at least one pipeline stage matches. Raises `AssertionError` if no match. If `intent_type` is provided, the matched message's `msg_type` must **contain** `intent_type` as a substring (case-sensitive). |
+| `assert_no_match(utterance, timeout=2.0)` — `ovoscope/pipeline.py:213` | `None` | Assert the utterance is NOT matched by any loaded stage within `timeout` seconds. Raises `AssertionError` if a match is found. |
+
+#### `assert_matches(intent_type=...)` semantics
+
+`intent_type` is a **substring** check on the matched message's `msg_type`:
+
+```python
+# Pass: msg_type "padatious:0.95:LightsOnIntent" contains "LightsOnIntent"
+msg = harness.assert_matches("turn on the lights", intent_type="LightsOnIntent")
+
+# Pass: no intent_type check — any match accepted
+msg = harness.assert_matches("turn on the lights")
+
+# Fail: "LightsOffIntent" not in "padatious:0.95:LightsOnIntent"
+msg = harness.assert_matches("turn on the lights", intent_type="LightsOffIntent")
+# → AssertionError: Expected intent type to contain 'LightsOffIntent', got '...'
+```
 
 ## Implementation Note
 

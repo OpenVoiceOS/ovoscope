@@ -1,4 +1,18 @@
 # Maintenance Report — `ovoscope`
+## [2026-03-11] — Docs Gap Review and Fixes
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - `docs/ocp.md`: Documented `execute()` return type (`List[Message]`), clarified `patch_targets` format (dotted Python path where symbol is used), added aiohttp example.
+  - `docs/pipeline.md`: Documented `assert_matches(intent_type=...)` as substring check with example; added `ovoscope/pipeline.py:LINE` citations to all methods.
+  - `docs/cli.md`: Corrected `--ignore-context` → `--include-context`, explained when/why to use it; clarified `validate` pydantic fallback trigger.
+  - `docs/end2end-test.md`, `docs/minicroft.md`, `docs/capture-session.md`: Added `ovoscope/__init__.py:LINE` source citations to class and key method definitions.
+  - `docs/capture-session.md`: Documented `finish()` idempotency.
+  - `docs/listener.md`: Added full VAD/WakeWord API section (`MockVADEngine`, `MockHotWordEngine`, `is_silence`, `extract_speech`, `detect_wakeword`, `scan_for_wakeword`, `VADTest`, `WakeWordTest`) with examples and `ovoscope/listener.py:LINE` citations. Updated constructor parameter table. Fixed stale line references.
+  - `docs/index.md`: Added `gui-testing.md` link; updated Public API section with `GUICaptureSession`, VAD/WW helpers; fixed "Does NOT Do" section for VAD/WW.
+  - `QUICK_FACTS.md`: Added entry-point groups table; updated test count (243) and coverage note.
+- **Oversight**: No new code changes — docs only.
+
 ## [2026-03-11] — Add VAD and WakeWord Support to MiniListener
 
 - **AI Model**: Claude Haiku 4.5

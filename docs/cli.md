@@ -89,7 +89,7 @@ Exits 0 if identical, 1 if differences are found.
 | `expected` | **required** | Reference fixture path. |
 | `actual` | **required** | Fixture to compare against reference. |
 | `--no-color` | False | Disable ANSI color codes. |
-| `--ignore-context` | True | Skip context-field comparison. |
+| `--include-context` | False | Include `context` fields in the comparison. By default context is ignored because it contains ephemeral routing metadata (`source`, `destination`, `session`) that varies between runs. Pass `--include-context` when you specifically want to assert routing behaviour. |
 
 ---
 
@@ -102,8 +102,10 @@ Validates one or more fixture files against the expected schema —
 ovoscope validate test/fixtures/*.json
 ```
 
-Uses `pydantic_helpers.validate_fixture` when available; falls back to
-basic JSON structure validation otherwise.
+Uses `pydantic_helpers.validate_fixture` when available (requires
+`pip install ovoscope[pydantic]`); falls back to basic JSON structure
+validation (checks required top-level keys and that `expected_messages`
+is a list) when the `pydantic` extra is not installed.
 
 ---
 

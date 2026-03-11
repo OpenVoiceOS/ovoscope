@@ -42,24 +42,45 @@ result = OCPTest(
 | `expected_stream_url` | `Optional[str]` | `None` | Substring expected in `ovos.common_play.start` URI. |
 | `lang` | `str` | `"en-US"` | Language tag. |
 | `timeout` | `float` | `20.0` | Max wait in seconds. |
-| `patch_targets` | `List[str]` | `[]` | Additional `requests`-like modules to patch. |
+| `patch_targets` | `List[str]` | `[]` | Additional `requests`-like module paths to patch (dotted Python path to the callable to replace). |
 
-## HTTP Mocking
+### `execute()` — `ovoscope/ocp.py:90`
+
+Returns `List[Message]` — all bus messages captured during the interaction
+(same format as `CaptureSession.responses`).
+
+## HTTP Mocking — `ovoscope/ocp.py:139`
 
 HTTP calls are intercepted via `unittest.mock.patch` on `requests.Session.get`
-and `requests.get` — `ocp.py:_build_mock_response`.
+and `requests.get` by default.
 
-For skills using non-standard HTTP clients (e.g. `aiohttp`), pass the module
-path in `patch_targets`:
+The `mock_responses` dict maps **URL substrings** to JSON response bodies.
+When the patched `get()` is called, the mock checks if any key is a substring
+of the request URL and returns the corresponding body.
+
+For skills using non-standard HTTP clients (e.g. `aiohttp`, `httpx`), pass
+additional dotted Python module paths in `patch_targets`. The path must point
+to the exact callable that the skill imports and calls:
 
 ```python
+# Default: patches requests.Session.get and requests.get automatically.
+# Use patch_targets for any other HTTP client the skill uses.
+
 OCPTest(
-    skill_ids=["..."],
+    skill_ids=["ovos-skill-example-aiohttp.openvoiceos"],
     utterance="play jazz",
-    mock_responses={"api.example.com": {"results": [...]}},
-    patch_targets=["my_skill.http.aiohttp.ClientSession.get"],
+    mock_responses={
+        "api.example.com": {"results": [{"title": "Jazz Radio", "url": "http://stream.example.com/jazz"}]},
+    },
+    # Dotted path: <module-where-the-symbol-is-used>.<callable>
+    patch_targets=["ovos_skill_example.api_client.aiohttp.ClientSession.get"],
 ).execute()
 ```
+
+The format is the same as `unittest.mock.patch` target strings — the dotted
+path to where the symbol is **used** (not where it is defined). See
+[unittest.mock patch docs](https://docs.python.org/3/library/unittest.mock.html#unittest.mock.patch)
+for details.
 
 ## `assert_ocp_query_response`
 

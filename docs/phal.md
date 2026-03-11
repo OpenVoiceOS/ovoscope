@@ -30,7 +30,7 @@ testing and should use hardware-in-the-loop integration tests instead:
 
 ## `MiniPHAL` — Context Manager
 
-`MiniPHAL` — `phal.py:MiniPHAL`
+`MiniPHAL` — `ovoscope/phal.py:43`
 
 ```python
 from ovos_utils.messagebus import Message
@@ -54,12 +54,33 @@ with MiniPHAL(
 
 ### Methods
 
+`MiniPHAL.emit` — `ovoscope/phal.py:146`
+
 | Method | Description |
 |--------|-------------|
-| `emit(msg, wait=0.05)` | Emit a message and briefly wait for handlers. |
-| `assert_emitted(msg_type, timeout=2.0)` | Assert message type was emitted; returns the `Message`. |
-| `assert_not_emitted(msg_type, wait=0.2)` | Assert message type was NOT emitted. |
-| `clear_captured()` | Clear the captured message list. |
+| `emit(msg, wait=0.05)` | Emit `msg` on the internal bus then sleep `wait` seconds so async handlers have time to fire before the next assertion. Set `wait=0` to disable the sleep. |
+| `assert_emitted(msg_type, timeout=2.0)` | Poll captured messages up to `timeout` seconds; return the first matching `Message`. Raises `AssertionError` on timeout. — `ovoscope/phal.py:157` |
+| `assert_not_emitted(msg_type, wait=0.2)` | Sleep `wait` seconds then assert no captured message has `msg_type`. Raises `AssertionError` if one was captured. — `ovoscope/phal.py:184` |
+| `clear_captured()` | Clear the captured message list. Useful between sequential assertions in the same `with` block. — `ovoscope/phal.py:203` |
+
+#### `emit(wait=...)` — settling delay
+
+The `wait` parameter (default `0.05` s) controls how long `MiniPHAL` sleeps
+after calling `bus.emit()`. PHAL plugin handlers may run on a background thread,
+so a short settle time is necessary before asserting on results. Increase `wait`
+for plugins with higher latency; set `wait=0` to suppress the sleep entirely when
+the handler is known to be synchronous.
+
+```python
+# Default — 50 ms settle time
+phal.emit(Message("network.connected"))
+
+# Custom settle time (slower plugin)
+phal.emit(Message("system.reboot"), wait=0.5)
+
+# No sleep (synchronous handler)
+phal.emit(Message("config.get"), wait=0)
+```
 
 ## `PHALTest` — Declarative Style
 

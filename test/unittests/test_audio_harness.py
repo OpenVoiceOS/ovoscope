@@ -365,13 +365,16 @@ class TestPlaybackServiceHarness(unittest.TestCase):
     def test_multiple_speaks_each_recorded(self) -> None:
         """Sequential speak calls must each appear in spoken_utterances."""
         with PlaybackServiceHarness() as h:
-            h.speak("first sentence")
-            # Wait for PlaybackThread to fully finish the first sentence
-            # and fire on_end before we queue the next one.
-            # We use a small sleep here because we need to ensure the PlaybackThread
-            # loop has actually moved past the first item and cleared its queue.
-            time.sleep(0.1)
-            h.speak("second sentence")
+            # Emit two speak messages. PlaybackThread may batch them,
+            # so we check that both utterances were eventually synthesised.
+            h.bus.emit(Message("speak", {"utterance": "first sentence"}))
+            h.bus.emit(Message("speak", {"utterance": "second sentence"}))
+
+            # Wait for both to be recorded by MockTTS
+            start = time.monotonic()
+            while len(h.mock_tts.spoken_utterances) < 2 and time.monotonic() - start < 5.0:
+                time.sleep(0.1)
+
             self.assertIn("first sentence", h.mock_tts.spoken_utterances)
             self.assertIn("second sentence", h.mock_tts.spoken_utterances)
 

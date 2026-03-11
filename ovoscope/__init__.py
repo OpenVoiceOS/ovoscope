@@ -113,25 +113,44 @@ LIGHT_TEST_PIPELINE = [
     "ovos-stop-pipeline-plugin-medium",
 ]
 
+DEFAULT_PIPELINE_UNSET = object()
+
 
 def is_pipeline_available(pipeline: List[str]) -> bool:
-    """Check if all stages in *pipeline* are installed.
+    """Return True if all pipeline stages in *pipeline* are currently installed.
 
-    Args:
-        pipeline: List of pipeline stage IDs.
+    Uses ``importlib.metadata`` to check entry points — no FakeBus or IntentService
+    is created, so this is cheap to call at class setup time.
 
-    Returns:
-        True if all stages have corresponding plugins installed, False otherwise.
+    Example::
+
+        import unittest
+        from ovoscope import is_pipeline_available, M2V_PIPELINE
+
+        class TestM2V(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls):
+                if not is_pipeline_available(M2V_PIPELINE):
+                    raise unittest.SkipTest("ovos-m2v-pipeline not installed")
     """
-    from ovos_plugin_manager.intents import find_pipeline_plugins
-    available = set(find_pipeline_plugins().keys())
+    import importlib.metadata
+    installed_bases: set = set()
+    try:
+        # Python 3.10+ entry_points API
+        for ep in importlib.metadata.entry_points(group="opm.pipeline"):
+            installed_bases.add(ep.name)
+    except TypeError:
+        # Fallback for older metadata API if needed
+        for ep in importlib.metadata.entry_points().get("opm.pipeline", []):
+            installed_bases.add(ep.name)
+
     for stage in pipeline:
         base = stage
         for suffix in ("-high", "-medium", "-low"):
             if stage.endswith(suffix):
                 base = stage[: -len(suffix)]
                 break
-        if base not in available:
+        if base not in installed_bases:
             return False
     return True
 
@@ -145,19 +164,22 @@ class MiniCroft(SkillManager):
                  enable_skill_api=True,
                  extra_skills: Optional[Dict[str, OVOSSkill]] = None,
                  isolate_config: bool = True,
-                 default_pipeline: Optional[List[str]] = None,
+                 default_pipeline: Optional[List[str]] = DEFAULT_PIPELINE_UNSET,
                  lang: Optional[str] = None,
                  secondary_langs: Optional[List[str]] = None,
                  pipeline_config: Optional[Dict[str, Dict]] = None,
                  *args, **kwargs):
         self._isolated_config = isolate_config
         self._original_xdg_configs: Optional[List[LocalConf]] = None
-        self._default_pipeline = default_pipeline
-        if self._default_pipeline is None:
+
+        if default_pipeline is DEFAULT_PIPELINE_UNSET:
             if is_pipeline_available(DEFAULT_TEST_PIPELINE):
                 self._default_pipeline = DEFAULT_TEST_PIPELINE
             else:
                 self._default_pipeline = LIGHT_TEST_PIPELINE
+        else:
+            self._default_pipeline = default_pipeline
+
         self._original_pipeline: Optional[List[str]] = None
         self._original_cfg_pipeline: Optional[List[str]] = None
         self._had_cfg_pipeline: bool = False
@@ -446,49 +468,20 @@ def get_minicroft(skill_ids: Union[List[str], str], *args,
         skill_ids = [skill_ids]
     assert isinstance(skill_ids, list)
     croft = MiniCroft(skill_ids, *args, **kwargs)
-    croft.start()
-    deadline = time() + max_wait
-    while croft.status.state != ProcessState.READY:
-        if time() > deadline:
-            raise TimeoutError(
-                f"MiniCroft did not reach READY in {max_wait}s — "
-                f"check skill startup logs (skill_ids={skill_ids})"
-            )
-        sleep(0.1)
-    return croft
-
-
-def is_pipeline_available(pipeline: List[str]) -> bool:
-    """Return True if all pipeline stages in *pipeline* are currently installed.
-
-    Uses ``importlib.metadata`` to check entry points — no FakeBus or IntentService
-    is created, so this is cheap to call at class setup time.
-
-    Example::
-
-        import unittest
-        from ovoscope import is_pipeline_available, M2V_PIPELINE
-
-        class TestM2V(unittest.TestCase):
-            @classmethod
-            def setUpClass(cls):
-                if not is_pipeline_available(M2V_PIPELINE):
-                    raise unittest.SkipTest("ovos-m2v-pipeline not installed")
-    """
-    import importlib.metadata
-    installed_bases: set = set()
-    for ep in importlib.metadata.entry_points(group="opm.pipeline"):
-        installed_bases.add(ep.name)
-
-    for stage in pipeline:
-        base = stage
-        for suffix in ("-high", "-medium", "-low"):
-            if stage.endswith(suffix):
-                base = stage[: -len(suffix)]
-                break
-        if base not in installed_bases:
-            return False
-    return True
+    try:
+        croft.start()
+        deadline = time() + max_wait
+        while croft.status.state != ProcessState.READY:
+            if time() > deadline:
+                raise TimeoutError(
+                    f"MiniCroft did not reach READY in {max_wait}s — "
+                    f"check skill startup logs (skill_ids={skill_ids})"
+                )
+            sleep(0.1)
+        return croft
+    except Exception:
+        croft.stop()
+        raise
 
 
 @dataclasses.dataclass()
@@ -952,6 +945,3 @@ except ImportError as e:
         pass
     else:
         raise
-except ImportError:
-    pass
-

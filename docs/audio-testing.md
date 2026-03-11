@@ -93,6 +93,7 @@ Use the subscribe-emit-wait pattern instead:
 
 ```python
 import threading
+from ovoscope.audio import AudioServiceHarness
 from ovos_bus_client.message import Message
 
 reply_data = {}
@@ -102,10 +103,11 @@ def _on_reply(msg):
     reply_data.update(msg.data)
     done.set()
 
-h.bus.on("mycroft.audio.service.track_info_reply", _on_reply)
-h.bus.emit(Message("mycroft.audio.service.track_info"))
-done.wait(timeout=2)
-h.bus.remove("mycroft.audio.service.track_info_reply", _on_reply)
+with AudioServiceHarness() as h:
+    h.bus.on("mycroft.audio.service.track_info_reply", _on_reply)
+    h.bus.emit(Message("mycroft.audio.service.track_info"))
+    done.wait(timeout=2)
+    h.bus.remove("mycroft.audio.service.track_info_reply", _on_reply)
 ```
 
 `AudioServiceHarness.get_track_info()` and `list_backends()` already implement

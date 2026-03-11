@@ -1,8 +1,8 @@
 # ovoscope — Audit Report
 ## Documentation Status
-- [ ] AGENTS.md Header Format
-- [ ] QUICK_FACTS.md
-- [ ] FAQ.md
+- [x] AGENTS.md Header Format
+- [x] QUICK_FACTS.md
+- [x] FAQ.md
 - [x] MAINTENANCE_REPORT.md
 - [x] AUDIT.md
 - [x] SUGGESTIONS.md
@@ -17,29 +17,18 @@
 `test/unittests/test_audio_harness.py`.
 All pass (62 passed, 0 failed).
 ---
-### [MAJOR] Missing LICENSE file
-**Evidence**: `pyproject.toml` declares `license={text = "Apache-2.0"}` but no `LICENSE` file
-exists at the repo root.
-**Impact**: Legal ambiguity for downstream users and packagers. PyPI classifiers and SPDX tooling
-expect the file to be present.
-**Recommended fix**: Add `LICENSE` file containing the Apache-2.0 full text.
+### ~~[MAJOR] Missing LICENSE file~~ ✅ FIXED
+LICENSE file (Apache-2.0) added to repo root. `pyproject.toml` correctly references it.
 ---
 ### ~~[MAJOR] `End2EndTest.execute()` returns `None`~~ ✅ FIXED
 `execute()` now returns `List[Message]`. Signature changed to
 `def execute(self, timeout: int = 30) -> List[Message]`. `assert_spoke()` builds on this.
 ---
-### [MAJOR] No type annotations on any public method
-**Evidence**: All public methods in `ovoscope/__init__.py` — `get_minicroft()`,
-`CaptureSession.capture()`, `CaptureSession.finish()`, `End2EndTest.execute()`,
-`End2EndTest.from_message()`, `End2EndTest.from_path()`, `End2EndTest.save()` — lack return type
-annotations. Parameters are annotated on some (e.g., `get_minicroft`) but not consistently.
-**Impact**: IDE type checking and mypy cannot verify callers. Reduces discoverability for new
-contributors.
-**Recommended fix**: Add PEP 484 annotations to all public method signatures. Run `mypy
-ovoscope/` to verify.
+### ~~[MAJOR] No type annotations on any public method~~ ✅ FIXED
+All public methods in `ovoscope/__init__.py` and new modules now have PEP 484 annotations.
 ---
 ### [MODERATE] `CaptureSession.capture()` returns `None` — captured messages inaccessible inline
-**Evidence**: `ovoscope/__init__.py` lines 133–137 — `capture()` returns nothing. Captured
+**Evidence**: `ovoscope/__init__.py` — `capture()` returns nothing. Captured
 messages are only accessible via `self.responses` after `finish()` is called. The pattern
 `capture.capture(msg); messages = capture.finish()` is functional but forces a two-step flow.
 **Impact**: Cannot chain captures or do inline assertions without accessing the attribute
@@ -65,6 +54,5 @@ builds non-reproducible if the upstream action changes.
 `ad-m/github-push-action`.
 ---
 ## Next Steps (Priority Order)
-1. Add `LICENSE` (Apache-2.0) — legal requirement
-2. Add type annotations to all public methods — maintainability
-3. Pin CI action refs — reproducibility
+1. Address CaptureSession.capture() return value — usability
+2. Pin CI action refs — reproducibility

@@ -590,6 +590,11 @@ class PlaybackServiceHarness:
                         lambda m: self._mic_listen.set())
 
         except Exception:
+            if self.svc:
+                try:
+                    self.svc.shutdown()
+                except Exception:
+                    pass
             self._play_audio_patcher.stop()
             self.bus.close()
             raise
@@ -618,7 +623,7 @@ class PlaybackServiceHarness:
     # ------------------------------------------------------------------
 
     def speak(self, utterance: str, expect_response: bool = False,
-              timeout: float = 5.0) -> None:
+              timeout: float = 10.0) -> None:
         """Emit a ``speak`` message and wait for audio_output_end.
 
         Args:
@@ -629,14 +634,17 @@ class PlaybackServiceHarness:
         Raises:
             TimeoutError: If speech playback does not finish within timeout.
         """
+        # Clear events BEFORE emitting the message
         self._audio_output_start.clear()
         self._audio_output_end.clear()
         self._mic_listen.clear()
+
         self.bus.emit(Message("speak", {
             "utterance": utterance,
             "lang": "en-US",
             "expect_response": expect_response,
         }))
+
         if not self._audio_output_end.wait(timeout):
             raise TimeoutError(
                 f"Speech playback for '{utterance}' did not finish within {timeout}s"

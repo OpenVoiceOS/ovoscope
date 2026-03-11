@@ -9,6 +9,8 @@
 | [capture-session.md](capture-session.md) | `CaptureSession` — message capture during a test |
 | [end2end-test.md](end2end-test.md) | `End2EndTest` — full test runner reference |
 | [pydantic-integration.md](pydantic-integration.md) | Using `ovos-pydantic-models` with OvoScope |
+| [audio-testing.md](audio-testing.md) | `AudioServiceHarness`, `PlaybackServiceHarness` — testing audio services |
+| [listener.md](listener.md) | `MiniListener`, `get_mini_listener`, `ListenerTest` — testing audio transformer plugins and STT pipeline |
 ## Conceptual Model
 ```
 Test                         FakeBus
@@ -68,6 +70,9 @@ from ovoscope import (
     get_minicroft,     # factory: create + wait for READY
     CaptureSession,    # message recorder for a single interaction
     End2EndTest,       # declarative test runner
+    MiniListener,      # in-process audio transformer pipeline
+    get_mini_listener, # factory: create MiniListener with plugins
+    ListenerTest,      # declarative listener test runner
 )
 ```
 Type aliases also exported:
@@ -79,11 +84,33 @@ from ovoscope import SerializedMessage, SerializedTest
 |---|---|
 | `ovos-core >= 2.0.4a2` | `SkillManager`, `IntentService`, `FakeBus`, `SessionManager` |
 Python 3.10+ is required (uses `match`/structural typing in ovos-core).
+## Listener Pipeline Testing
+
+`MiniListener` extends ovoscope to cover **audio transformer plugins** — the
+plugins that process raw audio before it reaches the intent engine.  It wraps
+`AudioTransformersService` on a `FakeBus` so transformer behaviour is fully
+observable through bus messages.
+
+See [listener.md](listener.md) for full API reference and usage patterns.
+
+```python
+from ovoscope import get_mini_listener
+from ovos_audio_transformer_plugin_ggwave import GGWavePlugin
+
+plugin = GGWavePlugin(config={"start_enabled": True})
+listener = get_mini_listener(
+    plugin_instances={"ovos-audio-transformer-plugin-ggwave": plugin}
+)
+msgs = listener.feed_audio(b"\x00" * 1024)
+listener.shutdown()
+```
+
 ## What OvoScope Does NOT Do
 - Does not start a real WebSocket MessageBus server — uses `FakeBus` (in-process pub/sub).
 - Does not load PHAL plugins or the audio service — only skills and the intent pipeline.
 - Does not test GUI rendering — GUI namespace messages are ignored by default (`ignore_gui=True`).
-- Does not test STT or TTS — operates at the `recognizer_loop:utterance` level.
+- Does not test TTS — operates at the `recognizer_loop:utterance` level (see [audio-testing.md](audio-testing.md) for TTS lifecycle testing).
+- `MiniListener` covers `AudioTransformersService` and the STT pipeline — not VAD, wake-word, or the full DinkumVoiceLoop.
 ## Quick Links
 | Resource | Path |
 |---|---|

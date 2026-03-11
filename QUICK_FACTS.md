@@ -12,7 +12,7 @@ End-to-end test framework for OpenVoiceOS skills
 ## Testing & CI
 | Feature | Details |
 |---------|---------|
-| Unit Tests | 104 tests across `test/unittests/` (all passing) |
+| Unit Tests | 142 tests across `test/unittests/` (all passing) — +38 audio harness tests |
 | Coverage | 89% overall (improved from 78%) |
 | Test Framework | pytest with custom fixtures |
 | Coverage Reporter | py-cov-action/python-coverage-comment-action@v3 |
@@ -32,8 +32,18 @@ End-to-end test framework for OpenVoiceOS skills
 - **MiniCroft fixture** — pytest integration with class-scoped skill testing
 - **Message capture** — CaptureSession for recording skill responses
 - **Assertions** — End2EndTest with assertions (assert_spoke, etc.)
+- **Audio harnesses** — AudioServiceHarness, PlaybackServiceHarness, MockAudioBackend, MockTTS, AudioCaptureSession (optional `[audio]` extra)
 - **Pydantic integration** — Optional typed bridge with ovos-pydantic-models
 - **Version from pyproject.toml** — Full migration from setup.py
+
+## Audio Harness Classes (ovoscope.audio)
+| Class | Description |
+|---|---|
+| `MockAudioBackend` | No-op AudioBackend tracking state (is_playing, is_paused, played_tracks, ducking counters) |
+| `AudioServiceHarness` | Context manager: AudioService + MockAudioBackend on FakeBus |
+| `MockTTS` | No-op TTS writing silent WAV, recording spoken_utterances |
+| `PlaybackServiceHarness` | Context manager: PlaybackService + MockTTS on FakeBus |
+| `AudioCaptureSession` | Records bus messages matching prefix list for sequence assertions |
 ## Test-Gated Releases
 ✅ Alpha releases gate on `build_tests` passing (100+ unit tests)
 ✅ Stable releases gate on master push (must pass alpha CI first)

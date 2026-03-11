@@ -25,6 +25,12 @@ classifiers = [
 
 [project.optional-dependencies]
 pydantic = ["ovos-pydantic-models>=0.1.0"]
+audio = ["ovos-audio>=0.1.0"]
+dev = [
+    "ovoscope[audio,pydantic]",
+    "pytest",
+    "pytest-cov",
+]
 
 [project.urls]
 Homepage = "https://github.com/TigreGotico/ovoscope"

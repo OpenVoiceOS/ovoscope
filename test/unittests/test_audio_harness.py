@@ -25,25 +25,34 @@ import tempfile
 import time
 import threading
 import unittest
+import importlib.util
 from unittest.mock import patch, MagicMock
+
+AUDIO_AVAILABLE = importlib.util.find_spec("ovos_audio") is not None
 
 from ovos_bus_client.message import Message
 from ovos_utils.fakebus import FakeBus
 
-from ovoscope.audio import (
-    AudioCaptureSession,
-    AudioServiceHarness,
-    MockAudioBackend,
-    MockTTS,
-    PlaybackServiceHarness,
-    SILENT_WAV,
-)
+if AUDIO_AVAILABLE:
+    from ovoscope.audio import (
+        AudioCaptureSession,
+        AudioServiceHarness,
+        MockAudioBackend,
+        MockTTS,
+        PlaybackServiceHarness,
+        SILENT_WAV,
+    )
+else:
+    # Stubs for collection when audio extra is missing
+    AudioCaptureSession = AudioServiceHarness = MockAudioBackend = \
+        MockTTS = PlaybackServiceHarness = SILENT_WAV = object
 
 
 # ---------------------------------------------------------------------------
 # TestMockAudioBackend
 # ---------------------------------------------------------------------------
 
+@unittest.skipUnless(AUDIO_AVAILABLE, "ovos-audio (audio extra) not installed")
 class TestMockAudioBackend(unittest.TestCase):
     """Unit tests for MockAudioBackend state tracking."""
 
@@ -124,6 +133,7 @@ class TestMockAudioBackend(unittest.TestCase):
 # TestAudioServiceHarness
 # ---------------------------------------------------------------------------
 
+@unittest.skipUnless(AUDIO_AVAILABLE, "ovos-audio (audio extra) not installed")
 class TestAudioServiceHarness(unittest.TestCase):
     """Integration tests for AudioServiceHarness."""
 
@@ -245,6 +255,7 @@ class TestAudioServiceHarness(unittest.TestCase):
 # TestMockTTS
 # ---------------------------------------------------------------------------
 
+@unittest.skipUnless(AUDIO_AVAILABLE, "ovos-audio (audio extra) not installed")
 class TestMockTTS(unittest.TestCase):
     """Unit tests for MockTTS."""
 
@@ -309,6 +320,7 @@ class TestMockTTS(unittest.TestCase):
 # TestPlaybackServiceHarness
 # ---------------------------------------------------------------------------
 
+@unittest.skipUnless(AUDIO_AVAILABLE, "ovos-audio (audio extra) not installed")
 class TestPlaybackServiceHarness(unittest.TestCase):
     """Integration tests for PlaybackServiceHarness."""
 
@@ -364,6 +376,7 @@ class TestPlaybackServiceHarness(unittest.TestCase):
 # TestAudioCaptureSession
 # ---------------------------------------------------------------------------
 
+@unittest.skipUnless(AUDIO_AVAILABLE, "ovos-audio (audio extra) not installed")
 class TestAudioCaptureSession(unittest.TestCase):
     """Unit tests for AudioCaptureSession."""
 

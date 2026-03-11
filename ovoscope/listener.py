@@ -1,43 +1,108 @@
 # Copyright 2024 OpenVoiceOS
 # Licensed under the Apache License, Version 2.0
-"""MiniListener — in-process audio transformer pipeline for ovoscope.
+"""MiniListener — in-process listener pipeline for ovoscope.
 
-Wraps ``AudioTransformersService`` on a ``FakeBus`` so that audio
-transformer plugins can be tested end-to-end without a real microphone
-or a running ``ovos-dinkum-listener`` process.
+Wraps ``AudioTransformersService`` (and optionally an STT plugin) on a
+``FakeBus`` so that the full listener pipeline can be tested end-to-end
+without a real microphone or a running ``ovos-dinkum-listener`` process.
 
-Example::
+Two usage patterns are supported:
+
+**1. Audio transformer testing** (e.g. ggwave) — feed raw audio chunks and
+assert on the bus messages emitted by the transformer plugins::
 
     from ovoscope.listener import get_mini_listener
     from ovos_audio_transformer_plugin_ggwave import GGWavePlugin
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, patch
     import ggwave
 
-    ggwave.decode = MagicMock(return_value=b"UTT:turn on the lights")
-    plugin = GGWavePlugin(config={"start_enabled": True})
-    listener = get_mini_listener(plugin_instances={"ovos-audio-transformer-plugin-ggwave": plugin})
-    msgs = listener.feed_audio(b"\\x00" * 1024)
+    with patch.object(ggwave, "decode", MagicMock(return_value=b"UTT:turn on the lights")):
+        plugin = GGWavePlugin(config={"start_enabled": True})
+        listener = get_mini_listener(
+            plugin_instances={"ovos-audio-transformer-plugin-ggwave": plugin}
+        )
+        msgs = listener.feed_audio(b"\\x00" * 1024)
+        assert any(m.msg_type == "recognizer_loop:utterance" for m in msgs)
+        listener.shutdown()
+
+**2. Full pipeline testing** (audio transformers → STT) — feed a real WAV
+file and assert that a ``recognizer_loop:utterance`` is emitted::
+
+    from ovoscope.listener import get_mini_listener
+    from unittest.mock import MagicMock
+
+    stt = MagicMock()
+    stt.execute.return_value = "ask not what your country can do for you"
+
+    listener = get_mini_listener()
+    msgs = listener.listen("path/to/jfk.wav", language="en-us", stt_instance=stt)
     assert any(m.msg_type == "recognizer_loop:utterance" for m in msgs)
     listener.shutdown()
 """
 
 from __future__ import annotations
 
+import io
+import wave
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 from ovos_bus_client.message import Message
 from ovos_utils.fakebus import FakeBus
 
 
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _wav_to_audio_data(audio: Union[bytes, str, Path],
+                       sample_rate: int = 16000,
+                       sample_width: int = 2) -> Any:
+    """Convert WAV bytes or a WAV file path to an ``AudioData`` object.
+
+    Uses ``AudioData.from_file()`` — `ovos_plugin_manager/utils/audio.py:34`
+    — when a file path is given, which handles WAV/AIFF/FLAC automatically.
+
+    For raw bytes, parses the WAV header via the ``wave`` stdlib module to
+    extract sample_rate and sample_width.
+
+    Args:
+        audio: Raw WAV bytes **or** a path to a WAV/AIFF/FLAC file.
+        sample_rate: Fallback sample rate when the WAV header cannot be parsed.
+        sample_width: Fallback sample width (bytes) when header cannot be
+            parsed.
+
+    Returns:
+        ``AudioData(frame_data, sample_rate, sample_width)``
+    """
+    from ovos_plugin_manager.utils.audio import AudioData
+
+    if isinstance(audio, (str, Path)):
+        return AudioData.from_file(str(audio))
+
+    # bytes path: parse WAV header to get sample_rate / sample_width
+    try:
+        with wave.open(io.BytesIO(audio)) as wf:
+            sample_rate = wf.getframerate()
+            sample_width = wf.getsampwidth()
+            frame_data = wf.readframes(wf.getnframes())
+    except Exception:
+        # Not a WAV file or corrupt header — treat as raw PCM
+        frame_data = audio
+
+    return AudioData(frame_data, sample_rate, sample_width)
+
+
 class MiniListener:
-    """In-process audio transformer pipeline for integration testing.
+    """In-process listener pipeline for integration testing.
 
     Wraps ``AudioTransformersService`` — `ovos_dinkum_listener/transformers.py` —
-    on a ``FakeBus`` so transformer plugins can be exercised without hardware.
+    on a ``FakeBus`` so transformer plugins and the STT plugin can be exercised
+    without real hardware or a running ``ovos-dinkum-listener`` process.
 
-    All ``Message`` objects emitted on the bus during a ``feed_audio`` /
-    ``feed_speech`` / ``transform`` call are captured and returned.
+    All ``Message`` objects emitted on the bus during any feed / transform /
+    listen call are captured and returned.
 
     Args:
         config: Full OVOS config dict. Must contain at minimum::
@@ -45,10 +110,10 @@ class MiniListener:
             {"listener": {"audio_transformers": {}}}
 
         plugin_instances: Optional mapping of plugin name → already-instantiated
-            plugin object.  Use this when the plugin is not (yet) registered via
-            an OPM entry point, or when you need direct control over the
-            plugin config.  Each plugin will be bound to the internal FakeBus
-            and injected into the ``AudioTransformersService``.
+            audio transformer plugin object.  Use this when the plugin is not
+            (yet) registered via an OPM entry point, or when you need direct
+            control over the plugin config.  Each plugin will be bound to the
+            internal FakeBus and injected into the ``AudioTransformersService``.
     """
 
     def __init__(
@@ -136,6 +201,107 @@ class MiniListener:
         audio, ctx = self.transformers.transform(chunk)
         return audio, ctx, list(self._messages)
 
+    def listen(
+        self,
+        audio: Union[bytes, str, Path],
+        language: str = "en-us",
+        stt_instance: Optional[Any] = None,
+        sample_rate: int = 16000,
+        sample_width: int = 2,
+    ) -> List[Message]:
+        """Full pipeline: audio → transformers → STT → ``recognizer_loop:utterance``.
+
+        This is the primary method for end-to-end listener pipeline tests.
+        Feed a real WAV file (or raw PCM bytes), run it through the loaded
+        audio transformer plugins, then optionally through an STT plugin.
+        If the STT plugin returns a non-empty transcript, a
+        ``recognizer_loop:utterance`` message is emitted on the FakeBus.
+
+        The complete sequence::
+
+            audio bytes / WAV file
+              │
+              ▼ AudioTransformersService.transform()
+            transformed audio + context
+              │
+              ▼ stt_instance.execute(AudioData, language)   [if provided]
+            transcript string
+              │
+              ▼ bus.emit("recognizer_loop:utterance")       [if non-empty]
+              │
+              ▼ captured messages
+
+        Args:
+            audio: Raw WAV/PCM bytes **or** a path to a ``.wav`` file.
+                The WAV header is parsed automatically to extract sample_rate
+                and sample_width.
+            language: BCP-47 language code forwarded to the STT plugin and
+                embedded in the emitted utterance message.
+            stt_instance: Optional STT plugin object with an
+                ``execute(audio_data, language) -> str`` method.  When
+                provided, ``AudioData`` is built from the (transformed) audio
+                and passed to the plugin.  If ``None``, no STT step is
+                performed.
+            sample_rate: Fallback sample rate used when *audio* is raw PCM
+                (i.e. has no WAV header).
+            sample_width: Fallback sample width in bytes when *audio* is raw
+                PCM.
+
+        Returns:
+            All ``Message`` objects emitted on the FakeBus during this call,
+            including any messages from transformer plugins **and** the
+            ``recognizer_loop:utterance`` from the STT step.
+
+        Example::
+
+            from ovoscope.listener import get_mini_listener
+            from unittest.mock import MagicMock
+
+            stt = MagicMock()
+            stt.execute.return_value = "ask not what your country can do for you"
+
+            listener = get_mini_listener()
+            msgs = listener.listen(
+                "tests/jfk.wav", language="en-us", stt_instance=stt
+            )
+            assert any(m.msg_type == "recognizer_loop:utterance" for m in msgs)
+            utt = next(m for m in msgs if m.msg_type == "recognizer_loop:utterance")
+            assert utt.data["lang"] == "en-us"
+            listener.shutdown()
+        """
+        self._messages.clear()
+
+        # Resolve file path to bytes so the transformer pipeline receives bytes.
+        if isinstance(audio, (str, Path)):
+            with open(audio, "rb") as fh:
+                audio_bytes: bytes = fh.read()
+        else:
+            audio_bytes = audio
+
+        # Run audio through the transformer pipeline (always, even if no
+        # plugins are loaded — transform() initialises the context dict).
+        transformed, ctx = self.transformers.transform(audio_bytes)
+
+        # STT step (optional)
+        if stt_instance is not None:
+            # Convert (possibly transformer-modified) bytes to AudioData.
+            # Use the WAV-aware helper so sample_rate / sample_width are
+            # read from the WAV header rather than hard-coded.
+            audio_data = _wav_to_audio_data(
+                transformed, sample_rate=sample_rate, sample_width=sample_width
+            )
+            raw = stt_instance.execute(audio_data, language)
+            transcript = raw.strip() if isinstance(raw, str) else ""
+
+            if transcript:
+                self.bus.emit(Message(
+                    "recognizer_loop:utterance",
+                    {"utterances": [transcript], "lang": language},
+                    {**ctx, "destination": ["skills"]},
+                ))
+
+        return list(self._messages)
+
     def shutdown(self) -> None:
         """Shut down all loaded transformer plugins gracefully."""
         self.transformers.shutdown()
@@ -145,6 +311,7 @@ def get_mini_listener(
     transformer_plugins: Optional[List[str]] = None,
     config: Optional[Dict[str, Any]] = None,
     plugin_instances: Optional[Dict[str, Any]] = None,
+    stt_instance: Optional[Any] = None,
 ) -> MiniListener:
     """Factory: create a ready-to-use :class:`MiniListener`.
 
@@ -171,9 +338,12 @@ def get_mini_listener(
             when *config* is provided.
         config: Full config dict.  When provided, *transformer_plugins* is
             ignored.  Must include the ``listener.audio_transformers`` key.
-        plugin_instances: Pre-instantiated plugin objects keyed by plugin name.
-            Injected directly into the ``AudioTransformersService`` after it
-            is initialised, bypassing OPM entry-point discovery.
+        plugin_instances: Pre-instantiated audio-transformer plugin objects
+            keyed by plugin name.  Injected directly into the
+            ``AudioTransformersService`` after it is initialised, bypassing
+            OPM entry-point discovery.
+        stt_instance: Unused by the factory; kept for API symmetry.  Pass
+            ``stt_instance`` directly to :meth:`MiniListener.listen` instead.
 
     Returns:
         A fully initialised :class:`MiniListener` instance ready to receive

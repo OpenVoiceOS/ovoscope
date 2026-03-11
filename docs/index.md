@@ -10,7 +10,7 @@
 | [end2end-test.md](end2end-test.md) | `End2EndTest` — full test runner reference |
 | [pydantic-integration.md](pydantic-integration.md) | Using `ovos-pydantic-models` with OvoScope |
 | [audio-testing.md](audio-testing.md) | `AudioServiceHarness`, `PlaybackServiceHarness` — testing audio services |
-| [listener.md](listener.md) | `MiniListener`, `get_mini_listener`, `ListenerTest` — testing audio transformer plugins |
+| [listener.md](listener.md) | `MiniListener`, `get_mini_listener`, `ListenerTest` — testing audio transformer plugins and STT pipeline |
 ## Conceptual Model
 ```
 Test                         FakeBus

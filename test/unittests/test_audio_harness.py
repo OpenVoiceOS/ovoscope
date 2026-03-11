@@ -359,6 +359,9 @@ class TestPlaybackServiceHarness(unittest.TestCase):
         """Sequential speak calls must each appear in spoken_utterances."""
         with PlaybackServiceHarness() as h:
             h.speak("first sentence")
+            # Wait for PlaybackThread to fully finish the first sentence
+            # and fire on_end before we queue the next one.
+            time.sleep(0.5)
             h.speak("second sentence")
             self.assertIn("first sentence", h.mock_tts.spoken_utterances)
             self.assertIn("second sentence", h.mock_tts.spoken_utterances)

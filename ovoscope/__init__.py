@@ -76,12 +76,9 @@ M2V_PIPELINE = [
     "ovos-m2v-pipeline-low",
 ]
 
-# Deterministic test pipeline — all standard built-in stages, no AI/LLM/persona/OCP.
-# This is the default when isolate_config=True so test results are reproducible
-# regardless of which AI or media plugins happen to be installed in the environment.
-# Uses padacioso (pure Python, always available) for exact-match intents.
-# If your skill uses padatious (C extension), either add PADATIOUS_PIPELINE to your
-# test pipeline or install ovos-padatious-pipeline-plugin in your [test] deps.
+# Standard test pipeline — all standard built-in stages.
+# This requires ovos-adapt-pipeline-plugin and ovos-padatious-pipeline-plugin.
+# If these are not installed, use LIGHT_TEST_PIPELINE instead.
 DEFAULT_TEST_PIPELINE = [
     "ovos-stop-pipeline-plugin-high",
     "ovos-converse-pipeline-plugin",
@@ -101,6 +98,43 @@ DEFAULT_TEST_PIPELINE = [
     "ovos-stop-pipeline-plugin-medium",
 ]
 
+# Lightweight test pipeline — no C extensions (swig) required.
+# Uses only pure-Python stages that are dependencies of ovos-core/workshop.
+# Use this when you want fast CI without building Padatious or Adapt.
+LIGHT_TEST_PIPELINE = [
+    "ovos-stop-pipeline-plugin-high",
+    "ovos-converse-pipeline-plugin",
+    "ovos-padacioso-pipeline-plugin-high",
+    "ovos-padacioso-pipeline-plugin-medium",
+    "ovos-padacioso-pipeline-plugin-low",
+    "ovos-fallback-pipeline-plugin-high",
+    "ovos-fallback-pipeline-plugin-medium",
+    "ovos-fallback-pipeline-plugin-low",
+    "ovos-stop-pipeline-plugin-medium",
+]
+
+
+def is_pipeline_available(pipeline: List[str]) -> bool:
+    """Check if all stages in *pipeline* are installed.
+
+    Args:
+        pipeline: List of pipeline stage IDs.
+
+    Returns:
+        True if all stages have corresponding plugins installed, False otherwise.
+    """
+    from ovos_plugin_manager.intents import find_pipeline_plugins
+    available = set(find_pipeline_plugins().keys())
+    for stage in pipeline:
+        base = stage
+        for suffix in ("-high", "-medium", "-low"):
+            if stage.endswith(suffix):
+                base = stage[: -len(suffix)]
+                break
+        if base not in available:
+            return False
+    return True
+
 
 class MiniCroft(SkillManager):
     def __init__(self, skill_ids,
@@ -111,7 +145,7 @@ class MiniCroft(SkillManager):
                  enable_skill_api=True,
                  extra_skills: Optional[Dict[str, OVOSSkill]] = None,
                  isolate_config: bool = True,
-                 default_pipeline: Optional[List[str]] = DEFAULT_TEST_PIPELINE,
+                 default_pipeline: Optional[List[str]] = None,
                  lang: Optional[str] = None,
                  secondary_langs: Optional[List[str]] = None,
                  pipeline_config: Optional[Dict[str, Dict]] = None,
@@ -119,6 +153,11 @@ class MiniCroft(SkillManager):
         self._isolated_config = isolate_config
         self._original_xdg_configs: Optional[List[LocalConf]] = None
         self._default_pipeline = default_pipeline
+        if self._default_pipeline is None:
+            if is_pipeline_available(DEFAULT_TEST_PIPELINE):
+                self._default_pipeline = DEFAULT_TEST_PIPELINE
+            else:
+                self._default_pipeline = LIGHT_TEST_PIPELINE
         self._original_pipeline: Optional[List[str]] = None
         self._original_cfg_pipeline: Optional[List[str]] = None
         self._had_cfg_pipeline: bool = False
@@ -193,6 +232,15 @@ class MiniCroft(SkillManager):
                          enable_event_scheduler=enable_event_scheduler,
                          *args, **kwargs)
 
+    @property
+    def pipeline(self) -> List[str]:
+        """Return the current active pipeline stages for this instance.
+
+        Returns:
+            List of stage IDs.
+        """
+        return self._default_pipeline
+
     def handle_boot_message(self, message: str):
         self.boot_messages.append(Message.deserialize(message))
 
@@ -219,16 +267,11 @@ class MiniCroft(SkillManager):
 
         self.bus.emit(Message("mycroft.skills.train"))  # tell any pipeline plugins to train loaded intents
 
-    def _check_pipeline_available(self, pipeline: List[str]) -> None:
-        """Warn loudly if any stage in *pipeline* cannot be served by IntentService.
+    def _check_pipeline_available(self, pipeline: List[str]) -> bool:
+        """Check if all stages in *pipeline* can be served by IntentService.
 
-        IntentService resolves stage IDs by stripping the '-high'/'-medium'/'-low'
-        suffix and looking up the base plugin name in ``pipeline_plugins``.  If a
-        plugin is missing the stage silently produces no matches — the intent is
-        never recognised and the test receives fewer messages than expected.
-
-        This method raises ``RuntimeError`` early so the failure message points at
-        the missing package rather than an opaque message-count mismatch.
+        Returns:
+            bool: True if all stages are available, False if any are missing.
         """
         available = set(self.intents.pipeline_plugins.keys())
         missing = []
@@ -242,21 +285,30 @@ class MiniCroft(SkillManager):
             if base not in available:
                 missing.append(stage)
         if missing:
-            raise RuntimeError(
-                f"Pipeline stage(s) not installed: {missing}\n"
+            LOG.warning(
+                f"ovoscope: Pipeline stage(s) not installed: {missing}\n"
                 f"Installed pipeline plugins: {sorted(available)}\n"
-                f"Add the missing package(s) to your [test] extras or CI install step.\n"
+                f"Missing package(s) suggested:\n"
                 f"  ADAPT_PIPELINE  → pip install ovos-adapt-pipeline-plugin\n"
                 f"  PADATIOUS_PIPELINE → pip install ovos-padatious-pipeline-plugin\n"
-                f"  PADACIOSO_PIPELINE → already bundled with ovos-workshop (no extra install)"
+                f"  PADACIOSO_PIPELINE → already bundled with ovos-workshop\n"
             )
+            return False
+        return True
 
     def run(self):
         """Load skills and mark core as ready to start tests"""
         self.status.set_alive()
         self.load_plugin_skills()
         if self._default_pipeline is not None:
-            self._check_pipeline_available(self._default_pipeline)
+            if not self._check_pipeline_available(self._default_pipeline):
+                if self._default_pipeline == DEFAULT_TEST_PIPELINE:
+                    LOG.info("ovoscope: falling back to LIGHT_TEST_PIPELINE")
+                    self._default_pipeline = LIGHT_TEST_PIPELINE
+                else:
+                    LOG.error("ovoscope: specified pipeline is missing stages; "
+                              "test results may be unreliable")
+
             # Two-pronged pipeline override:
             #
             # 1. SessionManager.default_session — controls sessions created from

@@ -8,7 +8,7 @@ from ovos_workshop.skills.ovos import OVOSSkill
 
 from ovos_bus_client.session import SessionManager
 
-from ovoscope import MiniCroft, get_minicroft, DEFAULT_TEST_PIPELINE, ADAPT_PIPELINE
+from ovoscope import MiniCroft, get_minicroft, DEFAULT_TEST_PIPELINE, LIGHT_TEST_PIPELINE, ADAPT_PIPELINE
 
 
 # ---------------------------------------------------------------------------
@@ -105,10 +105,14 @@ class TestMiniCroftPipelineIsolation(unittest.TestCase):
         self.assertEqual(SessionManager.default_session.pipeline, original)
 
     def test_isolate_config_uses_default_test_pipeline(self):
-        """isolate_config=True with no explicit default_pipeline uses DEFAULT_TEST_PIPELINE."""
+        """isolate_config=True with no explicit default_pipeline uses DEFAULT_TEST_PIPELINE or fallback."""
         mc = get_minicroft([])
         try:
-            self.assertEqual(SessionManager.default_session.pipeline, DEFAULT_TEST_PIPELINE)
+            # If all plugins are installed, it uses DEFAULT_TEST_PIPELINE.
+            # Otherwise it falls back to LIGHT_TEST_PIPELINE.
+            # Both are valid outcomes of the "isolation + default" logic.
+            self.assertIn(mc.pipeline, [DEFAULT_TEST_PIPELINE, LIGHT_TEST_PIPELINE])
+            self.assertEqual(SessionManager.default_session.pipeline, mc.pipeline)
         finally:
             mc.stop()
 

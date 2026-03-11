@@ -570,35 +570,49 @@ class PlaybackServiceHarness:
         )
         self._play_audio_patcher.start()
 
-        # Build the service — passing tts= sets disable_reload = True
-        self.svc = PlaybackService(
-            bus=self.bus,
-            tts=self.mock_tts,
-            disable_ocp=self.disable_ocp,
-            validate_source=self.validate_source,
-        )
-        # Wire mock_tts to the playback thread created by PlaybackService
-        self.mock_tts.init(self.bus, self.svc.playback_thread)
+        try:
+            # Build the service — passing tts= sets disable_reload = True
+            self.svc = PlaybackService(
+                bus=self.bus,
+                tts=self.mock_tts,
+                disable_ocp=self.disable_ocp,
+                validate_source=self.validate_source,
+            )
+            # Wire mock_tts to the playback thread created by PlaybackService
+            self.mock_tts.init(self.bus, self.svc.playback_thread)
 
-        # Subscribe lifecycle events for synchronisation
-        self.bus.on("recognizer_loop:audio_output_start",
-                    lambda m: self._audio_output_start.set())
-        self.bus.on("recognizer_loop:audio_output_end",
-                    lambda m: self._audio_output_end.set())
-        self.bus.on("mycroft.mic.listen",
-                    lambda m: self._mic_listen.set())
+            # Subscribe lifecycle events for synchronisation
+            self.bus.on("recognizer_loop:audio_output_start",
+                        lambda m: self._audio_output_start.set())
+            self.bus.on("recognizer_loop:audio_output_end",
+                        lambda m: self._audio_output_end.set())
+            self.bus.on("mycroft.mic.listen",
+                        lambda m: self._mic_listen.set())
+
+        except Exception:
+            self._play_audio_patcher.stop()
+            self.bus.close()
+            raise
 
         return self
 
     def __exit__(self, *args) -> None:
         """Shut down PlaybackService and stop patches."""
         if self.svc:
-            self.svc.shutdown()
+            try:
+                self.svc.shutdown()
+            except Exception:
+                pass
         if self._play_audio_patcher:
-            self._play_audio_patcher.stop()
+            try:
+                self._play_audio_patcher.stop()
+            except Exception:
+                pass
         if self.bus:
-            self.bus.close()
-
+            try:
+                self.bus.close()
+            except Exception:
+                pass
     # ------------------------------------------------------------------
     # Control methods
     # ------------------------------------------------------------------
@@ -611,6 +625,9 @@ class PlaybackServiceHarness:
             utterance: The text to speak.
             expect_response: If True, expect microphone listen after speech.
             timeout: Maximum seconds to wait for playback to finish.
+
+        Raises:
+            TimeoutError: If speech playback does not finish within timeout.
         """
         self._audio_output_start.clear()
         self._audio_output_end.clear()
@@ -620,7 +637,10 @@ class PlaybackServiceHarness:
             "lang": "en-US",
             "expect_response": expect_response,
         }))
-        self._audio_output_end.wait(timeout)
+        if not self._audio_output_end.wait(timeout):
+            raise TimeoutError(
+                f"Speech playback for '{utterance}' did not finish within {timeout}s"
+            )
 
     def stop(self) -> None:
         """Emit mycroft.stop to halt TTS playback."""

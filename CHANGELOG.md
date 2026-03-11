@@ -1,21 +1,12 @@
 # Changelog
 
-## [0.9.2a3](https://github.com/TigreGotico/ovoscope/tree/0.9.2a3) (2026-03-10)
+## [0.10.0a1](https://github.com/TigreGotico/ovoscope/tree/0.10.0a1) (2026-03-11)
 
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.9.2a2...0.9.2a3)
-
-## [0.9.2a2](https://github.com/TigreGotico/ovoscope/tree/0.9.2a2) (2026-03-10)
-
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.9.2a1...0.9.2a2)
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.9.2...0.10.0a1)
 
 **Merged pull requests:**
 
-- Tests [\#40](https://github.com/TigreGotico/ovoscope/pull/40) ([JarbasAl](https://github.com/JarbasAl))
-- Fix perms [\#39](https://github.com/TigreGotico/ovoscope/pull/39) ([JarbasAl](https://github.com/JarbasAl))
-
-## [0.9.2a1](https://github.com/TigreGotico/ovoscope/tree/0.9.2a1) (2026-03-10)
-
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.9.1...0.9.2a1)
+- feat: Add pipeline configuration support to MiniCroft, audio testing harnesses, and listener pipeline testing [\#44](https://github.com/TigreGotico/ovoscope/pull/44) ([JarbasAl](https://github.com/JarbasAl))
 
 
 

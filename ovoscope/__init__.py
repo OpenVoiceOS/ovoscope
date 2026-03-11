@@ -51,6 +51,15 @@ PADATIOUS_PIPELINE = [
     "ovos-padatious-pipeline-plugin-medium",
     "ovos-padatious-pipeline-plugin-low",
 ]
+# Padacioso is a pure-Python Padatious-compatible engine (no swig/C required).
+# It ships as a dependency of ovos-workshop so is always available in any OVOS
+# skill test environment.  Use this in place of PADATIOUS_PIPELINE when you
+# don't want a swig build dep in CI or when ovos-padatious is not installed.
+PADACIOSO_PIPELINE = [
+    "ovos-padacioso-pipeline-plugin-high",
+    "ovos-padacioso-pipeline-plugin-medium",
+    "ovos-padacioso-pipeline-plugin-low",
+]
 FALLBACK_PIPELINE = [
     "ovos-fallback-pipeline-plugin-high",
     "ovos-fallback-pipeline-plugin-medium",
@@ -61,25 +70,89 @@ PERSONA_PIPELINE = [
     "ovos-persona-pipeline-plugin-high",
     "ovos-persona-pipeline-plugin-low",
 ]
+M2V_PIPELINE = [
+    "ovos-m2v-pipeline-high",
+    "ovos-m2v-pipeline-medium",
+    "ovos-m2v-pipeline-low",
+]
 
-# Deterministic test pipeline — all standard built-in stages, no AI/LLM/persona/OCP.
-# This is the default when isolate_config=True so test results are reproducible
-# regardless of which AI or media plugins happen to be installed in the environment.
+# Standard test pipeline — all standard built-in stages.
+# This requires ovos-adapt-pipeline-plugin and ovos-padatious-pipeline-plugin.
+# If these are not installed, use LIGHT_TEST_PIPELINE instead.
 DEFAULT_TEST_PIPELINE = [
     "ovos-stop-pipeline-plugin-high",
     "ovos-converse-pipeline-plugin",
     "ovos-adapt-pipeline-plugin-high",
     "ovos-padatious-pipeline-plugin-high",
+    "ovos-padacioso-pipeline-plugin-high",
     "ovos-adapt-pipeline-plugin-medium",
     "ovos-padatious-pipeline-plugin-medium",
+    "ovos-padacioso-pipeline-plugin-medium",
     "ovos-common-query-pipeline-plugin",
     "ovos-adapt-pipeline-plugin-low",
     "ovos-padatious-pipeline-plugin-low",
+    "ovos-padacioso-pipeline-plugin-low",
     "ovos-fallback-pipeline-plugin-high",
     "ovos-fallback-pipeline-plugin-medium",
     "ovos-fallback-pipeline-plugin-low",
     "ovos-stop-pipeline-plugin-medium",
 ]
+
+# Lightweight test pipeline — no C extensions (swig) required.
+# Uses only pure-Python stages that are dependencies of ovos-core/workshop.
+# Use this when you want fast CI without building Padatious or Adapt.
+LIGHT_TEST_PIPELINE = [
+    "ovos-stop-pipeline-plugin-high",
+    "ovos-converse-pipeline-plugin",
+    "ovos-padacioso-pipeline-plugin-high",
+    "ovos-padacioso-pipeline-plugin-medium",
+    "ovos-padacioso-pipeline-plugin-low",
+    "ovos-fallback-pipeline-plugin-high",
+    "ovos-fallback-pipeline-plugin-medium",
+    "ovos-fallback-pipeline-plugin-low",
+    "ovos-stop-pipeline-plugin-medium",
+]
+
+DEFAULT_PIPELINE_UNSET = object()
+
+
+def is_pipeline_available(pipeline: List[str]) -> bool:
+    """Return True if all pipeline stages in *pipeline* are currently installed.
+
+    Uses ``importlib.metadata`` to check entry points — no FakeBus or IntentService
+    is created, so this is cheap to call at class setup time.
+
+    Example::
+
+        import unittest
+        from ovoscope import is_pipeline_available, M2V_PIPELINE
+
+        class TestM2V(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls):
+                if not is_pipeline_available(M2V_PIPELINE):
+                    raise unittest.SkipTest("ovos-m2v-pipeline not installed")
+    """
+    import importlib.metadata
+    installed_bases: set = set()
+    try:
+        # Python 3.10+ entry_points API
+        for ep in importlib.metadata.entry_points(group="opm.pipeline"):
+            installed_bases.add(ep.name)
+    except TypeError:
+        # Fallback for older metadata API if needed
+        for ep in importlib.metadata.entry_points().get("opm.pipeline", []):
+            installed_bases.add(ep.name)
+
+    for stage in pipeline:
+        base = stage
+        for suffix in ("-high", "-medium", "-low"):
+            if stage.endswith(suffix):
+                base = stage[: -len(suffix)]
+                break
+        if base not in installed_bases:
+            return False
+    return True
 
 
 class MiniCroft(SkillManager):
@@ -91,13 +164,22 @@ class MiniCroft(SkillManager):
                  enable_skill_api=True,
                  extra_skills: Optional[Dict[str, OVOSSkill]] = None,
                  isolate_config: bool = True,
-                 default_pipeline: Optional[List[str]] = DEFAULT_TEST_PIPELINE,
+                 default_pipeline: Optional[List[str]] = DEFAULT_PIPELINE_UNSET,
                  lang: Optional[str] = None,
                  secondary_langs: Optional[List[str]] = None,
+                 pipeline_config: Optional[Dict[str, Dict]] = None,
                  *args, **kwargs):
         self._isolated_config = isolate_config
         self._original_xdg_configs: Optional[List[LocalConf]] = None
-        self._default_pipeline = default_pipeline
+
+        if default_pipeline is DEFAULT_PIPELINE_UNSET:
+            if is_pipeline_available(DEFAULT_TEST_PIPELINE):
+                self._default_pipeline = DEFAULT_TEST_PIPELINE
+            else:
+                self._default_pipeline = LIGHT_TEST_PIPELINE
+        else:
+            self._default_pipeline = default_pipeline
+
         self._original_pipeline: Optional[List[str]] = None
         self._original_cfg_pipeline: Optional[List[str]] = None
         self._had_cfg_pipeline: bool = False
@@ -112,6 +194,9 @@ class MiniCroft(SkillManager):
         self._had_lang: bool = False
         self._original_secondary_langs: Optional[List[str]] = None
         self._had_secondary_langs: bool = False
+        self._pipeline_config: Optional[Dict[str, Dict]] = pipeline_config
+        self._original_pipeline_configs: Dict[str, Optional[Dict]] = {}
+        self._had_pipeline_configs: Dict[str, bool] = {}
 
         if isolate_config:
             # Replace user XDG configs (e.g. ~/.config/mycroft/mycroft.conf) with
@@ -143,17 +228,47 @@ class MiniCroft(SkillManager):
                 LOG.debug(f"ovoscope: secondary_langs set to "
                           f"{self._secondary_langs}")
 
+        # Patch per-pipeline config BEFORE super().__init__() so that pipeline
+        # plugins read the overridden values during their __init__.
+        # pipeline_config is a dict keyed by pipeline plugin config key
+        # (the key used under Configuration()["intents"]), e.g.:
+        #   {"ovos_m2v_pipeline": {"model": "Jarbas/ovos-model2vec-..."}}
+        if self._pipeline_config:
+            cfg = Configuration()
+            intents_cfg = cfg.setdefault("intents", {})
+            for plugin_key, plugin_cfg in self._pipeline_config.items():
+                self._had_pipeline_configs[plugin_key] = plugin_key in intents_cfg
+                self._original_pipeline_configs[plugin_key] = intents_cfg.get(plugin_key)
+                intents_cfg[plugin_key] = plugin_cfg
+                LOG.debug(f"ovoscope: pipeline_config patched '{plugin_key}'")
+
         self.boot_messages: List[Message] = []
         bus = FakeBus()
         bus.on("message", self.handle_boot_message)
         self.skill_ids = skill_ids
         self.extra_skills = extra_skills or {}
-        super().__init__(bus, enable_installer=enable_installer,
-                         enable_skill_api=enable_skill_api,
-                         enable_file_watcher=enable_file_watcher,
-                         enable_intent_service=enable_intent_service,
-                         enable_event_scheduler=enable_event_scheduler,
-                         *args, **kwargs)
+
+        try:
+            super().__init__(bus, enable_installer=enable_installer,
+                             enable_skill_api=enable_skill_api,
+                             enable_file_watcher=enable_file_watcher,
+                             enable_intent_service=enable_intent_service,
+                             enable_event_scheduler=enable_event_scheduler,
+                             *args, **kwargs)
+        except Exception:
+            # If super().__init__ fails (e.g. plugin construction error),
+            # ensure global Configuration() is restored.
+            self.stop()
+            raise
+
+    @property
+    def pipeline(self) -> List[str]:
+        """Return the current active pipeline stages for this instance.
+
+        Returns:
+            List of stage IDs.
+        """
+        return self._default_pipeline
 
     def handle_boot_message(self, message: str):
         self.boot_messages.append(Message.deserialize(message))
@@ -181,11 +296,48 @@ class MiniCroft(SkillManager):
 
         self.bus.emit(Message("mycroft.skills.train"))  # tell any pipeline plugins to train loaded intents
 
+    def _check_pipeline_available(self, pipeline: List[str]) -> bool:
+        """Check if all stages in *pipeline* can be served by IntentService.
+
+        Returns:
+            bool: True if all stages are available, False if any are missing.
+        """
+        available = set(self.intents.pipeline_plugins.keys())
+        missing = []
+        for stage in pipeline:
+            # Strip priority suffix to get the base plugin ID
+            base = stage
+            for suffix in ("-high", "-medium", "-low"):
+                if stage.endswith(suffix):
+                    base = stage[: -len(suffix)]
+                    break
+            if base not in available:
+                missing.append(stage)
+        if missing:
+            LOG.warning(
+                f"ovoscope: Pipeline stage(s) not installed: {missing}\n"
+                f"Installed pipeline plugins: {sorted(available)}\n"
+                f"Missing package(s) suggested:\n"
+                f"  ADAPT_PIPELINE  → pip install ovos-adapt-pipeline-plugin\n"
+                f"  PADATIOUS_PIPELINE → pip install ovos-padatious-pipeline-plugin\n"
+                f"  PADACIOSO_PIPELINE → already bundled with ovos-workshop\n"
+            )
+            return False
+        return True
+
     def run(self):
         """Load skills and mark core as ready to start tests"""
         self.status.set_alive()
         self.load_plugin_skills()
         if self._default_pipeline is not None:
+            if not self._check_pipeline_available(self._default_pipeline):
+                if self._default_pipeline == DEFAULT_TEST_PIPELINE:
+                    LOG.info("ovoscope: falling back to LIGHT_TEST_PIPELINE")
+                    self._default_pipeline = LIGHT_TEST_PIPELINE
+                else:
+                    LOG.error("ovoscope: specified pipeline is missing stages; "
+                              "test results may be unreliable")
+
             # Two-pronged pipeline override:
             #
             # 1. SessionManager.default_session — controls sessions created from
@@ -240,8 +392,15 @@ class MiniCroft(SkillManager):
         self.bus.emit(msg)
 
     def stop(self):
-        super().stop()
-        self.bus.close()
+        try:
+            super().stop()
+        except Exception:
+            pass
+        if hasattr(self, "bus") and self.bus:
+            try:
+                self.bus.close()
+            except Exception:
+                pass
         if self._default_pipeline is not None and self._original_pipeline is not None:
             SessionManager.default_session.pipeline = self._original_pipeline
             cfg = Configuration()
@@ -279,6 +438,15 @@ class MiniCroft(SkillManager):
             else:
                 cfg.pop("secondary_langs", None)
             LOG.debug("ovoscope: secondary_langs restored")
+        if self._pipeline_config:
+            cfg = Configuration()
+            intents_cfg = cfg.get("intents", {})
+            for plugin_key in self._pipeline_config:
+                if self._had_pipeline_configs.get(plugin_key):
+                    intents_cfg[plugin_key] = self._original_pipeline_configs[plugin_key]
+                else:
+                    intents_cfg.pop(plugin_key, None)
+            LOG.debug("ovoscope: pipeline_config restored")
         if self._isolated_config and self._original_xdg_configs is not None:
             Configuration.xdg_configs = self._original_xdg_configs
             Configuration.reload()
@@ -300,16 +468,20 @@ def get_minicroft(skill_ids: Union[List[str], str], *args,
         skill_ids = [skill_ids]
     assert isinstance(skill_ids, list)
     croft = MiniCroft(skill_ids, *args, **kwargs)
-    croft.start()
-    deadline = time() + max_wait
-    while croft.status.state != ProcessState.READY:
-        if time() > deadline:
-            raise TimeoutError(
-                f"MiniCroft did not reach READY in {max_wait}s — "
-                f"check skill startup logs (skill_ids={skill_ids})"
-            )
-        sleep(0.1)
-    return croft
+    try:
+        croft.start()
+        deadline = time() + max_wait
+        while croft.status.state != ProcessState.READY:
+            if time() > deadline:
+                raise TimeoutError(
+                    f"MiniCroft did not reach READY in {max_wait}s — "
+                    f"check skill startup logs (skill_ids={skill_ids})"
+                )
+            sleep(0.1)
+        return croft
+    except Exception:
+        croft.stop()
+        raise
 
 
 @dataclasses.dataclass()
@@ -720,6 +892,7 @@ class End2EndTest:
             json.dump(self.serialize(anonymize=anonymize), f, ensure_ascii=False, indent=2)
 
     def assert_spoke(self, text: str, lang: str = "en-US", timeout: int = 30) -> None:
+
         """Run the test and assert that a ``speak`` message with the given utterance was emitted.
 
         Sugar for simple speak-assertion tests that don't need to check the full message sequence.
@@ -743,3 +916,32 @@ class End2EndTest:
             f"❌ speak '{text}' (lang={lang}) not found. "
             f"Received speak utterances: {speak_utterances}"
         )
+
+
+try:
+    from ovoscope.audio import (  # noqa: F401
+        MockAudioBackend,
+        AudioServiceHarness,
+        MockTTS,
+        PlaybackServiceHarness,
+        AudioCaptureSession,
+    )
+except ImportError as e:
+    # Only silence if it's missing the optional dependency itself.
+    # If ovoscope.audio has a logic error (e.g. broken import of a present lib), re-raise.
+    if isinstance(e, ModuleNotFoundError) and e.name in ("ovos_audio", "ovos_audio.audio"):
+        pass
+    else:
+        raise
+
+try:
+    from ovoscope.listener import (  # noqa: F401
+        MiniListener,
+        get_mini_listener,
+        ListenerTest,
+    )
+except ImportError as e:
+    if isinstance(e, ModuleNotFoundError) and e.name in ("ovos_dinkum_listener", "ovos_dinkum_listener.transformers"):
+        pass
+    else:
+        raise

@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from ovos_utils.fakebus import FakeBus
-from ovos_utils.messagebus import Message
+from ovos_bus_client.message import Message
 
 from ovoscope.phal import MiniPHAL, PHALTest
 

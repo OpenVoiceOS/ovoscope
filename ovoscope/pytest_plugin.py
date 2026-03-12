@@ -47,7 +47,10 @@ Bus coverage opt-in::
             bus_coverage_session.add(test.bus_coverage_report)
 """
 
-from typing import Iterator, List, Optional, Union
+from typing import TYPE_CHECKING, Iterator, List, Optional, Union
+
+if TYPE_CHECKING:
+    from ovoscope.bus_coverage import BusCoverageReport
 
 import pytest
 
@@ -95,9 +98,9 @@ class BusCoverageCollector:
     """
 
     def __init__(self) -> None:
-        self._reports: List[object] = []
+        self._reports: List["BusCoverageReport"] = []
 
-    def add(self, report: Optional[object]) -> None:
+    def add(self, report: Optional["BusCoverageReport"]) -> None:
         """Add a :class:`~ovoscope.bus_coverage.BusCoverageReport` to the collector.
 
         Silently ignores ``None`` so callers do not need to guard against tests

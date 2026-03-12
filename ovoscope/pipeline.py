@@ -146,38 +146,60 @@ class PipelineHarness:
         if self._mc is None:
             raise RuntimeError("PipelineHarness must be used as a context manager.")
 
-        captured: List[Message] = []
-        event_types = [
-            "intent.service.skills.activated",
-            "intent_failure",
-            "mycroft.skill.handler.start",
-        ]
-
         import threading
-        done = threading.Event()
 
-        def _capture(msg: Any) -> None:
+        captured: List[Message] = []
+        _matched = threading.Event()
+        _failed = threading.Event()
+
+        success_type = "intent.service.skills.activated"
+        failure_types = ["intent_failure", "mycroft.skill.handler.start"]
+
+        def _on_success(msg: Any) -> None:
             if isinstance(msg, str):
                 try:
                     msg = Message.deserialize(msg)
                 except Exception:
                     return
             captured.append(msg)
-            done.set()
+            _matched.set()
 
-        for et in event_types:
-            self._mc.bus.on(et, _capture)
+        def _on_failure(msg: Any) -> None:
+            _failed.set()
+
+        self._mc.bus.on(success_type, _on_success)
+        for et in failure_types:
+            self._mc.bus.on(et, _on_failure)
 
         src = Message(
             "recognizer_loop:utterance",
             data={"utterances": [utterance], "lang": self.lang},
         )
         self._mc.bus.emit(src)
-        done.wait(timeout=timeout)
 
-        for et in event_types:
-            self._mc.bus.remove(et, _capture)
+        # Wait for either a match or a failure signal
+        import threading as _threading
+        done = _threading.Event()
 
+        def _wait_either() -> None:
+            while not _matched.is_set() and not _failed.is_set():
+                _matched.wait(timeout=0.05)
+                if _matched.is_set() or _failed.is_set():
+                    break
+            done.set()
+
+        watcher = _threading.Thread(target=_wait_either, daemon=True)
+        watcher.start()
+        timed_out = not done.wait(timeout=timeout)
+
+        self._mc.bus.remove(success_type, _on_success)
+        for et in failure_types:
+            self._mc.bus.remove(et, _on_failure)
+
+        if timed_out:
+            return None
+        if _failed.is_set():
+            return None
         return captured[0] if captured else None
 
     def assert_matches(

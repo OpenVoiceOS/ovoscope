@@ -18,7 +18,7 @@ End-to-end test framework for OpenVoiceOS skills
 ## Testing & CI
 | Feature | Details |
 |---------|---------|
-| Unit Tests | 243 tests across `test/unittests/` (all passing) |
+| Unit Tests | 348 tests across `test/unittests/` (all passing) |
 | Coverage | 53% overall (transformer/remote code excluded — requires optional deps) |
 | Test Framework | pytest with custom fixtures |
 | Coverage Reporter | py-cov-action/python-coverage-comment-action@v3 |

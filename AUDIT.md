@@ -58,6 +58,72 @@ builds non-reproducible if the upstream action changes.
 2. Pin CI action refs — reproducibility
 
 ---
+
+## Audit [2026-03-12] — Correctness Bugs, Coverage Gaps, Docs
+
+### ~~[CRITICAL] `pipeline.py` race condition in `match()`~~ ✅ FIXED
+
+**Evidence**: `ovoscope/pipeline.py:159–181` — a single `threading.Event` was
+shared for both success (`intent.service.skills.activated`) and failure
+(`intent_failure`, `mycroft.skill.handler.start`) handlers.  If `intent_failure`
+fired first, `captured[0]` would be a failure message returned as success.
+Additionally, `done.wait()` return value was not checked; a timeout silently
+returned `captured[0]` (or raised `IndexError` on empty list).
+
+**Fix**: Separate `_matched` and `_failed` events; only the success handler
+populates `captured`.  Timeout and failure both return `None`.
+Source: `ovoscope/pipeline.py:149`.
+
+### ~~[MAJOR] `diff.py` — subset comparison silently ignores extra keys~~ ✅ FIXED
+
+**Evidence**: `ovoscope/diff.py:121–138` — `_dict_diff()` only iterated keys
+in `expected`, so unexpected keys in `actual` were never flagged.
+
+**Fix**: Added `strict: bool = False` parameter to `_dict_diff()` and
+`diff_fixtures()`.  When `strict=True`, extra keys in `actual` are included in
+the diff detail.  Default `False` preserves existing behaviour.
+Source: `ovoscope/diff.py:121`.
+
+### ~~[MINOR] `bus_coverage.py` — dead method `_skill_id_for_handler()`~~ ✅ FIXED
+
+**Evidence**: `ovoscope/bus_coverage.py:745–763` — `_skill_id_for_handler()`
+was never called anywhere in the codebase (verified by grep).  Its logic is
+a subset of `_skill_id_for_closure()` which is the method actually used.
+
+**Fix**: Method deleted.
+Source: formerly `ovoscope/bus_coverage.py:745`.
+
+### ~~[MAJOR] No unit tests for `media.py` (`MockOCPBackend`, `OCPCaptureSession`, `OCPPlayerHarness`)~~ ✅ FIXED
+
+**Evidence**: `ovoscope/media.py` had no corresponding test file.
+
+**Fix**: Created `test/unittests/test_media.py` — 20 tests covering
+`MockOCPBackend` state transitions, `OCPCaptureSession` message accumulation,
+and assertion helpers.
+
+### ~~[MAJOR] No unit tests for `remote_recorder.py`~~ ✅ FIXED
+
+**Evidence**: `ovoscope/remote_recorder.py` had no corresponding test file.
+
+**Fix**: Created `test/unittests/test_remote_recorder.py` — 15 tests covering
+constructor defaults, `_parse_url`, connect/disconnect lifecycle, `record()` with
+mocked bus client, timeout handling, and fixture serialization.
+
+### ~~[MINOR] Deprecated `ovos_utils.messagebus.Message` import in `test_phal.py`~~ ✅ FIXED
+
+**Evidence**: `test/unittests/test_phal.py:23` — imported `Message` from
+deprecated `ovos_utils.messagebus` instead of canonical `ovos_bus_client.message`.
+
+**Fix**: Import changed to `from ovos_bus_client.message import Message`.
+Source: `test/unittests/test_phal.py:23`.
+
+### ~~[MINOR] `SUGGESTIONS.md` missing~~ ✅ FIXED
+
+**Evidence**: `SUGGESTIONS.md` was absent despite being required by `AGENTS.md`.
+
+**Fix**: `SUGGESTIONS.md` created with 10 structured proposals.
+
+---
 ## Bus Coverage Module — Full Audit [2026-03-12]
 
 ### ~~[CRITICAL] async_responses excluded from emitter coverage~~ ✅ FIXED

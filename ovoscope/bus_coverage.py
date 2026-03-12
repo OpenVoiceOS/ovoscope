@@ -743,26 +743,6 @@ class BusCoverageTracker:
         return None
 
     @staticmethod
-    def _skill_id_for_handler(
-        handler: Any,
-        skill_instance_map: Dict[int, str],
-    ) -> Optional[str]:
-        """Attribute a bound-method handler to its owning skill.
-
-        Args:
-            handler: A callable that was registered via ``bus.on``.
-            skill_instance_map: Mapping returned by :meth:`_skill_instance_map`.
-
-        Returns:
-            The ``skill_id`` string, or ``None`` if the handler does not
-            belong to any loaded skill.
-        """
-        owner = getattr(handler, "__self__", None)
-        if owner is None:
-            return None
-        return skill_instance_map.get(id(owner))
-
-    @staticmethod
     def _skill_id_for_message(msg: Message) -> Optional[str]:
         """Extract ``skill_id`` from a message's context field.
 

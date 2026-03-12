@@ -358,7 +358,11 @@ def _has_e2e_tests(repo_root: str) -> bool:
 
 
 def _count_fixtures(repo_root: str) -> int:
-    """Count ``.json`` fixture files in common fixture directories.
+    """Count ``.json`` fixture files in common fixture directories (recursive).
+
+    Searches recursively under each candidate directory so that fixtures
+    organised in sub-directories (e.g. ``test/end2end/skill_name/*.json``)
+    are counted correctly.
 
     Args:
         repo_root: Repository root directory.
@@ -366,16 +370,18 @@ def _count_fixtures(repo_root: str) -> int:
     Returns:
         Total count of JSON fixture files found.
     """
+    from pathlib import Path
     count = 0
-    candidates = [
-        os.path.join(repo_root, "test", "end2end"),
-        os.path.join(repo_root, "tests", "end2end"),
-        os.path.join(repo_root, "test", "fixtures"),
-        os.path.join(repo_root, "tests", "fixtures"),
+    candidate_names = [
+        ("test", "end2end"),
+        ("tests", "end2end"),
+        ("test", "fixtures"),
+        ("tests", "fixtures"),
     ]
-    for candidate in candidates:
-        if os.path.isdir(candidate):
-            count += sum(1 for f in os.listdir(candidate) if f.endswith(".json"))
+    for parts in candidate_names:
+        candidate = Path(repo_root).joinpath(*parts)
+        if candidate.is_dir():
+            count += sum(1 for _ in candidate.rglob("*.json"))
     return count
 
 

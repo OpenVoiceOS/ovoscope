@@ -1,4 +1,44 @@
 # Maintenance Report — `ovoscope`
+
+## [2026-03-12] — Full Audit Improvements (Correctness, Coverage, Docs, Packaging)
+
+- **AI Model**: claude-sonnet-4-6
+- **Actions Taken**:
+  - **P1.1** Fixed `pipeline.py` race condition: split success/failure into
+    separate `threading.Event` objects; `match()` now returns `None` on timeout
+    or failure instead of returning a failure message as success.
+    Source: `ovoscope/pipeline.py:149–200`.
+  - **P1.2** Added `strict: bool = False` to `diff.py` `_dict_diff()` and
+    `diff_fixtures()`.  When `strict=True`, extra keys in `actual` not in
+    `expected` are flagged.  Default `False` preserves existing behaviour.
+    Source: `ovoscope/diff.py:121`.
+  - **P1.3** Deleted dead `_skill_id_for_handler()` from `bus_coverage.py`
+    (lines 745–763, never called anywhere in the codebase).
+  - **P2.1** Created `test/unittests/test_media.py` — 20 unit tests for
+    `MockOCPBackend` state transitions and `OCPCaptureSession` accumulation.
+  - **P2.2** Created `test/unittests/test_remote_recorder.py` — 15 unit tests
+    for `RemoteRecorder` using mocked `MessageBusClient`.
+  - **P2.3** Fixed deprecated `ovos_utils.messagebus.Message` import in
+    `test/unittests/test_phal.py` → `ovos_bus_client.message.Message`.
+  - **P3.1** Created `SUGGESTIONS.md` with 10 structured proposals.
+  - **P3.2** Updated `QUICK_FACTS.md` test count: 243 → 306.
+  - **P3.3** Expanded `docs/pipeline.md` to full API reference with `pipeline.py:LINE`
+    citations, `_SinkSkill` explanation, Adapt/Padatious examples, and
+    pipeline success/failure signal documentation.
+  - **P3.4** Fixed `docs/ocp.md` to correctly reference `OCPTest` (the class
+    in `ocp.py`) and add cross-reference to `OCPPlayerHarness` in `media.py`.
+  - **P3.5** Updated `AUDIT.md` with 7 new findings (5 fixed, 2 pre-existing).
+  - **P4.1** Updated `pyproject.toml`: added Documentation and Issue Tracker
+    URLs, `[tool.setuptools.package-data]`, `timeout = 60` in pytest options,
+    and comment explaining the `ovos-core>=2.0.4a2` alpha pin.
+  - **P5.1** Made `_count_fixtures()` in `coverage.py` use `Path.rglob("*.json")`
+    for recursive fixture counting instead of `os.listdir()`.
+  - **P5.2** Added `TYPE_CHECKING` guard and proper `List["BusCoverageReport"]`
+    type annotation to `BusCoverageCollector._reports` in `pytest_plugin.py`.
+- **Oversight**: Human review pending. 348 unit tests pass locally (was 301; +35 new, +12 from new files).
+
+---
+
 ## [2026-03-12] — Bus Coverage Report Feature
 
 - **AI Model**: Claude Sonnet 4.6

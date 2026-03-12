@@ -586,7 +586,7 @@ class End2EndTest:
     ###########################
     track_bus_coverage: bool = False  # enable BusCoverageTracker for this test
     print_bus_coverage: bool = False  # print inline summary after execute()
-    bus_coverage_report: Optional[Any] = dataclasses.field(default=None, init=False, repr=False)
+    bus_coverage_report: Optional["BusCoverageReport"] = dataclasses.field(default=None, init=False, repr=False)
 
     ###########################
     # test runner internals
@@ -663,10 +663,9 @@ class End2EndTest:
 
         if _bus_tracker is not None:
             _bus_tracker.stop_tracking()
-            _bus_tracker.record_session(messages, self.expected_messages)
+            all_responses = messages + list(getattr(capture, "async_responses", []))
+            _bus_tracker.record_session(all_responses, self.expected_messages)
             self.bus_coverage_report = _bus_tracker.build_report()
-            if self.print_bus_coverage:
-                print(self.bus_coverage_report.summary_line())
 
         if self.test_message_number:
             n1 = len(self.expected_messages)
@@ -792,6 +791,9 @@ class End2EndTest:
             assert set(sess.blacklisted_intents) == set(expected_sess.blacklisted_intents), f"❌ final session blacklisted_intents doesn't match"
             if self.verbose:
                 print(f"✅ final session matches: {expected_sess.serialize()}")
+
+        if self.print_bus_coverage and self.bus_coverage_report is not None:
+            print(self.bus_coverage_report.summary_line())
 
         if self.managed:
             self.minicroft.stop()

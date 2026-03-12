@@ -517,3 +517,55 @@ class TestBusCoverageTrackerIterHandlers:
         wrapper = _Wrapper(fn)
         result = list(BusCoverageTracker._iter_handlers([wrapper]))
         assert result == [fn]
+
+
+class TestCoreAttributionBucket:
+    """Tests for __core__ bucket fallback (C1/C4 fixes)."""
+
+    def test_message_without_skill_id_goes_to_core_bucket(self):
+        """Observed messages with no skill_id in context must land in __core__."""
+        bus = FakeBus()
+        minicroft = MagicMock()
+        minicroft.plugin_skills = {}
+        tracker = BusCoverageTracker(bus, minicroft)
+
+        responses = [Message("intent.service.result", {}, {})]
+        tracker.record_session(responses, [])
+
+        assert "__core__" in tracker._observed
+        assert tracker._observed["__core__"]["intent.service.result"] == 1
+
+    def test_expected_message_without_skill_id_goes_to_core_when_unobserved(self):
+        """expected_messages with no skill_id and no prior observation go to __core__."""
+        bus = FakeBus()
+        minicroft = MagicMock()
+        minicroft.plugin_skills = {}
+        tracker = BusCoverageTracker(bus, minicroft)
+
+        expected = [Message("ovos.utterance.handled", {}, {})]
+        tracker.record_session([], expected)
+
+        assert "__core__" in tracker._asserted
+        assert tracker._asserted["__core__"]["ovos.utterance.handled"] == 1
+
+    def test_core_bucket_appears_in_report(self):
+        """build_report must include __core__ as a SkillBusCoverage row."""
+        bus = FakeBus()
+        minicroft = MagicMock()
+        minicroft.plugin_skills = {}
+        tracker = BusCoverageTracker(bus, minicroft)
+
+        responses = [Message("speak", {}, {})]
+        tracker.record_session(responses, [])
+
+        report = tracker.build_report()
+        skill_ids = [s.skill_id for s in report.skills]
+        assert "__core__" in skill_ids
+
+
+class TestJsonSchemaVersion:
+    def test_to_json_includes_schema_version(self):
+        """to_json() output must contain 'schema_version': '1'."""
+        report = BusCoverageReport(skills=[])
+        data = json.loads(report.to_json())
+        assert data.get("schema_version") == "1"

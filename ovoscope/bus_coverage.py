@@ -234,13 +234,16 @@ class BusCoverageReport:
             verbose: When ``True``, print per-msg-type detail rows for every
                 skill after the summary table.
         """
+        col_w = max((len(s.skill_id) for s in self.skills), default=5) + 2
+        col_w = max(col_w, 7)  # at least wide enough for "Skill" header
+        total_w = col_w + 36
         print()
-        print("━" * 66)
+        print("━" * total_w)
         print("Bus Coverage Report")
-        print("━" * 66)
-        header = f"{'Skill':<34} {'Listeners':>14}  {'Observed':>8}  {'Asserted':>8}"
+        print("━" * total_w)
+        header = f"{'Skill':<{col_w}} {'Listeners':>14}  {'Observed':>8}  {'Asserted':>8}"
         print(header)
-        print("─" * 66)
+        print("─" * total_w)
 
         total_l = total_cl = total_e = total_obs = total_ass = 0
         for skill in self.skills:
@@ -258,16 +261,16 @@ class BusCoverageReport:
             pct = f"{skill.listener_coverage_pct:.1f}%"
             listener_col = f"{c_l}/{n_l}  {pct}"
             print(
-                f"{skill.skill_id:<34} {listener_col:>14}  "
+                f"{skill.skill_id:<{col_w}} {listener_col:>14}  "
                 f"{c_obs}/{n_e:>6}  {c_ass}/{n_e:>6}"
             )
 
         if self.skills:
-            print("─" * 66)
+            print("─" * total_w)
             total_pct = (100.0 * total_cl / total_l) if total_l else 0.0
             total_listener_col = f"{total_cl}/{total_l}  {total_pct:.1f}%"
             print(
-                f"{'TOTAL':<34} {total_listener_col:>14}  "
+                f"{'TOTAL':<{col_w}} {total_listener_col:>14}  "
                 f"{total_obs}/{total_e:>6}  {total_ass}/{total_e:>6}"
             )
 
@@ -295,6 +298,7 @@ class BusCoverageReport:
             Pretty-printed JSON with ``skills`` and ``totals`` keys.
         """
         data = {
+            "schema_version": "1",
             "skills": [s.to_dict() for s in self.skills],
             "totals": self._totals_dict(),
         }
@@ -428,8 +432,11 @@ class BusCoverageTracker:
             instance = getattr(loader, "instance", loader) or loader
             combined_map[id(instance)] = skill_id
 
+        # Cache the bus events dict once — used across all three passes.
+        bus_events = self._get_bus_events()
+
         # Discover remaining owners by walking all bus handlers
-        for _msg_type, handlers in self._get_bus_events().items():
+        for _msg_type, handlers in bus_events.items():
             for handler in self._iter_handlers(handlers):
                 owner = getattr(handler, "__self__", None)
                 if owner is None:
@@ -442,18 +449,19 @@ class BusCoverageTracker:
                     )
                     combined_map[id(owner)] = component
 
-        _SKIP = {"FakeBus", "type"}
-
         # ── Pass 2: direct __self__ handlers ────────────────────────────────
-        for msg_type, handlers in self._get_bus_events().items():
+        for msg_type, handlers in bus_events.items():
             for handler in self._iter_handlers(handlers):
                 owner = getattr(handler, "__self__", None)
                 if owner is None:
                     continue  # handled in Pass 3
                 if id(owner) in skill_instance_ids:
                     continue  # already covered by EventContainer in Pass 1
+                # Skip FakeBus itself and bare class objects (type instances)
+                if isinstance(owner, type):
+                    continue
                 component = combined_map.get(id(owner), type(owner).__name__)
-                if component in _SKIP:
+                if component == "FakeBus":
                     continue
                 listener_map.setdefault(component, {})
                 listener_map[component][msg_type] = (
@@ -461,12 +469,12 @@ class BusCoverageTracker:
                 )
 
         # ── Pass 3: closure scan for handlers with no direct __self__ ────────
-        for msg_type, handlers in self._get_bus_events().items():
+        for msg_type, handlers in bus_events.items():
             for handler in self._iter_handlers(handlers):
                 if getattr(handler, "__self__", None) is not None:
                     continue  # already handled above
                 component = self._skill_id_from_closure(handler, combined_map)
-                if component is None or component in _SKIP:
+                if component is None or component == "FakeBus":
                     continue
                 # Only add if not already covered by EventContainer
                 if component in listener_map and msg_type in listener_map[component]:
@@ -517,18 +525,18 @@ class BusCoverageTracker:
         Can be called multiple times (once per ``End2EndTest.execute()`` call)
         before :meth:`build_report`.
 
+        Messages with no ``skill_id`` in context (core services, pipeline
+        components) are attributed to the ``"__core__"`` bucket so they are
+        never silently dropped.
+
         Args:
             responses: Messages from ``CaptureSession.responses`` (observed).
             expected_messages: Messages from ``End2EndTest.expected_messages``
                 (asserted).
         """
-        skill_map = self._skill_instance_map()
-
         # Observed: messages that actually appeared in CaptureSession
         for msg in responses:
-            skill_id = self._skill_id_for_message(msg)
-            if skill_id is None:
-                continue
+            skill_id = self._skill_id_for_message(msg) or "__core__"
             if skill_id not in self._observed:
                 self._observed[skill_id] = {}
             self._observed[skill_id][msg.msg_type] = (
@@ -546,7 +554,7 @@ class BusCoverageTracker:
                         skill_id = sid
                         break
             if skill_id is None:
-                continue
+                skill_id = "__core__"
             if skill_id not in self._asserted:
                 self._asserted[skill_id] = {}
             self._asserted[skill_id][msg.msg_type] = (

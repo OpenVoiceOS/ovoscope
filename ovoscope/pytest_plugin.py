@@ -189,7 +189,7 @@ class BusCoverageCollector:
 
 
 @pytest.fixture(scope="session")
-def bus_coverage_session() -> Iterator[BusCoverageCollector]:
+def bus_coverage_session(request) -> Iterator[BusCoverageCollector]:
     """Session-scoped fixture that collects bus coverage reports from all tests.
 
     Tests opt in by requesting this fixture and calling
@@ -211,9 +211,13 @@ def bus_coverage_session() -> Iterator[BusCoverageCollector]:
     """
     collector = BusCoverageCollector()
     yield collector
-    # The terminal summary hook below will print the report.
-    # Store it on the collector for the hook to pick up.
-    collector._finalized = True
+    # Store the merged report on the config object so the terminal hook can
+    # retrieve it without touching private pytest internals.
+    report = collector.merged_report()
+    if report is not None:
+        if not hasattr(request.config, "_bus_coverage_reports"):
+            request.config._bus_coverage_reports = []
+        request.config._bus_coverage_reports.append(report)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
@@ -222,42 +226,10 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
     Only runs if at least one test used the ``bus_coverage_session`` fixture
     and called ``bus_coverage_session.add(...)``.
     """
-    # Retrieve the collector from the fixture manager, if it was used.
-    try:
-        fm = config.pluginmanager.get_plugin("ovoscope")
-        if fm is None:
-            return
-    except Exception:
-        pass
-
-    # Walk all registered fixtures to find a BusCoverageCollector
-    try:
-        fixturemanager = config.pluginmanager.get_plugin("funcmanage")
-        if fixturemanager is None:
-            return
-    except Exception:
+    reports = getattr(config, "_bus_coverage_reports", None)
+    if not reports:
         return
-
-    # Find any session-scoped BusCoverageCollector instances that have data.
-    # They are stored on the fixture manager's _arg2fixturedefs.
-    try:
-        defs = fixturemanager._arg2fixturedefs.get("bus_coverage_session", [])
-    except Exception:
-        return
-    for fd in defs:
-        try:
-            # cached_result holds (value, when, exception)
-            cached = fd.cached_result
-            if cached is None:
-                continue
-            collector = cached[0]
-            if not isinstance(collector, BusCoverageCollector):
-                continue
-            report = collector.merged_report()
-            if report is None:
-                continue
-            terminalreporter.write_sep("=", "Bus Coverage Report")
-            report.print_report()
-            terminalreporter.write_line("")
-        except Exception:
-            continue
+    for report in reports:
+        terminalreporter.write_sep("=", "Bus Coverage Report")
+        report.print_report()
+        terminalreporter.write_line("")

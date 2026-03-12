@@ -347,13 +347,13 @@ def cmd_bus_coverage(args: argparse.Namespace) -> int:
 
         try:
             test.minicroft = mc
+            test.managed = False  # prevent execute() from stopping mc; finally block owns it
             test.track_bus_coverage = True
             test.execute()
         except AssertionError as exc:
             print(f"[bus-coverage] WARN (test failure, coverage still collected): {exc}")
         except Exception as exc:
             print(f"[bus-coverage] SKIP (execution error): {exc}")
-            mc.stop()
             errors.append(fixture_path)
             continue
         finally:

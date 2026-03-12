@@ -174,22 +174,66 @@ Source: `cmd_bus_coverage` — `ovoscope/cli.py`
 ## How listener attribution works
 
 After `MiniCroft` reaches READY, `BusCoverageTracker.snapshot_listeners()`
-iterates over the FakeBus handler registry (`bus.ee._events` in pyee v8+).
-For each handler, it checks `handler.__self__` (bound-method owner) against
-`minicroft.plugin_skills`.  Handlers whose owner is not a loaded skill are
-silently skipped (IntentService, SkillManager internals, etc.).
+uses a three-pass strategy:
 
-Source: `BusCoverageTracker.snapshot_listeners` — `ovoscope/bus_coverage.py:289`
+1. **Skills via EventContainer** — reads `skill.events.events` for every
+   entry in `minicroft.plugin_skills`.  This is authoritative because
+   ovos-workshop wraps handlers in `create_wrapper` closures before calling
+   `bus.on()`, making `handler.__self__` unreliable for skill handlers.
+2. **Core components via direct `__self__`** — handlers whose owner is not
+   a loaded skill are attributed by `type(owner).__name__`
+   (e.g. `IntentService`, `AdaptPipeline`, `FallbackService`).
+3. **Closure scan** — handlers without a direct `__self__` are scanned for
+   bound-method cell variables that point to a known skill instance.
+
+Source: `BusCoverageTracker.snapshot_listeners` — `ovoscope/bus_coverage.py:368`
+
+---
+
+## `__core__` bucket
+
+Messages emitted by core services (`IntentService`, `FallbackService`, pipeline
+components) do not carry `skill_id` in their context.  These messages are
+attributed to the `"__core__"` bucket in both observed and asserted emitter
+tracking so they are never silently dropped.  They appear as a normal row
+labelled `__core__` in the report.
+
+Source: `BusCoverageTracker.record_session` — `ovoscope/bus_coverage.py:510`
 
 ---
 
 ## Limitations
 
-- Only skills loaded through `MiniCroft.plugin_skills` are attributed.  Injected
-  skills passed via `extra_skills` are included; skills from other processes are not.
-- Listener coverage tracks invocations by *msg_type*, not by individual handler.
-  If two handlers for the same type are registered, one invocation counts both.
-- Emitter attribution relies on `msg.context["skill_id"]` being set correctly by
-  the skill.  Messages without `skill_id` in context (e.g. pipeline messages) use
-  a fallback heuristic: they are attributed to the first skill that already
-  observed that msg_type.
+- **Registration-time handlers always show NOT TESTED** — `register_vocab`,
+  `register_intent`, `mycroft.skills.train`, and other skill lifecycle handlers
+  are invoked during `MiniCroft.run()` *before* `snapshot_listeners()` is called.
+  They will always show 0 invocations regardless of test coverage.  This is
+  structural, not a test failure.  Source: `snapshot_listeners` —
+  `ovoscope/bus_coverage.py:368`.
+
+- **`bus.once()` handlers are invisible after firing** — one-shot handlers
+  registered with `bus.once()` during skill loading de-register before
+  `snapshot_listeners()` runs.  They will not appear in the listener report.
+
+- **Pipeline matching is not bus-driven** — Adapt and Padatious intent matching
+  is a direct callable call inside `IntentService`, not a `bus.emit`.
+  Pipeline handler listener coverage will structurally never reach 100%.
+
+- **`ignore_messages` types are excluded from emitter coverage** — message
+  types in `End2EndTest.ignore_messages` (e.g. GUI messages when
+  `ignore_gui=True`) never reach `CaptureSession.responses` and therefore
+  show 0 observed count regardless of how many times they were emitted.
+  Source: `CaptureSession.capture` — `ovoscope/__init__.py:503`.
+
+- **`async_responses` are included in observed emitter coverage** — since
+  v0.x, `async_responses` are merged with `responses` before
+  `record_session()` so async messages are no longer silently dropped.
+  Source: `End2EndTest.execute` — `ovoscope/__init__.py:666`.
+
+- **Only skills loaded through `MiniCroft.plugin_skills` are attributed**.
+  Injected skills passed via `extra_skills` are included; skills from other
+  processes are not.
+
+- **Listener coverage tracks invocations by msg_type, not by individual
+  handler**.  If two handlers for the same type are registered, one
+  invocation counts both.

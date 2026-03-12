@@ -366,62 +366,115 @@ class BusCoverageTracker:
     # ------------------------------------------------------------------
 
     def snapshot_listeners(self) -> None:
-        """Record each skill's registered bus message handlers.
+        """Record every bus handler grouped by owning component.
 
-        Must be called **after** ``MiniCroft`` reaches READY state so that all
-        skill handlers are registered.
+        Must be called **after** ``MiniCroft`` reaches READY state.
 
-        **Primary path**: reads ``skill.events.events`` from each loaded skill's
-        :class:`~ovos_workshop.skills.base.EventContainer`.  This is the
-        authoritative list of ``(msg_type, handler)`` pairs that ovos-workshop
-        maintains — it is more reliable than bus introspection because OVOS
-        wraps all handlers in closures (``create_wrapper``) before passing them
-        to ``bus.on()``.
+        Attribution strategy (in priority order):
 
-        **Fallback path**: if ``EventContainer`` is not available, falls back to
-        bus handler introspection via ``bus.ee._events`` and ``handler.__self__``
-        or closure analysis.
+        1. **Skills via EventContainer** — for each entry in
+           ``minicroft.plugin_skills``, unwrap ``PluginSkillLoader.instance``
+           and read ``skill.events.events``.  This is the authoritative list
+           because ovos-workshop wraps handlers in ``create_wrapper`` closures
+           before calling ``bus.on()``, making ``handler.__self__`` unreliable
+           for skill handlers.
+
+        2. **Core components via direct ``__self__``** — for every remaining
+           bus handler whose ``__self__`` is *not* already attributed to a
+           skill, use ``type(owner).__name__`` as the component name
+           (e.g. ``IntentService``, ``AdaptPipeline``, ``FallbackService``).
+
+        3. **Closure scan** — handlers whose ``__self__`` is ``None`` are
+           scanned for bound-method cell variables (catches ovos-workshop
+           closures that weren't in ``EventContainer``).
+
+        The resulting ``_registered`` dict maps
+        ``component_name → {msg_type → handler_count}``.
         """
         listener_map: Dict[str, Dict[str, int]] = {}
 
+        # ── Pass 1: skills via EventContainer ──────────────────────────────
         plugin_skills: Dict[str, Any] = (
             getattr(self._minicroft, "plugin_skills", {}) or {}
         )
+        # Build a set of instance ids that belong to skills so Pass 2 can skip them
+        skill_instance_ids: set = set()
+
         for skill_id, loader in plugin_skills.items():
-            # Unwrap PluginSkillLoader → actual skill instance
             instance = getattr(loader, "instance", loader)
             if instance is None:
                 instance = loader
+            skill_instance_ids.add(id(instance))
 
-            # Primary: use EventContainer.events if available
             ec = getattr(instance, "events", None)
             if ec is not None:
                 event_list = getattr(ec, "events", None)
                 if event_list is not None:
                     for msg_type, _handler in event_list:
-                        if skill_id not in listener_map:
-                            listener_map[skill_id] = {}
+                        listener_map.setdefault(skill_id, {})
                         listener_map[skill_id][msg_type] = (
                             listener_map[skill_id].get(msg_type, 0) + 1
                         )
-                    continue  # done for this skill
+                    continue  # authoritative — no need for bus scan
 
-            # Fallback: bus introspection (direct __self__ + closure scan)
-            skill_ids_by_obj = {id(instance): skill_id}
-            for msg_type, handlers in self._get_bus_events().items():
-                for handler in self._iter_handlers(handlers):
-                    # direct bound method
-                    sid = self._skill_id_for_handler(handler, skill_ids_by_obj)
-                    if sid is None:
-                        # scan closures
-                        sid = self._skill_id_from_closure(handler, skill_ids_by_obj)
-                    if sid is None:
-                        continue
-                    if sid not in listener_map:
-                        listener_map[sid] = {}
-                    listener_map[sid][msg_type] = (
-                        listener_map[sid].get(msg_type, 0) + 1
+            # Skill has no EventContainer: fall through to closure scan below
+            # (handled in Pass 3 with skill_id as the component label)
+            skill_instance_ids.discard(id(instance))  # re-enable for pass 3
+
+        # ── Build id→component name map for all known objects ───────────────
+        # Seed with skill instances (skill_id takes priority over type name)
+        combined_map: Dict[int, str] = {}
+        for skill_id, loader in plugin_skills.items():
+            instance = getattr(loader, "instance", loader) or loader
+            combined_map[id(instance)] = skill_id
+
+        # Discover remaining owners by walking all bus handlers
+        for _msg_type, handlers in self._get_bus_events().items():
+            for handler in self._iter_handlers(handlers):
+                owner = getattr(handler, "__self__", None)
+                if owner is None:
+                    continue
+                if id(owner) not in combined_map:
+                    component = (
+                        getattr(owner, "skill_id", None)
+                        or getattr(owner, "name", None)
+                        or type(owner).__name__
                     )
+                    combined_map[id(owner)] = component
+
+        _SKIP = {"FakeBus", "type"}
+
+        # ── Pass 2: direct __self__ handlers ────────────────────────────────
+        for msg_type, handlers in self._get_bus_events().items():
+            for handler in self._iter_handlers(handlers):
+                owner = getattr(handler, "__self__", None)
+                if owner is None:
+                    continue  # handled in Pass 3
+                if id(owner) in skill_instance_ids:
+                    continue  # already covered by EventContainer in Pass 1
+                component = combined_map.get(id(owner), type(owner).__name__)
+                if component in _SKIP:
+                    continue
+                listener_map.setdefault(component, {})
+                listener_map[component][msg_type] = (
+                    listener_map[component].get(msg_type, 0) + 1
+                )
+
+        # ── Pass 3: closure scan for handlers with no direct __self__ ────────
+        for msg_type, handlers in self._get_bus_events().items():
+            for handler in self._iter_handlers(handlers):
+                if getattr(handler, "__self__", None) is not None:
+                    continue  # already handled above
+                component = self._skill_id_from_closure(handler, combined_map)
+                if component is None or component in _SKIP:
+                    continue
+                # Only add if not already covered by EventContainer
+                if component in listener_map and msg_type in listener_map[component]:
+                    continue
+                listener_map.setdefault(component, {})
+                listener_map[component][msg_type] = (
+                    listener_map[component].get(msg_type, 0) + 1
+                )
 
         self._registered = listener_map
 

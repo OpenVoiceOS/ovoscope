@@ -84,7 +84,27 @@ with OCPPlayerHarness() as h:
     h.assert_now_playing_uri("http://example.com/2.mp3")
 ```
 
-### Duck / Unduck
+### Duck / Unduck vs Cork / Uncork
+
+`OCPMediaPlayer` distinguishes two separate mechanisms for voice-assistant
+interruptions.  Understanding the difference is essential for writing correct
+tests.
+
+#### Ducking — lower volume, keep playing
+
+Ducking happens when the assistant **speaks** (TTS output).  The player stays
+in ``PLAYING`` state; only the audio backend volume is reduced.
+
+| Bus message | Handler | Effect |
+|---|---|---|
+| `recognizer_loop:audio_output_start` / `ovos.common_play.duck` | `handle_duck_request` | Calls `audio_service.lower_volume()`, sets `_paused_on_duck=True` |
+| `recognizer_loop:audio_output_end` / `ovos.common_play.unduck` | `handle_unduck_request` | Calls `audio_service.restore_volume()` **only if state == PAUSED** |
+
+> **Design note**: `handle_unduck_request` guards on `state == PlayerState.PAUSED`.
+> After a pure duck cycle the player is still PLAYING, so `restore_volume` is
+> **not** called via this path.  The audio backend is expected to manage its
+> own volume, or restoration happens later via `ovos.utterance.handled` if the
+> player was also corked.  See `ovos_media/player.py:1228`.
 
 ```python
 from ovoscope.media import OCPPlayerHarness
@@ -94,8 +114,71 @@ with OCPPlayerHarness() as h:
     entry = MediaEntry(uri="http://example.com/song.mp3",
                        playback=PlaybackType.AUDIO)
     h.play(entry)
-    h.duck()   # recognizer_loop:audio_output_start — lowers volume
-    h.unduck() # recognizer_loop:audio_output_end — restores volume
+    h.duck()                        # lower_volume called; player stays PLAYING
+    h.assert_player_state(PlayerState.PLAYING)
+    assert h.player._paused_on_duck  # flag set even though PLAYING
+    h.unduck()                       # no-op when PLAYING (see note above)
+    h.assert_player_state(PlayerState.PLAYING)
+```
+
+#### Corking — pause the player, resume after listening
+
+Corking happens when the **microphone opens** (wake-word recognised, user
+speaking).  The player is fully **paused** and resumes after the interaction.
+
+| Bus message | Handler | Effect |
+|---|---|---|
+| `recognizer_loop:record_begin` / `ovos.common_play.cork` | `handle_cork_request` | Pauses player, sets `_paused_on_duck=True` |
+| `ovos.common_play.uncork` | `handle_uncork_request` | Resumes player **only if PAUSED and `_paused_on_duck`** |
+| `recognizer_loop:record_end` | `handle_record_end` | Waits up to 8 s for `speak`; if none → uncork |
+
+```python
+from ovoscope.media import OCPPlayerHarness
+from ovos_utils.ocp import MediaEntry, PlaybackType, PlayerState
+
+with OCPPlayerHarness() as h:
+    entry = MediaEntry(uri="http://example.com/song.mp3",
+                       playback=PlaybackType.AUDIO)
+    h.play(entry)
+    h.cork()                         # player → PAUSED
+    h.assert_player_state(PlayerState.PAUSED)
+    assert h.player._paused_on_duck
+
+    h.uncork()                       # player → PLAYING
+    h.assert_player_state(PlayerState.PLAYING)
+    assert not h.player._paused_on_duck
+```
+
+#### Uncork-guard: manual pause is not overridden by uncork
+
+``handle_uncork_request`` checks ``_paused_on_duck`` before resuming.  If the
+user paused manually, ``_paused_on_duck`` is ``False`` and ``uncork()`` is a
+no-op, preventing a spurious resume.
+
+```python
+with OCPPlayerHarness() as h:
+    h.play(entry)
+    h.pause()                 # manual pause — _paused_on_duck stays False
+    h.uncork()                # no-op — _paused_on_duck is False
+    h.assert_player_state(PlayerState.PAUSED)
+```
+
+#### record_end auto-uncork
+
+When the mic closes without any TTS following (utterance not recognised),
+``handle_record_end`` uncorks automatically after an 8-second timeout.  Tests
+should patch ``bus.wait_for_message`` to avoid the real wait:
+
+```python
+from unittest.mock import patch
+
+with OCPPlayerHarness() as h:
+    h.play(entry)
+    h.cork()
+    with patch.object(h.bus, "wait_for_message", return_value=None):
+        h.bus.emit(Message("recognizer_loop:record_end"))
+        import time; time.sleep(0.05)
+    h.assert_player_state(PlayerState.PLAYING)
 ```
 
 ### Simulating Stream End
@@ -177,8 +260,10 @@ with OCPPlayerHarness() as h:
 | `stop()` | `ovos.common_play.stop` |
 | `next_track()` | `ovos.common_play.next` |
 | `prev_track()` | `ovos.common_play.previous` |
-| `duck()` | `recognizer_loop:audio_output_start` |
-| `unduck()` | `recognizer_loop:audio_output_end` |
+| `duck()` | `recognizer_loop:audio_output_start` — lower volume, player stays PLAYING |
+| `unduck()` | `recognizer_loop:audio_output_end` — restore volume (no-op if PLAYING; see duck/cork note) |
+| `cork()` | `ovos.common_play.cork` — pause player, set `_paused_on_duck=True` |
+| `uncork()` | `ovos.common_play.uncork` — resume player if PAUSED and `_paused_on_duck` |
 | `simulate_track_end()` | `ovos.common_play.media.state` END_OF_MEDIA |
 | `simulate_invalid_stream()` | `ovos.common_play.media.state` INVALID_MEDIA |
 

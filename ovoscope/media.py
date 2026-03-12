@@ -420,22 +420,76 @@ class OCPPlayerHarness:
         time.sleep(0.05)
 
     def duck(self) -> None:
-        """Emit ``recognizer_loop:audio_output_start`` (ducking trigger)."""
+        """Lower the audio backend volume via ``recognizer_loop:audio_output_start``.
+
+        Ducking lowers volume while the voice assistant speaks.  The player
+        **stays PLAYING** — only the backend volume is reduced.
+
+        Equivalent OCP message: ``ovos.common_play.duck``.
+        Handler: ``OCPMediaPlayer.handle_duck_request`` —
+        ``ovos_media/player.py:1216``.
+        """
         self.bus.emit(Message("recognizer_loop:audio_output_start"))
         time.sleep(0.05)
 
     def unduck(self) -> None:
-        """Emit ``recognizer_loop:audio_output_end`` (unduck trigger)."""
+        """Restore the audio backend volume via ``recognizer_loop:audio_output_end``.
+
+        Note: ``handle_unduck_request`` only restores volume when the player is
+        PAUSED (``state == PlayerState.PAUSED``).  After a pure duck cycle the
+        player remains PLAYING, so this call is a no-op in that case.
+
+        Equivalent OCP message: ``ovos.common_play.unduck``.
+        Handler: ``OCPMediaPlayer.handle_unduck_request`` —
+        ``ovos_media/player.py:1228``.
+        """
         self.bus.emit(Message("recognizer_loop:audio_output_end"))
         time.sleep(0.05)
 
+    def cork(self) -> None:
+        """Pause the player via ``ovos.common_play.cork`` (microphone opens).
+
+        Corking fully **pauses** the player and sets ``_paused_on_duck = True``
+        so ``uncork()`` / ``record_end`` can resume it automatically.
+
+        Equivalent legacy message: ``recognizer_loop:record_begin``.
+        Handler: ``OCPMediaPlayer.handle_cork_request`` —
+        ``ovos_media/player.py:1198``.
+        """
+        self.bus.emit(Message("ovos.common_play.cork"))
+        time.sleep(0.05)
+
+    def uncork(self) -> None:
+        """Resume the player via ``ovos.common_play.uncork`` (microphone closes).
+
+        Only resumes if the player is PAUSED **and** ``_paused_on_duck`` is True
+        (i.e. the pause was caused by a cork, not a manual pause).
+
+        Equivalent legacy message: ``recognizer_loop:record_end`` followed by
+        8-second no-speak timeout.
+        Handler: ``OCPMediaPlayer.handle_uncork_request`` —
+        ``ovos_media/player.py:1207``.
+        """
+        self.bus.emit(Message("ovos.common_play.uncork"))
+        time.sleep(0.05)
+
     def simulate_track_end(self) -> None:
-        """Emit ``ovos.common_play.media.state`` ``END_OF_MEDIA``."""
+        """Emit ``ovos.common_play.media.state`` ``END_OF_MEDIA`` via the backend.
+
+        Triggers ``OCPMediaPlayer.handle_player_media_update`` →
+        ``handle_playback_ended``, which auto-advances the queue when
+        ``autoplay`` is enabled.
+        """
         self.backend.simulate_end()
         time.sleep(0.05)
 
     def simulate_invalid_stream(self) -> None:
-        """Emit ``ovos.common_play.media.state`` ``INVALID_MEDIA``."""
+        """Emit ``ovos.common_play.media.state`` ``INVALID_MEDIA`` via the backend.
+
+        Triggers ``OCPMediaPlayer.handle_player_media_update`` →
+        ``handle_invalid_media``, then ``play_next()`` when ``autoplay`` is
+        enabled.
+        """
         self.backend.simulate_invalid_stream()
         time.sleep(0.05)
 

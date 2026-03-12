@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0a1](https://github.com/TigreGotico/ovoscope/tree/0.12.0a1) (2026-03-12)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.11.0a1...0.12.0a1)
+
+**Merged pull requests:**
+
+- feat: SKILL.md for agents [\#48](https://github.com/TigreGotico/ovoscope/pull/48) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.11.0a1](https://github.com/TigreGotico/ovoscope/tree/0.11.0a1) (2026-03-11)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.10.0...0.11.0a1)

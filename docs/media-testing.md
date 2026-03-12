@@ -98,13 +98,7 @@ in ``PLAYING`` state; only the audio backend volume is reduced.
 | Bus message | Handler | Effect |
 |---|---|---|
 | `recognizer_loop:audio_output_start` / `ovos.common_play.duck` | `handle_duck_request` | Calls `audio_service.lower_volume()`, sets `_paused_on_duck=True` |
-| `recognizer_loop:audio_output_end` / `ovos.common_play.unduck` | `handle_unduck_request` | Calls `audio_service.restore_volume()` **only if state == PAUSED** |
-
-> **Design note**: `handle_unduck_request` guards on `state == PlayerState.PAUSED`.
-> After a pure duck cycle the player is still PLAYING, so `restore_volume` is
-> **not** called via this path.  The audio backend is expected to manage its
-> own volume, or restoration happens later via `ovos.utterance.handled` if the
-> player was also corked.  See `ovos_media/player.py:1228`.
+| `recognizer_loop:audio_output_end` / `ovos.common_play.unduck` | `handle_unduck_request` | Calls `audio_service.restore_volume()` whenever `_paused_on_duck` is True, **regardless of player state** |
 
 ```python
 from ovoscope.media import OCPPlayerHarness
@@ -114,11 +108,12 @@ with OCPPlayerHarness() as h:
     entry = MediaEntry(uri="http://example.com/song.mp3",
                        playback=PlaybackType.AUDIO)
     h.play(entry)
-    h.duck()                        # lower_volume called; player stays PLAYING
+    h.duck()                         # lower_volume called; player stays PLAYING
     h.assert_player_state(PlayerState.PLAYING)
-    assert h.player._paused_on_duck  # flag set even though PLAYING
-    h.unduck()                       # no-op when PLAYING (see note above)
+    assert h.player._paused_on_duck  # flag set
+    h.unduck()                       # restore_volume called; _paused_on_duck cleared
     h.assert_player_state(PlayerState.PLAYING)
+    assert not h.player._paused_on_duck
 ```
 
 #### Corking — pause the player, resume after listening
@@ -261,7 +256,7 @@ with OCPPlayerHarness() as h:
 | `next_track()` | `ovos.common_play.next` |
 | `prev_track()` | `ovos.common_play.previous` |
 | `duck()` | `recognizer_loop:audio_output_start` — lower volume, player stays PLAYING |
-| `unduck()` | `recognizer_loop:audio_output_end` — restore volume (no-op if PLAYING; see duck/cork note) |
+| `unduck()` | `recognizer_loop:audio_output_end` — restore volume whenever `_paused_on_duck` is True (duck or cork path) |
 | `cork()` | `ovos.common_play.cork` — pause player, set `_paused_on_duck=True` |
 | `uncork()` | `ovos.common_play.uncork` — resume player if PAUSED and `_paused_on_duck` |
 | `simulate_track_end()` | `ovos.common_play.media.state` END_OF_MEDIA |

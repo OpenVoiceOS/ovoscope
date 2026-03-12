@@ -12,6 +12,7 @@
 | [audio-testing.md](audio-testing.md) | `AudioServiceHarness`, `PlaybackServiceHarness` — testing audio services |
 | [listener.md](listener.md) | `MiniListener`, `get_mini_listener`, `ListenerTest`, `MockVADEngine`, `MockHotWordEngine`, `VADTest`, `WakeWordTest` — testing audio transformer plugins, STT pipeline, VAD, and wake-word |
 | [gui-testing.md](gui-testing.md) | `GUICaptureSession` — asserting GUI page navigation and namespace values |
+| [bus-coverage.md](bus-coverage.md) | `BusCoverageTracker`, `BusCoverageReport` — measuring handler and emitter coverage per skill |
 ## Conceptual Model
 ```
 Test                         FakeBus

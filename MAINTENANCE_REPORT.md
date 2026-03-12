@@ -1,4 +1,18 @@
 # Maintenance Report — `ovoscope`
+## [2026-03-12] — Bus Coverage Report Feature
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - Created `ovoscope/bus_coverage.py` — `BusCoverageTracker`, `BusCoverageReport`, `SkillBusCoverage`, `HandlerEntry`, `EmitterEntry` dataclasses.  Tracks listener invocations (via `bus.emit` monkey-patch) and emitter observed/asserted counts per skill_id.  Handler attribution via `handler.__self__` → `minicroft.plugin_skills`.  Handles pyee v9 `OrderedDict` storage format.
+  - Modified `ovoscope/__init__.py`: added `track_bus_coverage`, `print_bus_coverage`, `bus_coverage_report` fields to `End2EndTest`; hooked `BusCoverageTracker` into `execute()` around the capture block.
+  - Modified `ovoscope/pytest_plugin.py`: added `BusCoverageCollector`, `bus_coverage_session` session fixture, `pytest_terminal_summary` hook for merged end-of-session report.
+  - Modified `ovoscope/cli.py`: added `cmd_bus_coverage` subcommand and `bus-coverage` parser entry.
+  - Created `docs/bus-coverage.md` — full API reference with source citations.
+  - Updated `FAQ.md` with three new Q&A entries.
+  - Created `test/unittests/test_bus_coverage.py` — 32 unit tests, all passing.
+- **Oversight**: 301 unit tests pass locally.  `bus_coverage.py` at 97% coverage.
+
+
 ## [2026-03-11] — Add ovoscope-setup entrypoint for AI assistant skill installation
 
 - **AI Model**: Claude Sonnet 4.6

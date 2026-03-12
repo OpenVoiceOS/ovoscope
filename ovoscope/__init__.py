@@ -582,6 +582,13 @@ class End2EndTest:
     test_final_session: bool = True
 
     ###########################
+    # bus coverage
+    ###########################
+    track_bus_coverage: bool = False  # enable BusCoverageTracker for this test
+    print_bus_coverage: bool = False  # print inline summary after execute()
+    bus_coverage_report: Optional[Any] = dataclasses.field(default=None, init=False, repr=False)
+
+    ###########################
     # test runner internals
     ###########################
     verbose: bool = True
@@ -632,6 +639,14 @@ class End2EndTest:
             print(f"💡 original message.context source: '{o_src}'")
             print(f"💡 original message.context destination: '{o_dst}'")
 
+        # bus coverage tracking (optional)
+        _bus_tracker = None
+        if self.track_bus_coverage:
+            from ovoscope.bus_coverage import BusCoverageTracker
+            _bus_tracker = BusCoverageTracker(self.minicroft.bus, self.minicroft)
+            _bus_tracker.snapshot_listeners()
+            _bus_tracker.start_tracking()
+
         # the capture session will store all messages until capture.finish()
         #  even if multiple messages are emitted
         capture = CaptureSession(self.minicroft, eof_msgs=self.eof_msgs,
@@ -645,6 +660,13 @@ class End2EndTest:
 
         # final message list
         messages = capture.finish()
+
+        if _bus_tracker is not None:
+            _bus_tracker.stop_tracking()
+            _bus_tracker.record_session(messages, self.expected_messages)
+            self.bus_coverage_report = _bus_tracker.build_report()
+            if self.print_bus_coverage:
+                print(self.bus_coverage_report.summary_line())
 
         if self.test_message_number:
             n1 = len(self.expected_messages)

@@ -1,4 +1,46 @@
 # FAQ — `ovoscope`
+## How do I measure which bus message handlers my tests actually exercise?
+
+Use bus coverage: set `track_bus_coverage=True` on `End2EndTest`.  After
+`execute()`, `test.bus_coverage_report` contains a `BusCoverageReport` with
+per-skill listener coverage (which `bus.on()` registrations were triggered)
+and emitter coverage (which message types were observed / asserted).
+
+```python
+test = End2EndTest(
+    skill_ids=["my-skill.author"],
+    source_message=message,
+    expected_messages=[...],
+    track_bus_coverage=True,
+    print_bus_coverage=True,   # print inline summary
+)
+test.execute()
+print(test.bus_coverage_report.to_json())
+```
+
+See [docs/bus-coverage.md](docs/bus-coverage.md) for the full reference.
+`BusCoverageTracker` — `ovoscope/bus_coverage.py:242`.
+
+## How do I get an aggregate bus coverage report across an entire test suite?
+
+Use the `bus_coverage_session` pytest fixture.  Each test calls
+`bus_coverage_session.add(test.bus_coverage_report)` after `execute()`.  A
+merged table is printed automatically at session end.  See
+[docs/bus-coverage.md](docs/bus-coverage.md).
+
+## How do I run bus coverage from the command line without writing pytest tests?
+
+Use the `ovoscope bus-coverage` subcommand:
+
+```bash
+ovoscope bus-coverage path/to/fixtures/       # table report
+ovoscope bus-coverage path/to/fixtures/ --format json
+ovoscope bus-coverage path/to/fixtures/ --verbose   # per-msg detail
+```
+
+`cmd_bus_coverage` — `ovoscope/cli.py`.
+
+
 ## How do I test AudioService or PlaybackService without real audio hardware?
 Use `AudioServiceHarness` or `PlaybackServiceHarness` from `ovoscope.audio`. Both run on a
 `FakeBus` with `MockAudioBackend`/`MockTTS` respectively — no real audio device, TTS engine,

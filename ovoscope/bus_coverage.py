@@ -366,29 +366,62 @@ class BusCoverageTracker:
     # ------------------------------------------------------------------
 
     def snapshot_listeners(self) -> None:
-        """Introspect the FakeBus handler registry and map handlers to skills.
+        """Record each skill's registered bus message handlers.
 
         Must be called **after** ``MiniCroft`` reaches READY state so that all
-        skill handlers have been registered via ``bus.on(...)``.
+        skill handlers are registered.
 
-        Handlers whose ``__self__`` is not a loaded skill instance (e.g.
-        IntentService, SkillManager internals) are silently skipped.
+        **Primary path**: reads ``skill.events.events`` from each loaded skill's
+        :class:`~ovos_workshop.skills.base.EventContainer`.  This is the
+        authoritative list of ``(msg_type, handler)`` pairs that ovos-workshop
+        maintains — it is more reliable than bus introspection because OVOS
+        wraps all handlers in closures (``create_wrapper``) before passing them
+        to ``bus.on()``.
+
+        **Fallback path**: if ``EventContainer`` is not available, falls back to
+        bus handler introspection via ``bus.ee._events`` and ``handler.__self__``
+        or closure analysis.
         """
-        skill_map = self._skill_instance_map()
         listener_map: Dict[str, Dict[str, int]] = {}
 
-        for msg_type, handlers in self._get_bus_events().items():
-            if not handlers:
-                continue
-            for handler in self._iter_handlers(handlers):
-                skill_id = self._skill_id_for_handler(handler, skill_map)
-                if skill_id is None:
-                    continue
-                if skill_id not in listener_map:
-                    listener_map[skill_id] = {}
-                listener_map[skill_id][msg_type] = (
-                    listener_map[skill_id].get(msg_type, 0) + 1
-                )
+        plugin_skills: Dict[str, Any] = (
+            getattr(self._minicroft, "plugin_skills", {}) or {}
+        )
+        for skill_id, loader in plugin_skills.items():
+            # Unwrap PluginSkillLoader → actual skill instance
+            instance = getattr(loader, "instance", loader)
+            if instance is None:
+                instance = loader
+
+            # Primary: use EventContainer.events if available
+            ec = getattr(instance, "events", None)
+            if ec is not None:
+                event_list = getattr(ec, "events", None)
+                if event_list is not None:
+                    for msg_type, _handler in event_list:
+                        if skill_id not in listener_map:
+                            listener_map[skill_id] = {}
+                        listener_map[skill_id][msg_type] = (
+                            listener_map[skill_id].get(msg_type, 0) + 1
+                        )
+                    continue  # done for this skill
+
+            # Fallback: bus introspection (direct __self__ + closure scan)
+            skill_ids_by_obj = {id(instance): skill_id}
+            for msg_type, handlers in self._get_bus_events().items():
+                for handler in self._iter_handlers(handlers):
+                    # direct bound method
+                    sid = self._skill_id_for_handler(handler, skill_ids_by_obj)
+                    if sid is None:
+                        # scan closures
+                        sid = self._skill_id_from_closure(handler, skill_ids_by_obj)
+                    if sid is None:
+                        continue
+                    if sid not in listener_map:
+                        listener_map[sid] = {}
+                    listener_map[sid][msg_type] = (
+                        listener_map[sid].get(msg_type, 0) + 1
+                    )
 
         self._registered = listener_map
 
@@ -593,16 +626,60 @@ class BusCoverageTracker:
     def _skill_instance_map(self) -> Dict[int, str]:
         """Build a mapping from ``id(skill_instance)`` to ``skill_id``.
 
+        Unwraps ``PluginSkillLoader`` objects (which store the real skill
+        instance at ``.instance``) before building the map.
+
         Returns:
-            Dict of ``{id(skill_obj): skill_id}`` for all loaded plugin skills.
+            Dict of ``{id(skill_instance): skill_id}`` for all loaded plugin skills.
         """
         mapping: Dict[int, str] = {}
         plugin_skills: Dict[str, Any] = (
             getattr(self._minicroft, "plugin_skills", {}) or {}
         )
-        for skill_id, skill_obj in plugin_skills.items():
-            mapping[id(skill_obj)] = skill_id
+        for skill_id, loader in plugin_skills.items():
+            instance = getattr(loader, "instance", loader)
+            if instance is None:
+                instance = loader
+            mapping[id(instance)] = skill_id
         return mapping
+
+    @staticmethod
+    def _skill_id_from_closure(
+        handler: Any,
+        skill_instance_map: Dict[int, str],
+    ) -> Optional[str]:
+        """Attempt to attribute a closure-wrapped handler to a skill.
+
+        OVOS wraps all skill handlers in ``create_wrapper`` closures.  The
+        original bound method is captured as a cell variable whose
+        ``__self__`` is the skill instance.
+
+        Args:
+            handler: A callable registered via ``bus.on``.
+            skill_instance_map: Mapping from ``id(skill_instance)`` to skill_id.
+
+        Returns:
+            The ``skill_id`` string, or ``None`` if no skill found in closure.
+        """
+        closure = getattr(handler, "__closure__", None)
+        if not closure:
+            return None
+        for cell in closure:
+            try:
+                val = cell.cell_contents
+            except ValueError:
+                continue
+            # Direct skill instance in closure
+            sid = skill_instance_map.get(id(val))
+            if sid is not None:
+                return sid
+            # Bound method whose __self__ is the skill instance
+            owner = getattr(val, "__self__", None)
+            if owner is not None:
+                sid = skill_instance_map.get(id(owner))
+                if sid is not None:
+                    return sid
+        return None
 
     @staticmethod
     def _skill_id_for_handler(

@@ -238,36 +238,76 @@ class _FakeSkill:
         pass
 
 
+class _FakeEventContainer:
+    """Minimal EventContainer stub matching ovos_workshop's EventContainer."""
+
+    def __init__(self, events):
+        self.events = events  # list of (msg_type, handler)
+
+
 class TestBusCoverageTrackerSnapshotListeners:
-    def test_snapshot_registers_handlers_by_skill(self):
-        """snapshot_listeners should map bound handlers to their skill_id."""
+    def test_snapshot_uses_event_container_when_available(self):
+        """snapshot_listeners should read skill.events.events (primary path)."""
         bus = FakeBus()
         skill_a = _FakeSkill()
+        skill_a.events = _FakeEventContainer([
+            ("speak", skill_a.on_speak),
+            ("intent.activate", skill_a.on_speak),
+        ])
 
-        # bound method — __self__ is skill_a
-        bus.on("speak", skill_a.on_speak)
+        loader = MagicMock()
+        loader.instance = skill_a
 
         minicroft = MagicMock()
-        minicroft.plugin_skills = {"skill-a.author": skill_a}
+        minicroft.plugin_skills = {"skill-a.author": loader}
 
         tracker = BusCoverageTracker(bus, minicroft)
         tracker.snapshot_listeners()
 
         assert "skill-a.author" in tracker._registered
         assert "speak" in tracker._registered["skill-a.author"]
+        assert "intent.activate" in tracker._registered["skill-a.author"]
+        assert len(tracker._registered["skill-a.author"]) == 2
 
-    def test_snapshot_ignores_unattributed_handlers(self):
-        """Handlers without __self__ or not in plugin_skills should be ignored."""
+    def test_snapshot_fallback_bus_introspection(self):
+        """snapshot_listeners falls back to bus introspection when no EventContainer."""
         bus = FakeBus()
-        bus.on("speak", lambda m: None)  # lambda has no __self__
+        skill_a = _FakeSkill()
+        # No .events attribute on skill_a
+
+        loader = MagicMock()
+        loader.instance = skill_a
+
+        # Register a bound method directly on the bus
+        bus.on("speak", skill_a.on_speak)
 
         minicroft = MagicMock()
-        minicroft.plugin_skills = {}
+        minicroft.plugin_skills = {"skill-a.author": loader}
 
         tracker = BusCoverageTracker(bus, minicroft)
         tracker.snapshot_listeners()
 
-        assert tracker._registered == {}
+        # Should have found the handler via fallback bus introspection
+        assert "skill-a.author" in tracker._registered
+        assert "speak" in tracker._registered["skill-a.author"]
+
+    def test_snapshot_ignores_unattributed_handlers(self):
+        """Skills with no handlers produce no entries."""
+        bus = FakeBus()
+        skill_a = _FakeSkill()
+        skill_a.events = _FakeEventContainer([])  # no handlers
+
+        loader = MagicMock()
+        loader.instance = skill_a
+
+        minicroft = MagicMock()
+        minicroft.plugin_skills = {"skill-a.author": loader}
+
+        tracker = BusCoverageTracker(bus, minicroft)
+        tracker.snapshot_listeners()
+
+        # skill registered but no msg_types
+        assert tracker._registered.get("skill-a.author", {}) == {}
 
 
 class TestBusCoverageTrackerEmitPatch:

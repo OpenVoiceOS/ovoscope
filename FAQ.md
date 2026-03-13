@@ -1,4 +1,46 @@
 # FAQ — `ovoscope`
+## How do I measure which bus message handlers my tests actually exercise?
+
+Use bus coverage: set `track_bus_coverage=True` on `End2EndTest`.  After
+`execute()`, `test.bus_coverage_report` contains a `BusCoverageReport` with
+per-skill listener coverage (which `bus.on()` registrations were triggered)
+and emitter coverage (which message types were observed / asserted).
+
+```python
+test = End2EndTest(
+    skill_ids=["my-skill.author"],
+    source_message=message,
+    expected_messages=[...],
+    track_bus_coverage=True,
+    print_bus_coverage=True,   # print inline summary
+)
+test.execute()
+print(test.bus_coverage_report.to_json())
+```
+
+See [docs/bus-coverage.md](docs/bus-coverage.md) for the full reference.
+`BusCoverageTracker` — `ovoscope/bus_coverage.py:242`.
+
+## How do I get an aggregate bus coverage report across an entire test suite?
+
+Use the `bus_coverage_session` pytest fixture.  Each test calls
+`bus_coverage_session.add(test.bus_coverage_report)` after `execute()`.  A
+merged table is printed automatically at session end.  See
+[docs/bus-coverage.md](docs/bus-coverage.md).
+
+## How do I run bus coverage from the command line without writing pytest tests?
+
+Use the `ovoscope bus-coverage` subcommand:
+
+```bash
+ovoscope bus-coverage path/to/fixtures/       # table report
+ovoscope bus-coverage path/to/fixtures/ --format json
+ovoscope bus-coverage path/to/fixtures/ --verbose   # per-msg detail
+```
+
+`cmd_bus_coverage` — `ovoscope/cli.py`.
+
+
 ## How do I test AudioService or PlaybackService without real audio hardware?
 Use `AudioServiceHarness` or `PlaybackServiceHarness` from `ovoscope.audio`. Both run on a
 `FakeBus` with `MockAudioBackend`/`MockTTS` respectively — no real audio device, TTS engine,
@@ -15,6 +57,33 @@ it does nothing if called within 1 second of `play()`. Tests must `time.sleep(1.
 reply is emitted before the internal listener is registered. Use subscribe-emit-wait with a
 `threading.Event` instead. `AudioServiceHarness.get_track_info()` and `list_backends()`
 implement this pattern — `ovoscope/audio.py`.
+
+## How do I test VAD (Voice Activity Detection) without a real microphone?
+
+Use `MockVADEngine` from `ovoscope.listener`. It classifies all-zero bytes as silence and
+any non-zero byte as speech. Inject it into `MiniListener(config, vad_instance=MockVADEngine())`
+or use the declarative `VADTest` dataclass. No microphone, audio driver, or OPM plugin required.
+
+```python
+from ovoscope.listener import MockVADEngine, VADTest
+VADTest(vad_instance=MockVADEngine(), audio_input=b"\\x01" * 512, expect_silence=False).execute()
+```
+
+## How do I test Wake Word detection without loading a real model?
+
+Use `MockHotWordEngine(trigger_after=N)` from `ovoscope.listener`. It fires after exactly N
+`update()` calls and auto-resets. Inject via `MiniListener(config, ww_instances={"hey_mycroft": engine})`
+or use the declarative `WakeWordTest` dataclass.
+
+```python
+from ovoscope.listener import MockHotWordEngine, WakeWordTest
+WakeWordTest(
+    ww_instances={"hey_mycroft": MockHotWordEngine(trigger_after=2)},
+    audio_chunks=[b"\\x00" * 512] * 4,
+    expect_detected=True,
+    expected_detection_frame=1,
+).execute()
+```
 
 ## What is `ovoscope`?
 `ovoscope` is End-to-end test framework for OpenVoiceOS skills.
@@ -267,3 +336,85 @@ The override is patched into `Configuration()["intents"]` before `super().__init
 ```bash
 python -c "from model2vec.inference import StaticModelPipeline; StaticModelPipeline.from_pretrained('Jarbas/ovos-model2vec-intents-distiluse-base-multilingual-cased-v2')"
 ```
+
+---
+
+## CLI
+
+### How do I record a fixture from the command line?
+```bash
+ovoscope record --skill-id ovos-skill-hello-world.openvoiceos \
+    --utterance "hello" --output fixture.json
+```
+
+### How do I replay a fixture?
+```bash
+ovoscope run fixture.json --verbose
+```
+
+### How do I compare two fixture files?
+```bash
+ovoscope diff expected.json actual.json
+```
+Exit code 0 = identical, 1 = differences found.
+
+### How do I scan my workspace for E2E coverage gaps?
+```bash
+ovoscope coverage "OpenVoiceOS Workspace/" --format table
+```
+
+---
+
+## PHAL Testing
+
+### Can I test PHAL plugins with ovoscope?
+Yes — any PHAL plugin that communicates only via the MessageBus (no physical
+hardware) is testable with `MiniPHAL` or `PHALTest` from `ovoscope.phal`.
+
+### Which PHAL plugins require real hardware?
+`ovos-PHAL-plugin-alsa`, `ovos-PHAL-plugin-mk1`, `ovos-PHAL-plugin-dotstar`.
+These should use hardware-in-the-loop integration tests instead.
+
+---
+
+## OCP Testing
+
+### How do I test an OCP skill without a real HTTP server?
+Use `OCPTest` with `mock_responses` — keys are URL substrings matched
+against actual requests, values are the JSON bodies returned.
+
+### What message flow does OCP testing drive?
+`recognizer_loop:utterance` → `ovos.common_play.query` → `ovos.common_play.query.response` → `ovos.common_play.start`
+
+---
+
+## GUI Assertions
+
+### How do I assert that a skill showed a GUI page?
+```python
+from ovoscope import GUICaptureSession
+with GUICaptureSession(mc.bus) as gui:
+    # ... trigger interaction ...
+    gui.assert_page_shown("my_skill", "main.qml")
+```
+
+### How do I assert that a skill set a specific session data key in a namespace?
+Use `assert_namespace_has_key()`:
+```python
+with GUICaptureSession(mc.bus) as gui:
+    # ... trigger interaction ...
+    gui.assert_namespace_has_key("my_skill", "temperature")
+```
+This checks that a `mycroft.session.set` message was captured containing the given key in the specified namespace. See [docs/gui-testing.md](docs/gui-testing.md).
+
+---
+
+## Coverage Scanner
+
+### What entry-point groups does the scanner detect?
+`opm.skill`, `opm.pipeline`, `opm.phal`, `opm.plugin.tts`, `opm.plugin.stt`,
+`opm.plugin.audio`, `opm.common_play`, `opm.solver`.
+
+### How is "covered" defined?
+A repo is considered covered when `test/end2end/` (or `tests/end2end/`)
+exists and contains at least one `.py` file (excluding `__init__.py`).

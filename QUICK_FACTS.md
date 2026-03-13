@@ -9,11 +9,17 @@ End-to-end test framework for OpenVoiceOS skills
 | Repository | [https://github.com/TigreGotico/ovoscope](https://github.com/TigreGotico/ovoscope) |
 | Python Support | >=3.10 |
 | Status | Active development |
+## Entry Points
+| Group | Value | Description |
+|-------|-------|-------------|
+| `console_scripts` | `ovoscope = ovoscope.cli:main` | CLI entry point |
+| `pytest11` | `ovoscope = ovoscope.pytest_plugin` | pytest plugin (auto-loaded by pytest) |
+
 ## Testing & CI
 | Feature | Details |
 |---------|---------|
-| Unit Tests | 142 tests across `test/unittests/` (all passing) — +38 audio harness tests |
-| Coverage | 89% overall (improved from 78%) |
+| Unit Tests | 348 tests across `test/unittests/` (all passing) |
+| Coverage | 53% overall (transformer/remote code excluded — requires optional deps) |
 | Test Framework | pytest with custom fixtures |
 | Coverage Reporter | py-cov-action/python-coverage-comment-action@v3 |
 ## CI Workflows

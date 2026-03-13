@@ -13,6 +13,8 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    # Alpha pin: 2.0.4 stable not yet released; 2.0.4a2 is the minimum that
+    # includes the FakeBus-compatible SkillManager changes ovoscope depends on.
     "ovos-core>=2.0.4a2",
 ]
 classifiers = [
@@ -25,15 +27,22 @@ classifiers = [
 
 [project.optional-dependencies]
 pydantic = ["ovos-pydantic-models>=0.1.0"]
-audio = ["ovos-audio>=0.1.0"]
+audio = ["ovos-audio>=1.2.0"]
 dev = [
-    "ovoscope[audio,pydantic]",
+    "ovos-audio>=1.2.0",
+    "ovos-pydantic-models>=0.1.0",
     "pytest",
     "pytest-cov",
 ]
 
+[project.scripts]
+ovoscope = "ovoscope.cli:main"
+ovoscope-setup = "ovoscope.setup_skill:main"
+
 [project.urls]
 Homepage = "https://github.com/TigreGotico/ovoscope"
+Documentation = "https://github.com/TigreGotico/ovoscope/tree/master/docs"
+"Issue Tracker" = "https://github.com/TigreGotico/ovoscope/issues"
 
 [project.entry-points."pytest11"]
 ovoscope = "ovoscope.pytest_plugin"
@@ -41,8 +50,12 @@ ovoscope = "ovoscope.pytest_plugin"
 [tool.setuptools.dynamic]
 version = {attr = "ovoscope.version.__version__"}
 
+[tool.setuptools.package-data]
+ovoscope = ["skill_data/*", "*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["test"]
+timeout = 60
 
 [tool.coverage.run]
 relative_files = true

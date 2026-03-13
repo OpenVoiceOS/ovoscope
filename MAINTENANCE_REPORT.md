@@ -1,4 +1,110 @@
 # Maintenance Report — `ovoscope`
+
+## [2026-03-13] — GUICaptureSession: assert_namespace_has_key + unit tests
+
+- **AI Model**: Claude Opus 4.6
+- **Actions Taken**:
+  - Added `assert_namespace_has_key()` method to `GUICaptureSession` for asserting that a skill set a specific session data key in a GUI namespace
+  - Updated `docs/gui-testing.md` with documentation for the new method
+  - Created `test/unittests/test_gui_capture.py` with 10 unit tests covering the new assertion method
+  - Updated `FAQ.md` with Q&A for `assert_namespace_has_key()`
+- **Oversight**: Human-reviewed plan execution
+
+---
+
+## [2026-03-12] — Full Audit Improvements (Correctness, Coverage, Docs, Packaging)
+
+- **AI Model**: claude-sonnet-4-6
+- **Actions Taken**:
+  - **P1.1** Fixed `pipeline.py` race condition: split success/failure into
+    separate `threading.Event` objects; `match()` now returns `None` on timeout
+    or failure instead of returning a failure message as success.
+    Source: `ovoscope/pipeline.py:149–200`.
+  - **P1.2** Added `strict: bool = False` to `diff.py` `_dict_diff()` and
+    `diff_fixtures()`.  When `strict=True`, extra keys in `actual` not in
+    `expected` are flagged.  Default `False` preserves existing behaviour.
+    Source: `ovoscope/diff.py:121`.
+  - **P1.3** Deleted dead `_skill_id_for_handler()` from `bus_coverage.py`
+    (lines 745–763, never called anywhere in the codebase).
+  - **P2.1** Created `test/unittests/test_media.py` — 20 unit tests for
+    `MockOCPBackend` state transitions and `OCPCaptureSession` accumulation.
+  - **P2.2** Created `test/unittests/test_remote_recorder.py` — 15 unit tests
+    for `RemoteRecorder` using mocked `MessageBusClient`.
+  - **P2.3** Fixed deprecated `ovos_utils.messagebus.Message` import in
+    `test/unittests/test_phal.py` → `ovos_bus_client.message.Message`.
+  - **P3.1** Created `SUGGESTIONS.md` with 10 structured proposals.
+  - **P3.2** Updated `QUICK_FACTS.md` test count: 243 → 306.
+  - **P3.3** Expanded `docs/pipeline.md` to full API reference with `pipeline.py:LINE`
+    citations, `_SinkSkill` explanation, Adapt/Padatious examples, and
+    pipeline success/failure signal documentation.
+  - **P3.4** Fixed `docs/ocp.md` to correctly reference `OCPTest` (the class
+    in `ocp.py`) and add cross-reference to `OCPPlayerHarness` in `media.py`.
+  - **P3.5** Updated `AUDIT.md` with 7 new findings (5 fixed, 2 pre-existing).
+  - **P4.1** Updated `pyproject.toml`: added Documentation and Issue Tracker
+    URLs, `[tool.setuptools.package-data]`, `timeout = 60` in pytest options,
+    and comment explaining the `ovos-core>=2.0.4a2` alpha pin.
+  - **P5.1** Made `_count_fixtures()` in `coverage.py` use `Path.rglob("*.json")`
+    for recursive fixture counting instead of `os.listdir()`.
+  - **P5.2** Added `TYPE_CHECKING` guard and proper `List["BusCoverageReport"]`
+    type annotation to `BusCoverageCollector._reports` in `pytest_plugin.py`.
+- **Oversight**: Human review pending. 348 unit tests pass locally (was 301; +35 new, +12 from new files).
+
+---
+
+## [2026-03-12] — Bus Coverage Report Feature
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - Created `ovoscope/bus_coverage.py` — `BusCoverageTracker`, `BusCoverageReport`, `SkillBusCoverage`, `HandlerEntry`, `EmitterEntry` dataclasses.  Tracks listener invocations (via `bus.emit` monkey-patch) and emitter observed/asserted counts per skill_id.  Handler attribution via `handler.__self__` → `minicroft.plugin_skills`.  Handles pyee v9 `OrderedDict` storage format.
+  - Modified `ovoscope/__init__.py`: added `track_bus_coverage`, `print_bus_coverage`, `bus_coverage_report` fields to `End2EndTest`; hooked `BusCoverageTracker` into `execute()` around the capture block.
+  - Modified `ovoscope/pytest_plugin.py`: added `BusCoverageCollector`, `bus_coverage_session` session fixture, `pytest_terminal_summary` hook for merged end-of-session report.
+  - Modified `ovoscope/cli.py`: added `cmd_bus_coverage` subcommand and `bus-coverage` parser entry.
+  - Created `docs/bus-coverage.md` — full API reference with source citations.
+  - Updated `FAQ.md` with three new Q&A entries.
+  - Created `test/unittests/test_bus_coverage.py` — 32 unit tests, all passing.
+- **Oversight**: 301 unit tests pass locally.  `bus_coverage.py` at 97% coverage.
+
+
+## [2026-03-11] — Add ovoscope-setup entrypoint for AI assistant skill installation
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - Created `ovoscope/setup_skill.py` — `ovoscope-setup` CLI with install/uninstall for Claude, Gemini, OpenCode; auto-detect mode; `--list`, `--path`, `--uninstall` flags.
+  - Created `ovoscope/skill_data/` package with bundled skill definitions:
+    - `claude/SKILL.md` + `claude/scripts/ovoscope.sh` + `claude/assets/docs/` + `claude/assets/FAQ.md|QUICK_FACTS.md`
+    - `gemini/` — identical structure (Gemini uses same SKILL.md format, project-level install)
+    - `opencode/ovoscope.md` — YAML frontmatter agent definition for OpenCode
+  - Updated `pyproject.toml`: added `ovoscope-setup` script entrypoint, `[tool.setuptools.packages.find]`, and `[tool.setuptools.package-data]` to bundle `skill_data/`.
+  - Added 26 unit tests in `test/unittests/test_setup_skill.py` — all passing.
+- **Oversight**: 269 unit tests pass locally.
+
+## [2026-03-11] — Docs Gap Review and Fixes
+
+- **AI Model**: Claude Sonnet 4.6
+- **Actions Taken**:
+  - `docs/ocp.md`: Documented `execute()` return type (`List[Message]`), clarified `patch_targets` format (dotted Python path where symbol is used), added aiohttp example.
+  - `docs/pipeline.md`: Documented `assert_matches(intent_type=...)` as substring check with example; added `ovoscope/pipeline.py:LINE` citations to all methods.
+  - `docs/cli.md`: Corrected `--ignore-context` → `--include-context`, explained when/why to use it; clarified `validate` pydantic fallback trigger.
+  - `docs/end2end-test.md`, `docs/minicroft.md`, `docs/capture-session.md`: Added `ovoscope/__init__.py:LINE` source citations to class and key method definitions.
+  - `docs/capture-session.md`: Documented `finish()` idempotency.
+  - `docs/listener.md`: Added full VAD/WakeWord API section (`MockVADEngine`, `MockHotWordEngine`, `is_silence`, `extract_speech`, `detect_wakeword`, `scan_for_wakeword`, `VADTest`, `WakeWordTest`) with examples and `ovoscope/listener.py:LINE` citations. Updated constructor parameter table. Fixed stale line references.
+  - `docs/index.md`: Added `gui-testing.md` link; updated Public API section with `GUICaptureSession`, VAD/WW helpers; fixed "Does NOT Do" section for VAD/WW.
+  - `QUICK_FACTS.md`: Added entry-point groups table; updated test count (243) and coverage note.
+- **Oversight**: No new code changes — docs only.
+
+## [2026-03-11] — Add VAD and WakeWord Support to MiniListener
+
+- **AI Model**: Claude Haiku 4.5
+- **Actions Taken**:
+  - Extended `ovoscope/listener.py` with `MockVADEngine`, `MockHotWordEngine`, `VADTest`, `WakeWordTest`.
+  - Extended `MiniListener` with `vad_instance` / `ww_instances` constructor params.
+  - Added `is_silence()`, `extract_speech()`, `detect_wakeword()`, `scan_for_wakeword()` methods to `MiniListener` — `listener.py:466–600`.
+  - Extended `get_mini_listener()` factory with `vad_plugin`, `vad_instance`, `ww_plugin`, `ww_instances` params.
+  - Made `ovos_dinkum_listener` import lazy (graceful `ImportError`) so VAD/WW tests work without the full listener stack installed.
+  - Added 41 unit tests in `test/unittests/test_listener_vad_ww.py`.
+  - Updated `FAQ.md` with VAD and WakeWord testing Q&A.
+- **Oversight**: 243 unit tests pass locally.
+
 ## [2026-03-11] — Enhance Audio Testing Robustness and CI
 
 - **AI Model**: Claude Sonnet 4.6
@@ -301,7 +407,48 @@ level where every OVOS repo can adopt ovoscope end-to-end testing without readin
 - **Actions Taken**: Read `ovoscope/__init__.py` (485 lines), `test/test_helloworld.py`,
   `ovos-core/test/end2end/test_adapt.py`, and all existing docs; then generated enriched content.
 - **Oversight**: Code examples are illustrative but not executed. Verify against live skill install before treating as runnable.
+
 ---
+
+## 2026-03-11 — Phase 1–3 Feature Additions
+
+**AI Model**: claude-sonnet-4-6
+**Oversight**: Human review pending
+
+### Actions Taken
+
+Added CLI, PHAL harness, fixture differ, OCP harness, pipeline harness,
+ecosystem coverage scanner, GUI capture session, and remote recorder.
+
+**New modules:**
+- `ovoscope/cli.py` — `ovoscope` CLI with `record`, `run`, `diff`, `validate`, `coverage`
+- `ovoscope/diff.py` — `MessageDiff`, `FixtureDiffResult`, `diff_fixtures`
+- `ovoscope/phal.py` — `MiniPHAL`, `PHALTest`
+- `ovoscope/ocp.py` — `OCPTest`, `assert_ocp_query_response`
+- `ovoscope/pipeline.py` — `PipelineHarness`
+- `ovoscope/coverage.py` — `RepoCoverage`, `EcosystemCoverageReport`, `scan_workspace`
+- `ovoscope/remote_recorder.py` — `RemoteRecorder`
+
+**Extended modules:**
+- `ovoscope/__init__.py` — added `GUICaptureSession`
+
+**New docs:**
+- `docs/cli.md`, `docs/phal.md`, `docs/ocp.md`, `docs/pipeline.md`
+- `docs/usage-guide.md` — Patterns 9–12 appended
+
+**New tests:**
+- `test/unittests/test_diff.py` — 7 test methods
+- `test/unittests/test_phal.py` — 8 test methods
+- `test/unittests/test_coverage.py` — 11 test methods
+- `test/unittests/test_cli.py` — 14 test methods
+
+**pyproject.toml changes:**
+- Added `[project.scripts] ovoscope = "ovoscope.cli:main"`
+
+All 202 tests pass. No regressions introduced.
+
+---
+
 ## [2026-03-08] — Initial compliance scaffold
 ### Changes
 - Created `QUICK_FACTS.md` with machine-readable package metadata.

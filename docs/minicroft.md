@@ -1,10 +1,11 @@
 # MiniCroft
 `MiniCroft` is a minimal, in-process OVOS Core that loads real skill plugins and runs the full intent pipeline on a `FakeBus`. It is the execution engine behind every OvoScope test.
-## Class: `MiniCroft`
+## Class: `MiniCroft` — `ovoscope/__init__.py:158`
 ```python
 from ovoscope import MiniCroft
 ```
-Subclass of `ovos_core.skill_manager.SkillManager`. Replaces the real WebSocket bus with `FakeBus`, disables components not needed for testing, and only loads the skills you specify.
+Subclass of `ovos_core.skill_manager.SkillManager`.
+`get_minicroft` factory — `ovoscope/__init__.py:456` Replaces the real WebSocket bus with `FakeBus`, disables components not needed for testing, and only loads the skills you specify.
 ### Constructor
 ```python
 MiniCroft(

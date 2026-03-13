@@ -98,6 +98,134 @@ DEFAULT_TEST_PIPELINE = [
     "ovos-stop-pipeline-plugin-medium",
 ]
 
+# ---------------------------------------------------------------------------
+# Global bus-coverage state (managed by pytest plugin or CLI)
+# ---------------------------------------------------------------------------
+GLOBAL_BUS_COVERAGE: bool = False
+GLOBAL_BUS_COVERAGE_FILE: Optional[str] = None
+
+
+class GlobalBusCoverageCollector:
+    """Accumulates bus events globally across all FakeBus instances."""
+    def __init__(self):
+        # msg_type -> count
+        self.invocations: Dict[str, int] = {}
+        # msg_type -> count (total times .on was called for this type)
+        self.registrations: Dict[str, int] = {}
+        # skill_id -> {msg_type -> count}
+        self.skill_registrations: Dict[str, Dict[str, int]] = {}
+
+    def record_invocation(self, msg_type: str):
+        self.invocations[msg_type] = self.invocations.get(msg_type, 0) + 1
+
+    def record_registration(self, msg_type: str):
+        self.registrations[msg_type] = self.registrations.get(msg_type, 0) + 1
+
+    def record_skill_registration(self, skill_id: str, msg_type: str):
+        if not skill_id:
+            return
+        if skill_id not in self.skill_registrations:
+            self.skill_registrations[skill_id] = {}
+        self.skill_registrations[skill_id][msg_type] = (
+            self.skill_registrations[skill_id].get(msg_type, 0) + 1
+        )
+
+    def rename_skill(self, old_id: str, new_id: str):
+        """Merge registrations from old_id into new_id."""
+        if not old_id or not new_id or old_id == new_id:
+            return
+        if old_id in self.skill_registrations:
+            old_data = self.skill_registrations.pop(old_id)
+            if new_id not in self.skill_registrations:
+                self.skill_registrations[new_id] = {}
+            for mt, count in old_data.items():
+                self.skill_registrations[new_id][mt] = (
+                    self.skill_registrations[new_id].get(mt, 0) + count
+                )
+
+
+GLOBAL_BUS_COVERAGE_COLLECTOR: Optional[GlobalBusCoverageCollector] = None
+
+
+def _patch_fakebus():
+    """Monkey-patch FakeBus and ovos-workshop classes to track global coverage."""
+    from ovos_utils.fakebus import FakeBus
+    
+    original_on = FakeBus.on
+    original_once = getattr(FakeBus, "once", None)
+    original_emit = FakeBus.emit
+
+    def patched_on(self, event, handler):
+        if GLOBAL_BUS_COVERAGE and GLOBAL_BUS_COVERAGE_COLLECTOR:
+            GLOBAL_BUS_COVERAGE_COLLECTOR.record_registration(event)
+        return original_on(self, event, handler)
+
+    def patched_once(self, event, handler):
+        if GLOBAL_BUS_COVERAGE and GLOBAL_BUS_COVERAGE_COLLECTOR:
+            GLOBAL_BUS_COVERAGE_COLLECTOR.record_registration(event)
+        if original_once:
+            return original_once(self, event, handler)
+        return original_on(self, event, handler)
+
+    def patched_emit(self, message):
+        if GLOBAL_BUS_COVERAGE and GLOBAL_BUS_COVERAGE_COLLECTOR:
+            msg_type = getattr(message, "msg_type", None) or getattr(message, "type", None)
+            if msg_type:
+                GLOBAL_BUS_COVERAGE_COLLECTOR.record_invocation(msg_type)
+        return original_emit(self, message)
+
+    FakeBus.on = patched_on
+    FakeBus.once = patched_once
+    FakeBus.emit = patched_emit
+
+    # --- Patch ovos-workshop for better attribution ---
+    try:
+        from ovos_workshop.skills.ovos import OVOSSkill
+        original_add_event = OVOSSkill.add_event
+        original_bind = OVOSSkill.bind
+
+        def patched_add_event(self, name, handler, *args, **kwargs):
+            if GLOBAL_BUS_COVERAGE and GLOBAL_BUS_COVERAGE_COLLECTOR:
+                # Fallback to .name if skill_id is not yet set
+                sid = getattr(self, "skill_id", None) or getattr(self, "name", None)
+                if sid:
+                    GLOBAL_BUS_COVERAGE_COLLECTOR.record_skill_registration(sid, name)
+            return original_add_event(self, name, handler, *args, **kwargs)
+
+        def patched_bind(self, bus):
+            if GLOBAL_BUS_COVERAGE and GLOBAL_BUS_COVERAGE_COLLECTOR:
+                old_id = getattr(self, "skill_id", None) or getattr(self, "name", None)
+                res = original_bind(self, bus)
+                new_id = getattr(self, "skill_id", None)
+                if old_id and new_id and old_id != new_id:
+                    GLOBAL_BUS_COVERAGE_COLLECTOR.rename_skill(old_id, new_id)
+                return res
+            return original_bind(self, bus)
+
+        OVOSSkill.add_event = patched_add_event
+        OVOSSkill.bind = patched_bind
+    except ImportError:
+        pass
+
+    try:
+        from ovos_utils.events import EventContainer
+        original_container_add = EventContainer.add
+
+        def patched_container_add(self, name, handler, once=False):
+            if GLOBAL_BUS_COVERAGE and GLOBAL_BUS_COVERAGE_COLLECTOR:
+                # EventContainer usually belongs to a skill, but we don't have easy
+                # access to skill_id here without more complex patching.
+                # However, many skills call self.add_event which we already patched.
+                pass
+            return original_container_add(self, name, handler, once)
+        # EventContainer.add = patched_container_add
+    except ImportError:
+        pass
+
+
+# Apply the patch immediately when ovoscope is imported
+_patch_fakebus()
+
 # Lightweight test pipeline — no C extensions (swig) required.
 # Uses only pure-Python stages that are dependencies of ovos-core/workshop.
 # Use this when you want fast CI without building Padatious or Adapt.
@@ -582,6 +710,13 @@ class End2EndTest:
     test_final_session: bool = True
 
     ###########################
+    # bus coverage
+    ###########################
+    track_bus_coverage: bool = False  # enable BusCoverageTracker for this test
+    print_bus_coverage: bool = False  # print inline summary after execute()
+    bus_coverage_report: Optional["BusCoverageReport"] = dataclasses.field(default=None, init=False, repr=False)
+
+    ###########################
     # test runner internals
     ###########################
     verbose: bool = True
@@ -589,6 +724,10 @@ class End2EndTest:
     managed: bool = False
 
     def __post_init__(self):
+        # global coverage opt-in
+        if GLOBAL_BUS_COVERAGE:
+            self.track_bus_coverage = True
+
         # standardize to be a list
         if isinstance(self.source_message, Message):
             self.source_message = [self.source_message]
@@ -632,6 +771,14 @@ class End2EndTest:
             print(f"💡 original message.context source: '{o_src}'")
             print(f"💡 original message.context destination: '{o_dst}'")
 
+        # bus coverage tracking (optional)
+        _bus_tracker = None
+        if self.track_bus_coverage:
+            from ovoscope.bus_coverage import BusCoverageTracker
+            _bus_tracker = BusCoverageTracker(self.minicroft.bus, self.minicroft)
+            _bus_tracker.snapshot_listeners()
+            _bus_tracker.start_tracking()
+
         # the capture session will store all messages until capture.finish()
         #  even if multiple messages are emitted
         capture = CaptureSession(self.minicroft, eof_msgs=self.eof_msgs,
@@ -645,6 +792,12 @@ class End2EndTest:
 
         # final message list
         messages = capture.finish()
+
+        if _bus_tracker is not None:
+            _bus_tracker.stop_tracking()
+            all_responses = messages + list(getattr(capture, "async_responses", []))
+            _bus_tracker.record_session(all_responses, self.expected_messages)
+            self.bus_coverage_report = _bus_tracker.build_report()
 
         if self.test_message_number:
             n1 = len(self.expected_messages)
@@ -770,6 +923,9 @@ class End2EndTest:
             assert set(sess.blacklisted_intents) == set(expected_sess.blacklisted_intents), f"❌ final session blacklisted_intents doesn't match"
             if self.verbose:
                 print(f"✅ final session matches: {expected_sess.serialize()}")
+
+        if self.print_bus_coverage and self.bus_coverage_report is not None:
+            print(self.bus_coverage_report.summary_line())
 
         if self.managed:
             self.minicroft.stop()
@@ -945,3 +1101,178 @@ except ImportError as e:
         pass
     else:
         raise
+
+
+@dataclasses.dataclass
+class GUICaptureSession:
+    """Capture ``gui.*`` bus messages emitted during a skill interaction.
+
+    Unlike :class:`CaptureSession` (which filters out ``gui.*`` messages by
+    default), this session records *only* GUI-related messages so tests can
+    assert page navigation, namespace values, and namespace teardown without
+    cluttering the main message capture.
+
+    Args:
+        bus: The :class:`FakeBus` to subscribe to.
+        prefixes: List of message-type prefixes to capture.
+            Defaults to ``["gui.", "mycroft.gui."]``.
+
+    Example::
+
+        from ovoscope import get_minicroft, GUICaptureSession
+        from ovos_utils.messagebus import Message
+
+        mc = get_minicroft(["ovos-skill-hello-world.openvoiceos"])
+        with GUICaptureSession(mc.bus) as gui:
+            mc.bus.emit(Message("recognizer_loop:utterance",
+                                data={"utterances": ["hello"], "lang": "en-US"}))
+            import time; time.sleep(2)
+            gui.assert_page_shown("helloworldskill", "hello.qml")
+        mc.stop()
+    """
+
+    bus: Any
+    prefixes: List[str] = dataclasses.field(
+        default_factory=lambda: ["gui.", "mycroft.gui."]
+    )
+    messages: List[Message] = dataclasses.field(default_factory=list)
+
+    def _on_message(self, raw: Any) -> None:
+        """Capture GUI-prefixed messages from the bus.
+
+        Args:
+            raw: Raw message string or :class:`Message` object.
+        """
+        if isinstance(raw, str):
+            try:
+                msg = Message.deserialize(raw)
+            except Exception:
+                return
+        else:
+            msg = raw
+        if any(msg.msg_type.startswith(p) for p in self.prefixes):
+            self.messages.append(msg)
+
+    def start(self) -> None:
+        """Subscribe to the bus and begin capturing."""
+        self.bus.on("message", self._on_message)
+
+    def stop(self) -> None:
+        """Unsubscribe from the bus and stop capturing."""
+        self.bus.remove("message", self._on_message)
+
+    def __enter__(self) -> "GUICaptureSession":
+        """Start capturing on context-manager entry."""
+        self.start()
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        """Stop capturing on context-manager exit."""
+        self.stop()
+
+    def assert_page_shown(self, namespace: str, page: str, timeout: float = 2.0) -> None:
+        """Assert that a GUI page was shown in the given namespace.
+
+        Polls the captured messages for up to *timeout* seconds.
+
+        Args:
+            namespace: GUI namespace (typically the skill ID slug).
+            page: QML page filename (e.g. ``"hello.qml"``).
+            timeout: Maximum seconds to wait.
+
+        Raises:
+            AssertionError: If no matching ``gui.page.show`` message is found.
+        """
+        import time
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for msg in self.messages:
+                if "page.show" in msg.msg_type:
+                    data_ns = (msg.data.get("namespace", "")
+                              or msg.data.get("__from", "")
+                              or msg.context.get("skill_id", ""))
+                    pages = (msg.data.get("pages", [])
+                             or msg.data.get("page_names", [])
+                             or [msg.data.get("page", "")])
+                    if namespace in data_ns and any(page in str(p) for p in pages):
+                        return
+            time.sleep(0.05)
+        captured = [(m.msg_type, m.data) for m in self.messages]
+        raise AssertionError(
+            f"Expected page {page!r} in namespace {namespace!r} to be shown, "
+            f"but no matching gui.page.show message was captured.\nGot: {captured}"
+        )
+
+    def assert_namespace_value(self, namespace: str, key: str, value: Any) -> None:
+        """Assert that a namespace key was set to a specific value.
+
+        Args:
+            namespace: GUI namespace to check.
+            key: Data key within the namespace.
+            value: Expected value.
+
+        Raises:
+            AssertionError: If no matching ``gui.value.set`` message is found.
+        """
+        for msg in self.messages:
+            if "value.set" in msg.msg_type or "namespace.update" in msg.msg_type:
+                data_ns = (msg.data.get("namespace", "")
+                              or msg.data.get("__from", "")
+                              or msg.context.get("skill_id", ""))
+                if namespace in data_ns:
+                    data = msg.data.get("data", msg.data)
+                    if data.get(key) == value:
+                        return
+        raise AssertionError(
+            f"Expected namespace {namespace!r} key {key!r}={value!r} not found.\n"
+            f"Captured GUI messages: {[m.msg_type for m in self.messages]}"
+        )
+
+    def assert_namespace_has_key(self, namespace: str, key: str) -> None:
+        """Assert that a key was set in a namespace, regardless of value.
+
+        Useful for dynamic data (e.g. weather API responses, timestamps)
+        where the exact value is unpredictable but the key must exist.
+
+        Args:
+            namespace: GUI namespace to check.
+            key: Data key that should exist within the namespace.
+
+        Raises:
+            AssertionError: If no matching message with the key is found.
+        """
+        for msg in self.messages:
+            if "value.set" in msg.msg_type or "namespace.update" in msg.msg_type:
+                data_ns = (msg.data.get("namespace", "")
+                              or msg.data.get("__from", "")
+                              or msg.context.get("skill_id", ""))
+                if namespace in data_ns:
+                    data = msg.data.get("data", msg.data)
+                    if key in data:
+                        return
+        raise AssertionError(
+            f"Expected namespace {namespace!r} to contain key {key!r}, "
+            f"but it was never set.\n"
+            f"Captured GUI messages: {[m.msg_type for m in self.messages]}"
+        )
+
+    def assert_namespace_cleared(self, namespace: str) -> None:
+        """Assert that a namespace was cleared/removed.
+
+        Args:
+            namespace: GUI namespace that should have been cleared.
+
+        Raises:
+            AssertionError: If no matching namespace-clear message is found.
+        """
+        for msg in self.messages:
+            if "namespace.remove" in msg.msg_type or "namespace.clear" in msg.msg_type:
+                data_ns = (msg.data.get("namespace", "")
+                              or msg.data.get("__from", "")
+                              or msg.context.get("skill_id", ""))
+                if namespace in data_ns:
+                    return
+        raise AssertionError(
+            f"Expected namespace {namespace!r} to be cleared, "
+            f"but no matching message was captured."
+        )

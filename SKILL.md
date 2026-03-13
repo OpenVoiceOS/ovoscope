@@ -56,6 +56,40 @@ test.execute(minicroft)
 ovoscope record <skill_id> "<utterance>" --output fixtures/hello.json
 ```
 
+### Bus Coverage Tracking
+
+Enable bus-level message coverage to ensure your tests trigger all expected event handlers and emissions.
+
+#### CLI (via pytest)
+```bash
+# Enable bus coverage for the session
+pytest test/end2end/ --ovoscope-bus-cov
+
+# Enable verbose mode to see exact message types
+pytest test/end2end/ --ovoscope-bus-cov --ovoscope-bus-cov-verbose
+
+# Filter by skill_id or component name (regex)
+pytest test/end2end/ --ovoscope-bus-cov --ovoscope-bus-cov-include="my-skill"
+pytest test/end2end/ --ovoscope-bus-cov --ovoscope-bus-cov-exclude="^Thread-|^__core__$"
+
+# Save the merged report to a JSON file (useful for CI)
+pytest test/end2end/ --ovoscope-bus-cov --ovoscope-bus-cov-file=coverage/bus-coverage.json
+```
+
+#### Manual Opt-in (per test)
+```python
+def test_something(self, minicroft, bus_coverage_session):
+    test = End2EndTest(..., track_bus_coverage=True)
+    test.execute()
+    # Add to the session-level collector
+    bus_coverage_session.add(test.bus_coverage_report)
+```
+
+**What is tracked:**
+- **Listeners:** Which message types the skill is listening for and if they were invoked.
+- **Emitters:** Which message types the skill emitted and if they were asserted in the test.
+- **Coverage %:** Per-skill and session-wide coverage statistics.
+
 ### Validate Expectations
 
 ```python

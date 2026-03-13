@@ -118,23 +118,36 @@ class FixtureDiffResult:
         }
 
 
-def _dict_diff(expected: Dict[str, Any], actual: Dict[str, Any]) -> Dict[str, Tuple[Any, Any]]:
+def _dict_diff(
+    expected: Dict[str, Any],
+    actual: Dict[str, Any],
+    strict: bool = False,
+) -> Dict[str, Tuple[Any, Any]]:
     """Return keys whose values differ between *expected* and *actual*.
 
-    Only keys present in *expected* are checked (subset comparison).
+    By default only keys present in *expected* are checked (subset comparison).
+    When *strict* is ``True``, keys present in *actual* but absent from
+    *expected* are also flagged as unexpected extras.
 
     Args:
         expected: Reference dict.
         actual: Dict to compare against.
+        strict: When ``True``, flag extra keys in *actual* not in *expected*.
+            Default ``False`` preserves the original subset-comparison behaviour.
 
     Returns:
         Mapping of key → (expected_value, actual_value) for differing keys.
+        For extra keys (strict mode only) the expected_value is ``None``.
     """
     diffs: Dict[str, Tuple[Any, Any]] = {}
     for k, exp_v in expected.items():
         act_v = actual.get(k)
         if act_v != exp_v:
             diffs[k] = (exp_v, act_v)
+    if strict:
+        for k, act_v in actual.items():
+            if k not in expected:
+                diffs[k] = (None, act_v)
     return diffs
 
 
@@ -160,6 +173,7 @@ def diff_fixtures(
     actual_path: str,
     *,
     ignore_context: bool = True,
+    strict: bool = False,
 ) -> FixtureDiffResult:
     """Compare two fixture JSON files and return a structured diff.
 
@@ -173,6 +187,8 @@ def diff_fixtures(
         expected_path: Path to the reference fixture file.
         actual_path: Path to the fixture file being validated.
         ignore_context: Skip context comparison (default True).
+        strict: When ``True``, flag extra keys in *actual* data/context dicts
+            not present in *expected*.  Default ``False`` (subset comparison).
 
     Returns:
         A :class:`FixtureDiffResult` describing all differences found.
@@ -228,10 +244,10 @@ def diff_fixtures(
             continue
 
         # Same type — compare data and context
-        data_diffs = _dict_diff(exp_msg.get("data", {}), act_msg.get("data", {}))
+        data_diffs = _dict_diff(exp_msg.get("data", {}), act_msg.get("data", {}), strict=strict)
         ctx_diffs: Dict[str, Tuple[Any, Any]] = {}
         if not ignore_context:
-            ctx_diffs = _dict_diff(exp_msg.get("context", {}), act_msg.get("context", {}))
+            ctx_diffs = _dict_diff(exp_msg.get("context", {}), act_msg.get("context", {}), strict=strict)
 
         if data_diffs or ctx_diffs:
             diff = MessageDiff(

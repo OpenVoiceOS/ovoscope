@@ -1,7 +1,8 @@
 # OCP / Common Play Testing
 
-`ovoscope.ocp` provides `OCPTest` and `assert_ocp_query_response` for
-testing OCP (OpenVoiceOS Common Play) skills that handle media queries.
+`ovoscope.ocp` provides `OCPTest` and `assert_ocp_query_response` for testing
+OCP (OpenVoiceOS Common Play) skills that handle media queries.  For testing
+the OCP player state machine, see `OCPPlayerHarness` in `ovoscope.media`.
 
 ## OCP Message Flow
 

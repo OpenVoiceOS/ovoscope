@@ -29,7 +29,8 @@ classifiers = [
 pydantic = ["ovos-pydantic-models>=0.1.0"]
 audio = ["ovos-audio>=1.2.0"]
 dev = [
-    "ovoscope[audio,pydantic]",
+    "ovos-audio>=1.2.0",
+    "ovos-pydantic-models>=0.1.0",
     "pytest",
     "pytest-cov",
 ]

@@ -47,8 +47,10 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
+import ovoscope
 from ovos_bus_client.message import Message
 
 
@@ -204,6 +206,29 @@ class BusCoverageReport:
 
     skills: List[SkillBusCoverage] = dataclasses.field(default_factory=list)
 
+    def filter(self, include: Optional[str] = None, exclude: Optional[str] = None) -> BusCoverageReport:
+        """Return a new report containing only skills matching the filters.
+
+        Args:
+            include: Regex pattern. If provided, only skills matching this
+                pattern are kept.
+            exclude: Regex pattern. If provided, skills matching this pattern
+                are removed.
+
+        Returns:
+            A new filtered :class:`BusCoverageReport`.
+        """
+        import re
+
+        filtered_skills = []
+        for skill in self.skills:
+            if include and not re.search(include, skill.skill_id):
+                continue
+            if exclude and re.search(exclude, skill.skill_id):
+                continue
+            filtered_skills.append(skill)
+        return BusCoverageReport(skills=filtered_skills)
+
     def summary_line(self) -> str:
         """Return per-skill single-line summaries joined by newlines.
 
@@ -358,6 +383,18 @@ class BusCoverageTracker:
         self._registered: Dict[str, Dict[str, int]] = {}
         # msg_type -> invocation_count (total across all emits during tracking)
         self._invocations: Dict[str, int] = {}
+        # Global counts from the ovoscope collector (captures boot sequence)
+        self._global_invocations: Dict[str, int] = {}
+        self._global_registrations: Dict[str, int] = {}
+        self._global_skill_registrations: Dict[str, Dict[str, int]] = {}
+
+        collector = ovoscope.GLOBAL_BUS_COVERAGE_COLLECTOR
+        if collector:
+            # Snapshot the global state at initialization
+            self._global_invocations = dict(collector.invocations)
+            self._global_registrations = dict(collector.registrations)
+            self._global_skill_registrations = deepcopy(collector.skill_registrations)
+
         # skill_id -> {msg_type -> observed_count}
         self._observed: Dict[str, Dict[str, int]] = {}
         # skill_id -> {msg_type -> asserted_count}
@@ -484,6 +521,29 @@ class BusCoverageTracker:
                     listener_map[component].get(msg_type, 0) + 1
                 )
 
+        # ── Pass 4: Global skill registrations (from patched OVOSSkill) ─────
+        # High-confidence registrations captured via monkey-patching.
+        for skill_id, handlers in self._global_skill_registrations.items():
+            for msg_type, count in handlers.items():
+                listener_map.setdefault(skill_id, {})
+                # Use max to avoid double-counting if already found via introspection
+                listener_map[skill_id][msg_type] = max(
+                    listener_map[skill_id].get(msg_type, 0), count
+                )
+
+        # ── Pass 5: Unclaimed global registrations (boot sequence fallback) ──
+        # Handlers registered and then unregistered during boot are captured
+        # by the global collector. We attribute them to __core__ if not already
+        # claimed by a skill/component during the snapshot.
+        for msg_type, count in self._global_registrations.items():
+            # Check if any skill/component already has this msg_type
+            already_claimed = any(msg_type in handlers for handlers in listener_map.values())
+            if not already_claimed:
+                listener_map.setdefault("__core__", {})
+                listener_map["__core__"][msg_type] = (
+                    listener_map["__core__"].get(msg_type, 0) + count
+                )
+
         self._registered = listener_map
 
     def start_tracking(self) -> None:
@@ -580,7 +640,11 @@ class BusCoverageTracker:
             for msg_type, handler_count in sorted(
                 (self._registered.get(skill_id) or {}).items()
             ):
-                invocations = self._invocations.get(msg_type, 0)
+                # Total invocations = global (boot) + local (test execution)
+                invocations = (
+                    self._invocations.get(msg_type, 0) +
+                    self._global_invocations.get(msg_type, 0)
+                )
                 listener_entries.append(
                     HandlerEntry(
                         msg_type=msg_type,

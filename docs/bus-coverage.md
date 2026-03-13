@@ -7,233 +7,145 @@ coverage answers:
 > *Which message handlers did my tests actually trigger?  Which messages did
 > the skill emit, and which of those did I explicitly assert?*
 
-## Two dimensions
+## Summary
 
 | Dimension | What it measures |
 |-----------|-----------------|
-| **Listener coverage** | Which `bus.on(msg_type, handler)` registrations were invoked (i.e. `bus.emit` was called for that msg_type) during tests |
-| **Emitter coverage** | Which message types the skill emitted (*observed*) and which were listed in `expected_messages` (*asserted*) |
-
-Both dimensions are grouped **per skill_id**.
+| **Listener coverage** | Which message types the skill is listening for and if they were invoked. |
+| **Emitter coverage** | Which message types the skill emitted and if they were asserted in the test. |
 
 ---
 
-## Enabling in a test
+## Enabling Coverage Tracking
 
-Add `track_bus_coverage=True` to `End2EndTest`:
+There are three ways to enable bus coverage:
+
+### 1. Global (Recommended for Pytest)
+Pass the `--ovoscope-bus-cov` flag to pytest. This automatically enables tracking for all `End2EndTests` in the session and captures the full boot sequence.
+
+```bash
+# Basic report
+pytest test/end2end/ --ovoscope-bus-cov
+
+# Verbose report (shows exact message types)
+pytest test/end2end/ --ovoscope-bus-cov --ovoscope-bus-cov-verbose
+
+# Filter by skill_id regex
+pytest test/end2end/ --ovoscope-bus-cov --ovoscope-bus-cov-include="my-skill"
+pytest test/end2end/ --ovoscope-bus-cov --ovoscope-bus-cov-exclude="^Thread-|^__core__$"
+
+# Save to JSON for CI
+pytest test/end2end/ --ovoscope-bus-cov --ovoscope-bus-cov-file=bus-cov.json
+```
+
+### 2. Manual (Per Test)
+Add `track_bus_coverage=True` to an `End2EndTest` instance.
 
 ```python
-from ovoscope import End2EndTest
-
-test = End2EndTest(
-    skill_ids=["my-skill.author"],
-    source_message=message,
-    expected_messages=[...],
-    track_bus_coverage=True,   # enable tracking
-    print_bus_coverage=True,   # print inline summary after execute()
-)
+test = End2EndTest(..., track_bus_coverage=True)
 test.execute()
 report = test.bus_coverage_report
 ```
 
-### Fields on `End2EndTest`
+### 3. CLI Subcommand
+Run coverage against a directory of JSON fixtures.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `track_bus_coverage` | `bool` | `False` | Enable `BusCoverageTracker` for this test |
-| `print_bus_coverage` | `bool` | `False` | Print a one-line summary per skill after `execute()` |
-| `bus_coverage_report` | `BusCoverageReport \| None` | `None` | Populated after `execute()` when `track_bus_coverage=True` |
-
-Source: `End2EndTest` — `ovoscope/__init__.py:532`
+```bash
+ovoscope bus-coverage Skills/ovos-skill-hello-world/test/end2end/ --verbose
+```
 
 ---
 
-## Pytest session summary
+## How it Works
 
-Tests opt in to the session-wide summary via the `bus_coverage_session` fixture:
+Ovoscope uses a multi-layered approach to capture 100% of bus activity, including events that happen before the tests officially start.
 
-```python
-class TestMySkill:
-    skill_ids = ["my-skill.author"]
+### Implementation Details
 
-    def test_hello(self, minicroft, bus_coverage_session):
-        test = End2EndTest(
-            minicroft=minicroft,
-            skill_ids=self.skill_ids,
-            source_message=message,
-            expected_messages=[...],
-            track_bus_coverage=True,
-        )
-        test.execute()
-        bus_coverage_session.add(test.bus_coverage_report)
+1.  **Global Monkey-Patching**: When enabled, `ovoscope` monkey-patches `ovos_utils.fakebus.FakeBus.on`, `.once`, and `.emit`. This ensures that even "boot sequence" activity (like vocab registration or internal service setup) is captured from the moment the process starts.
+2.  **Skill Attribution**: To accurately link message handlers to specific skills, `ovoscope` patches `ovos_workshop.skills.ovos.OVOSSkill.add_event` and `.bind`.
+    *   This allows capturing registrations that happen during skill `__init__`.
+    *   It handles skill renames (where a skill starts with a generic name and is later assigned a unique `skill_id` by the loader).
+3.  **Instance Introspection**: After `MiniCroft` is READY, `ovoscope` performs a final sweep by introspecting `skill.events.events` and walking the bus's internal handler map.
+
+### Data Attribution Logic
+
+Messages and handlers are attributed in this order of precedence:
+1.  **Direct Skill ID**: If the handler was registered via a patched `OVOSSkill` method.
+2.  **Closure Introspection**: If the handler closure contains a reference to a skill instance.
+3.  **Component Name**: If the handler belongs to a core component (e.g., `IntentService`, `AdaptPipeline`).
+4.  **`__core__` Bucket**: A fallback for any message type registered or emitted that cannot be linked to a specific skill or component.
+
+---
+
+## Reading the Report
+
+The report table displays three main columns:
+
 ```
-
-A merged table is printed at the end of the pytest session:
-
-```
-========================= Bus Coverage Report =========================
 Skill                              Listeners      Observed  Asserted
 ──────────────────────────────────────────────────────────────────────
 my-skill.author                    8/12   66.7%   10/15     6/15
-other-skill.author                12/12  100.0%    8/8      8/8
+IntentService                      2/4    50.0%    0/0      0/0
 ──────────────────────────────────────────────────────────────────────
-TOTAL                             20/24   83.3%   18/23    14/23
+TOTAL                             10/16   62.5%   10/15     6/15
 ```
 
-Source: `BusCoverageCollector` — `ovoscope/pytest_plugin.py:81`
+### 1. Listeners (The "What can it hear?" metric)
+*   **Formula**: `(Invoked Message Types) / (Registered Message Types)`
+*   **Registered**: Total unique message types the skill called `.on()` or `.add_event()` for.
+*   **Invoked**: How many of those message types were actually emitted on the bus during the session.
+*   **Meaning**: High percentage means your tests are triggering most of the skill's logic paths.
+
+### 2. Observed Emitters (The "What did it say?" metric)
+*   **Formula**: `(Emitted Message Types) / (Known Message Types)`
+*   **Known**: The set of message types that were *either* emitted by this skill during this session *or* were listed in the test's `expected_messages` for this skill.
+*   **Observed**: How many of those message types actually appeared on the bus.
+*   **Meaning**: Usually 100% unless you have conditional emissions that didn't fire.
+
+### 3. Asserted Emitters (The "Did I check it?" metric)
+*   **Formula**: `(Asserted Message Types) / (Known Message Types)`
+*   **Asserted**: How many of the observed message types were explicitly listed in `End2EndTest.expected_messages`.
+*   **Meaning**: High percentage means your test suite is strictly validating the skill's output, not just letting it happen.
 
 ---
 
-## CLI subcommand
+## Verbose Breakdown
+
+In verbose mode (`--ovoscope-bus-cov-verbose`), `ovoscope` lists every message type:
 
 ```
-ovoscope bus-coverage <TEST_DIR> [--skill-id ID] [--format table|json] [--verbose]
+LISTENERS — my-skill.author
+  ✓ my-intent.intent                                   2 invocation(s)
+  ✗ some-unused-event                                  NOT TESTED
+
+EMITTERS — my-skill.author
+  ✓ speak                                              observed 1x  ✓ asserted
+  ✓ my-skill.done                                      observed 1x  ✗ not asserted
 ```
 
-Loads every `.json` fixture in `TEST_DIR`, runs each with
-`track_bus_coverage=True`, aggregates, and prints the report.
-
-```bash
-# Table report
-ovoscope bus-coverage Skills/ovos-skill-hello-world/test/end2end/
-
-# JSON export
-ovoscope bus-coverage Skills/ovos-skill-hello-world/test/end2end/ --format json
-
-# Verbose per-msg detail
-ovoscope bus-coverage Skills/ovos-skill-hello-world/test/end2end/ --verbose
-
-# Filter to a specific skill
-ovoscope bus-coverage Skills/ --skill-id ovos-skill-hello-world.openvoiceos
-```
-
-Source: `cmd_bus_coverage` — `ovoscope/cli.py`
+*   **✓ (Checked)**: The listener was triggered or the emitter was asserted.
+*   **✗ (Cross)**: The listener was never triggered or the emitter was seen but not checked in the test.
 
 ---
 
-## Public API
+## Filtering and Tuning
 
-### `ovoscope.bus_coverage.HandlerEntry`
+By default, the bus report can be noisy because core services register many internal handlers. Use filtering to focus on your code:
 
-`HandlerEntry` — `ovoscope/bus_coverage.py:56`
-
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `msg_type` | `str` | Bus message type |
-| `handler_count` | `int` | Number of distinct handlers registered for this type |
-| `invocation_count` | `int` | Times `bus.emit` was called for this type |
-| `covered` | `bool` | `invocation_count > 0` |
-
-### `ovoscope.bus_coverage.EmitterEntry`
-
-`EmitterEntry` — `ovoscope/bus_coverage.py:85`
-
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `msg_type` | `str` | Bus message type |
-| `observed_count` | `int` | Times in `CaptureSession.responses` |
-| `asserted_count` | `int` | Times in `End2EndTest.expected_messages` |
-| `observed` | `bool` | `observed_count > 0` |
-| `asserted` | `bool` | `asserted_count > 0` |
-
-### `ovoscope.bus_coverage.SkillBusCoverage`
-
-`SkillBusCoverage` — `ovoscope/bus_coverage.py:118`
-
-| Property | Returns | Description |
-|----------|---------|-------------|
-| `listener_coverage_pct` | `float` | % of listener msg_types invoked |
-| `observed_emitter_pct` | `float` | % of emitter entries that were observed |
-| `asserted_emitter_pct` | `float` | % of emitter entries that were asserted |
-| `to_dict()` | `dict` | JSON-serializable representation |
-
-### `ovoscope.bus_coverage.BusCoverageReport`
-
-`BusCoverageReport` — `ovoscope/bus_coverage.py:163`
-
-| Method | Description |
-|--------|-------------|
-| `summary_line()` | One-line summary per skill, joined by newlines |
-| `print_report(verbose=False)` | Print formatted table to stdout |
-| `to_json()` | Serialize to JSON string |
-
-### `ovoscope.bus_coverage.BusCoverageTracker`
-
-`BusCoverageTracker` — `ovoscope/bus_coverage.py:242`
-
-| Method | Description |
-|--------|-------------|
-| `snapshot_listeners()` | Introspect bus after READY; map handlers to skills |
-| `start_tracking()` | Monkey-patch `bus.emit` to count invocations |
-| `stop_tracking()` | Restore original `bus.emit` |
-| `record_session(responses, expected_messages)` | Feed session data into emitter tracking |
-| `build_report()` | Compile a `BusCoverageReport` from all accumulated data |
+*   **Include**: Only show skills matching a regex.
+    *   `--ovoscope-bus-cov-include="my-skill"`
+*   **Exclude**: Hide matches. The standard CI/CD workflow excludes threads and internal metadata helpers by default.
+    *   `--ovoscope-bus-cov-exclude="^Thread-|^intents$|^skills$"`
 
 ---
 
-## How listener attribution works
+## Calculations API
 
-After `MiniCroft` reaches READY, `BusCoverageTracker.snapshot_listeners()`
-uses a three-pass strategy:
+If you are building custom tooling, you can access these values via `SkillBusCoverage` properties:
 
-1. **Skills via EventContainer** — reads `skill.events.events` for every
-   entry in `minicroft.plugin_skills`.  This is authoritative because
-   ovos-workshop wraps handlers in `create_wrapper` closures before calling
-   `bus.on()`, making `handler.__self__` unreliable for skill handlers.
-2. **Core components via direct `__self__`** — handlers whose owner is not
-   a loaded skill are attributed by `type(owner).__name__`
-   (e.g. `IntentService`, `AdaptPipeline`, `FallbackService`).
-3. **Closure scan** — handlers without a direct `__self__` are scanned for
-   bound-method cell variables that point to a known skill instance.
+*   `listener_coverage_pct`: `(covered_listeners / total_listeners) * 100`
+*   `observed_emitter_pct`: `(observed_emitters / total_emitters) * 100`
+*   `asserted_emitter_pct`: `(asserted_emitters / total_emitters) * 100`
 
-Source: `BusCoverageTracker.snapshot_listeners` — `ovoscope/bus_coverage.py:368`
-
----
-
-## `__core__` bucket
-
-Messages emitted by core services (`IntentService`, `FallbackService`, pipeline
-components) do not carry `skill_id` in their context.  These messages are
-attributed to the `"__core__"` bucket in both observed and asserted emitter
-tracking so they are never silently dropped.  They appear as a normal row
-labelled `__core__` in the report.
-
-Source: `BusCoverageTracker.record_session` — `ovoscope/bus_coverage.py:510`
-
----
-
-## Limitations
-
-- **Registration-time handlers always show NOT TESTED** — `register_vocab`,
-  `register_intent`, `mycroft.skills.train`, and other skill lifecycle handlers
-  are invoked during `MiniCroft.run()` *before* `snapshot_listeners()` is called.
-  They will always show 0 invocations regardless of test coverage.  This is
-  structural, not a test failure.  Source: `snapshot_listeners` —
-  `ovoscope/bus_coverage.py:368`.
-
-- **`bus.once()` handlers are invisible after firing** — one-shot handlers
-  registered with `bus.once()` during skill loading de-register before
-  `snapshot_listeners()` runs.  They will not appear in the listener report.
-
-- **Pipeline matching is not bus-driven** — Adapt and Padatious intent matching
-  is a direct callable call inside `IntentService`, not a `bus.emit`.
-  Pipeline handler listener coverage will structurally never reach 100%.
-
-- **`ignore_messages` types are excluded from emitter coverage** — message
-  types in `End2EndTest.ignore_messages` (e.g. GUI messages when
-  `ignore_gui=True`) never reach `CaptureSession.responses` and therefore
-  show 0 observed count regardless of how many times they were emitted.
-  Source: `CaptureSession.capture` — `ovoscope/__init__.py:503`.
-
-- **`async_responses` are included in observed emitter coverage** — since
-  v0.x, `async_responses` are merged with `responses` before
-  `record_session()` so async messages are no longer silently dropped.
-  Source: `End2EndTest.execute` — `ovoscope/__init__.py:666`.
-
-- **Only skills loaded through `MiniCroft.plugin_skills` are attributed**.
-  Injected skills passed via `extra_skills` are included; skills from other
-  processes are not.
-
-- **Listener coverage tracks invocations by msg_type, not by individual
-  handler**.  If two handlers for the same type are registered, one
-  invocation counts both.
+Source: `SkillBusCoverage` — `ovoscope/bus_coverage.py:118`

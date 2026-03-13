@@ -398,6 +398,15 @@ with GUICaptureSession(mc.bus) as gui:
     gui.assert_page_shown("my_skill", "main.qml")
 ```
 
+### How do I assert that a skill set a specific session data key in a namespace?
+Use `assert_namespace_has_key()`:
+```python
+with GUICaptureSession(mc.bus) as gui:
+    # ... trigger interaction ...
+    gui.assert_namespace_has_key("my_skill", "temperature")
+```
+This checks that a `mycroft.session.set` message was captured containing the given key in the specified namespace. See [docs/gui-testing.md](docs/gui-testing.md).
+
 ---
 
 ## Coverage Scanner

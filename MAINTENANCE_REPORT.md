@@ -1,5 +1,17 @@
 # Maintenance Report — `ovoscope`
 
+## [2026-03-13] — GUICaptureSession: assert_namespace_has_key + unit tests
+
+- **AI Model**: Claude Opus 4.6
+- **Actions Taken**:
+  - Added `assert_namespace_has_key()` method to `GUICaptureSession` for asserting that a skill set a specific session data key in a GUI namespace
+  - Updated `docs/gui-testing.md` with documentation for the new method
+  - Created `test/unittests/test_gui_capture.py` with 10 unit tests covering the new assertion method
+  - Updated `FAQ.md` with Q&A for `assert_namespace_has_key()`
+- **Oversight**: Human-reviewed plan execution
+
+---
+
 ## [2026-03-12] — Full Audit Improvements (Correctness, Coverage, Docs, Packaging)
 
 - **AI Model**: claude-sonnet-4-6

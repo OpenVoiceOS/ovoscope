@@ -152,6 +152,26 @@ gui.assert_namespace_value("helloworldskill", "greeting", "Hello!")
 
 Raises `AssertionError` if no matching message is found.
 
+#### `assert_namespace_has_key(namespace, key)`
+
+`GUICaptureSession.assert_namespace_has_key` — `ovoscope/__init__.py:1093`
+
+Assert that a `gui.value.set` or `gui.namespace.update` message set a
+specific key in the given namespace, regardless of value. Useful for
+dynamic data (weather API responses, timestamps) where the exact value
+is unpredictable.
+
+```python
+gui.assert_namespace_has_key("weatherskill", "current_temp")
+```
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `namespace` | `str` | GUI namespace to check. |
+| `key` | `str` | Data key that should exist. |
+
+Raises `AssertionError` if no matching message is found.
+
 #### `assert_namespace_cleared(namespace)`
 
 `GUICaptureSession.assert_namespace_cleared` — `ovoscope/__init__.py:1069`

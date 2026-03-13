@@ -54,7 +54,48 @@ if TYPE_CHECKING:
 
 import pytest
 
-from ovoscope import MiniCroft, get_minicroft
+from ovoscope import MiniCroft, get_minicroft, End2EndTest
+
+# Global collector for autouse fixture and monkey-patched End2EndTest
+_SESSION_COLLECTOR: Optional["BusCoverageCollector"] = None
+
+
+def pytest_addoption(parser):
+    """Add CLI options for ovoscope bus coverage."""
+    group = parser.getgroup("ovoscope")
+    group.addoption(
+        "--ovoscope-bus-cov",
+        action="store_true",
+        default=False,
+        help="Enable bus-level coverage tracking for all End2EndTests.",
+    )
+    group.addoption(
+        "--ovoscope-bus-cov-file",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Save the merged bus coverage report to a JSON file.",
+    )
+    group.addoption(
+        "--ovoscope-bus-cov-verbose",
+        action="store_true",
+        default=False,
+        help="Show detailed list of covered/uncovered message types in the terminal.",
+    )
+    group.addoption(
+        "--ovoscope-bus-cov-include",
+        action="store",
+        default=None,
+        metavar="PATTERN",
+        help="Only include skills/components matching this regex in the coverage report.",
+    )
+    group.addoption(
+        "--ovoscope-bus-cov-exclude",
+        action="store",
+        default=None,
+        metavar="PATTERN",
+        help="Exclude skills/components matching this regex from the coverage report.",
+    )
 
 
 @pytest.fixture(scope="class")
@@ -191,48 +232,92 @@ class BusCoverageCollector:
         return BusCoverageReport(skills=skills)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session", autouse=True)
 def bus_coverage_session(request) -> Iterator[BusCoverageCollector]:
     """Session-scoped fixture that collects bus coverage reports from all tests.
 
-    Tests opt in by requesting this fixture and calling
-    ``bus_coverage_session.add(test.bus_coverage_report)`` after ``execute()``.
-    A merged summary is printed in the pytest terminal output at session end.
+    Automatically enabled if ``--ovoscope-bus-cov`` is passed to pytest.
+    When enabled, it monkey-patches ``End2EndTest`` to
+    automatically add reports to the session collector after ``execute()``.
 
-    Example::
-
-        def test_my_skill(self, minicroft, bus_coverage_session):
-            test = End2EndTest(
-                minicroft=minicroft,
-                skill_ids=self.skill_ids,
-                source_message=message,
-                expected_messages=[...],
-                track_bus_coverage=True,
-            )
-            test.execute()
-            bus_coverage_session.add(test.bus_coverage_report)
+    Tests can also opt in manually without the CLI flag by requesting this
+    fixture and calling ``bus_coverage_session.add(test.bus_coverage_report)``.
     """
+    import ovoscope
+    global _SESSION_COLLECTOR
+    enabled = request.config.getoption("--ovoscope-bus-cov")
+    cov_file = request.config.getoption("--ovoscope-bus-cov-file")
+
     collector = BusCoverageCollector()
-    yield collector
+    _SESSION_COLLECTOR = collector
+
+    original_execute = End2EndTest.execute
+
+    if enabled:
+        ovoscope.GLOBAL_BUS_COVERAGE = True
+        ovoscope.GLOBAL_BUS_COVERAGE_FILE = cov_file
+        # Initialize the global collector to catch boot-time events
+        ovoscope.GLOBAL_BUS_COVERAGE_COLLECTOR = ovoscope.GlobalBusCoverageCollector()
+
+        # Auto-collect report after execution
+        def patched_execute(self, *args, **kwargs):
+            res = original_execute(self, *args, **kwargs)
+            if self.bus_coverage_report:
+                collector.add(self.bus_coverage_report)
+            return res
+
+        End2EndTest.execute = patched_execute
+
+    try:
+        yield collector
+    finally:
+        _SESSION_COLLECTOR = None
+        if enabled:
+            ovoscope.GLOBAL_BUS_COVERAGE = False
+            ovoscope.GLOBAL_BUS_COVERAGE_COLLECTOR = None
+            # Restore original behavior
+            End2EndTest.execute = original_execute
+            # Note: we don't restore track_bus_coverage default because it's a
+            # class attribute and we might have stepped on a manual True/False
+            # in some tests, but in pytest context it usually doesn't matter
+            # after the session ends.
+
     # Store the merged report on the config object so the terminal hook can
     # retrieve it without touching private pytest internals.
     report = collector.merged_report()
     if report is not None:
+        # Apply filters
+        include = request.config.getoption("--ovoscope-bus-cov-include")
+        exclude = request.config.getoption("--ovoscope-bus-cov-exclude")
+        report = report.filter(include=include, exclude=exclude)
+
         if not hasattr(request.config, "_bus_coverage_reports"):
             request.config._bus_coverage_reports = []
         request.config._bus_coverage_reports.append(report)
+
+        # Save to file if requested
+        cov_file = request.config.getoption("--ovoscope-bus-cov-file")
+        if cov_file:
+            import os
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(cov_file)), exist_ok=True)
+                with open(cov_file, "w", encoding="utf-8") as f:
+                    f.write(report.to_json())
+            except Exception as exc:
+                print(f"\nERROR: Failed to save bus coverage report to {cov_file}: {exc}")
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
     """Print the merged bus coverage report at the end of the pytest session.
 
     Only runs if at least one test used the ``bus_coverage_session`` fixture
-    and called ``bus_coverage_session.add(...)``.
+    (or ``--ovoscope-bus-cov`` was used) and reports were collected.
     """
     reports = getattr(config, "_bus_coverage_reports", None)
     if not reports:
         return
+    verbose = config.getoption("--ovoscope-bus-cov-verbose")
     for report in reports:
         terminalreporter.write_sep("=", "Bus Coverage Report")
-        report.print_report()
+        report.print_report(verbose=verbose)
         terminalreporter.write_line("")

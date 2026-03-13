@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0a1](https://github.com/TigreGotico/ovoscope/tree/0.13.0a1) (2026-03-13)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.12.0a1...0.13.0a1)
+
+**Merged pull requests:**
+
+- feat: Bus coverage + media testing [\#49](https://github.com/TigreGotico/ovoscope/pull/49) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.12.0a1](https://github.com/TigreGotico/ovoscope/tree/0.12.0a1) (2026-03-12)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.11.0a1...0.12.0a1)

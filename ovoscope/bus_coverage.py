@@ -468,6 +468,9 @@ class BusCoverageTracker:
         for skill_id, loader in plugin_skills.items():
             instance = getattr(loader, "instance", loader) or loader
             combined_map[id(instance)] = skill_id
+        
+        # Add minicroft itself to the map (it may be a Thread subclass like SkillManager)
+        combined_map[id(self._minicroft)] = self._get_component_name(self._minicroft)
 
         # Cache the bus events dict once — used across all three passes.
         bus_events = self._get_bus_events()
@@ -482,7 +485,7 @@ class BusCoverageTracker:
                     component = (
                         getattr(owner, "skill_id", None)
                         or getattr(owner, "name", None)
-                        or type(owner).__name__
+                        or self._get_component_name(owner)
                     )
                     combined_map[id(owner)] = component
 
@@ -497,7 +500,7 @@ class BusCoverageTracker:
                 # Skip FakeBus itself and bare class objects (type instances)
                 if isinstance(owner, type):
                     continue
-                component = combined_map.get(id(owner), type(owner).__name__)
+                component = combined_map.get(id(owner), self._get_component_name(owner))
                 if component == "FakeBus":
                     continue
                 listener_map.setdefault(component, {})
@@ -747,6 +750,38 @@ class BusCoverageTracker:
             return
         for item in it:
             yield getattr(item, "fn", item)
+
+    @staticmethod
+    def _get_component_name(owner: Any) -> str:
+        """Get the component name from an object, skipping Thread in the MRO.
+
+        For objects that inherit from Thread (e.g. SkillManager, PlaybackService),
+        this returns the actual class name instead of 'Thread'.
+
+        Special case: MiniCroft (the test harness) is reported as 'SkillManager'
+        for clarity in reports, since MiniCroft is just a test wrapper around
+        SkillManager.
+
+        Args:
+            owner: The object that owns a handler (typically __self__ of a bound method).
+
+        Returns:
+            The component name, using the first non-Thread class in the MRO.
+            MiniCroft is renamed to SkillManager for user-friendly reporting.
+        """
+        if owner is None:
+            return "Unknown"
+        
+        # Skip Thread and get the actual component class name
+        for cls in type(owner).__mro__:
+            if cls.__name__ not in ("Thread",) and cls is not object:
+                # Special case: MiniCroft → SkillManager for clarity
+                if cls.__name__ == "MiniCroft":
+                    return "SkillManager"
+                return cls.__name__
+        
+        # Fallback to type name if MRO doesn't help
+        return type(owner).__name__
 
     def _skill_instance_map(self) -> Dict[int, str]:
         """Build a mapping from ``id(skill_instance)`` to ``skill_id``.

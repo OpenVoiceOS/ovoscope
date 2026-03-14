@@ -339,6 +339,31 @@ python -c "from model2vec.inference import StaticModelPipeline; StaticModelPipel
 
 ---
 
+## Bus Coverage
+
+### Why do I see `Thread-1`, `Thread-2` entries in my bus coverage report?
+
+**This was fixed in ovoscope 0.14.0.** Previously, OVOS components that inherit 
+from `Thread` (such as `SkillManager`, `PlaybackService`, `OVOSDinkumVoiceService`, 
+and `MediaService`) had their handlers attributed to generic names like `Thread-1`, 
+`Thread-2`, etc.
+
+The fix uses Python's Method Resolution Order (MRO) to automatically resolve 
+Thread subclasses to their actual class names. The `_get_component_name()` method 
+walks the MRO chain and skips the `Thread` class, returning the first non-Thread 
+class name.
+
+**Special case:** `MiniCroft` (the test harness) is automatically renamed to 
+`SkillManager` in reports for clarity, since MiniCroft is just a test wrapper 
+around SkillManager.
+
+This approach is automatic and requires no manual maintenance of message type patterns.
+Any future Thread-based components will be correctly attributed without code changes.
+
+See [docs/bus-coverage.md](docs/bus-coverage.md) for the full reference.
+
+---
+
 ## CLI
 
 ### How do I record a fixture from the command line?

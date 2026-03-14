@@ -1,28 +1,12 @@
 # Changelog
 
-## [0.13.0a1](https://github.com/TigreGotico/ovoscope/tree/0.13.0a1) (2026-03-13)
+## [0.13.1a1](https://github.com/TigreGotico/ovoscope/tree/0.13.1a1) (2026-03-14)
 
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.12.0a1...0.13.0a1)
-
-**Merged pull requests:**
-
-- feat: Bus coverage + media testing [\#49](https://github.com/TigreGotico/ovoscope/pull/49) ([JarbasAl](https://github.com/JarbasAl))
-
-## [0.12.0a1](https://github.com/TigreGotico/ovoscope/tree/0.12.0a1) (2026-03-12)
-
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.11.0a1...0.12.0a1)
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.13.0...0.13.1a1)
 
 **Merged pull requests:**
 
-- feat: SKILL.md for agents [\#48](https://github.com/TigreGotico/ovoscope/pull/48) ([JarbasAl](https://github.com/JarbasAl))
-
-## [0.11.0a1](https://github.com/TigreGotico/ovoscope/tree/0.11.0a1) (2026-03-11)
-
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.10.0...0.11.0a1)
-
-**Merged pull requests:**
-
-- feat: support all ovos core services + CLI tooling for ovoscope [\#46](https://github.com/TigreGotico/ovoscope/pull/46) ([JarbasAl](https://github.com/JarbasAl))
+- fix: thread names in bus coverage report [\#52](https://github.com/TigreGotico/ovoscope/pull/52) ([JarbasAl](https://github.com/JarbasAl))
 
 
 

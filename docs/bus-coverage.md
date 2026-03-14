@@ -56,6 +56,32 @@ ovoscope bus-coverage Skills/ovos-skill-hello-world/test/end2end/ --verbose
 
 ---
 
+## Thread Component Merging
+
+OVOS components that inherit from `Thread` (such as `SkillManager`, `PlaybackService`, 
+`OVOSDinkumVoiceService`, and `MediaService`) are automatically resolved to their 
+actual class names using Python's Method Resolution Order (MRO).
+
+**As of ovoscope 0.14.0**, the `_get_component_name()` method walks the MRO chain 
+and skips the `Thread` class, returning the first non-Thread class name. This means:
+
+| Component Class | Inherits From | Reported As |
+|----------------|---------------|-------------|
+| `MiniCroft` (test harness) | `SkillManager` → `Thread` | `SkillManager` |
+| `SkillManager` | `Thread` | `SkillManager` |
+| `PlaybackService` | `Thread` | `PlaybackService` |
+| `OVOSDinkumVoiceService` | `Thread` | `OVOSDinkumVoiceService` |
+| `MediaService` | `Thread` | `MediaService` |
+| `IntentService` | (no Thread) | `IntentService` |
+
+Note: `MiniCroft` (the test harness) is automatically renamed to `SkillManager` in 
+reports for clarity, since MiniCroft is just a test wrapper around SkillManager.
+
+This approach is automatic and requires no manual maintenance of message type patterns.
+Any future Thread-based components will be correctly attributed without code changes.
+
+---
+
 ## How it Works
 
 Ovoscope uses a multi-layered approach to capture 100% of bus activity, including events that happen before the tests officially start.

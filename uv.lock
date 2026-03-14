@@ -671,9 +671,10 @@ pydantic = [
 [package.metadata]
 requires-dist = [
     { name = "ovos-audio", marker = "extra == 'audio'", specifier = ">=1.2.0" },
+    { name = "ovos-audio", marker = "extra == 'dev'", specifier = ">=1.2.0" },
     { name = "ovos-core", specifier = ">=2.0.4a2" },
+    { name = "ovos-pydantic-models", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "ovos-pydantic-models", marker = "extra == 'pydantic'", specifier = ">=0.1.0" },
-    { name = "ovoscope", extras = ["audio", "pydantic"], marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
 ]

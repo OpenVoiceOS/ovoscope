@@ -563,6 +563,69 @@ class TestCoreAttributionBucket:
         assert "__core__" in skill_ids
 
 
+# ---------------------------------------------------------------------------
+# Thread MRO Resolution
+# ---------------------------------------------------------------------------
+
+
+class TestGetComponentName:
+    """Tests for _get_component_name static method using MRO."""
+
+    def test_thread_subclass_returns_actual_class(self):
+        """Thread subclasses should return their actual class name, not 'Thread'."""
+        from threading import Thread
+        
+        class SkillManager(Thread):
+            pass
+        
+        class PlaybackService(Thread):
+            pass
+        
+        obj1 = SkillManager()
+        obj2 = PlaybackService()
+        
+        assert BusCoverageTracker._get_component_name(obj1) == "SkillManager"
+        assert BusCoverageTracker._get_component_name(obj2) == "PlaybackService"
+
+    def test_minicroft_renamed_to_skillmanager(self):
+        """MiniCroft (test harness) should be reported as 'SkillManager'."""
+        from ovoscope import MiniCroft
+        from ovos_utils.fakebus import FakeBus
+        
+        mc = MiniCroft(skill_ids=[])
+        # Don't start it, just test the name resolution
+        assert BusCoverageTracker._get_component_name(mc) == "SkillManager"
+
+    def test_non_thread_class_returns_class_name(self):
+        """Non-Thread classes should return their class name normally."""
+        
+        class IntentService:
+            pass
+        
+        obj = IntentService()
+        assert BusCoverageTracker._get_component_name(obj) == "IntentService"
+
+    def test_none_returns_unknown(self):
+        """None should return 'Unknown'."""
+        assert BusCoverageTracker._get_component_name(None) == "Unknown"
+
+    def test_deep_inheritance(self):
+        """Deep inheritance chains should still find the correct class."""
+        from threading import Thread
+        
+        class BaseService(Thread):
+            pass
+        
+        class AudioService(BaseService):
+            pass
+        
+        class PlaybackService(AudioService):
+            pass
+        
+        obj = PlaybackService()
+        assert BusCoverageTracker._get_component_name(obj) == "PlaybackService"
+
+
 class TestJsonSchemaVersion:
     def test_to_json_includes_schema_version(self):
         """to_json() output must contain 'schema_version': '1'."""

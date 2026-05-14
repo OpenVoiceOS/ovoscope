@@ -1281,3 +1281,21 @@ class GUICaptureSession:
             f"Expected namespace {namespace!r} to be cleared, "
             f"but no matching message was captured."
         )
+
+
+# ---------------------------------------------------------------------------
+# Public re-exports — see ovoscope/e2e.py for full docs
+# ---------------------------------------------------------------------------
+from ovoscope.e2e import (  # noqa: E402,F401
+    E2EPipelineHarness,
+    detach_intent,
+    detach_skill,
+    make_session,
+    make_utterance_message,
+    register_adapt_intent,
+    register_adapt_vocab,
+    register_padatious_entity,
+    register_padatious_intent,
+    wait_for_failure,
+    wait_for_match,
+)

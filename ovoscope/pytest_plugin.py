@@ -52,6 +52,8 @@ from typing import TYPE_CHECKING, Iterator, List, Optional, Union
 if TYPE_CHECKING:
     from ovoscope.bus_coverage import BusCoverageReport
 
+from pathlib import Path
+
 import pytest
 
 from ovoscope import MiniCroft, get_minicroft, End2EndTest
@@ -130,6 +132,24 @@ def pytest_addoption(parser):
               "don't fail the build; only the aggregate accuracy gate "
               "(--ovoscope-accuracy-min / --ovoscope-accuracy-baseline) "
               "can block the session."),
+    )
+    group.addoption(
+        "--ovoscope-accuracy-md",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help=("Write a Markdown intent-case accuracy report (the format "
+              "consumed by the OpenVoiceOS gh-automations PR-comment "
+              "workflow). Pairs naturally with --ovoscope-accuracy-report."),
+    )
+    group.addoption(
+        "--ovoscope-accuracy-top-n",
+        action="store",
+        type=int,
+        default=10,
+        metavar="N",
+        help=("Show the N hardest utterances (lowest cross-pipeline pass "
+              "rate) in the Markdown report. Default: 10."),
     )
 
 
@@ -377,6 +397,59 @@ def _resolve_intent_case_meta(item):
             getattr(func, "_intent_case_skill_id", ""))
 
 
+def _autodiscover_intent_cases(config):
+    """Walk pytest's loaded test modules and trigger auto-discovery.
+
+    Pytest collects tests from files matching ``test_*.py`` (or
+    ``*_test.py``) — *not* from ``conftest.py``. So the auto-discovery
+    target is a thin shim module like ``test_intent_cases.py`` that
+    declares::
+
+        ovoscope_intent_cases = dict(skill_id=..., handlers=...)
+
+    On the very first ``pytest_pycollect_makemodule`` we resolve the
+    module, scan it for that declaration, and inject the generated
+    TestCase classes into its namespace before pytest collects items
+    from it. The user writes one variable assignment, no
+    ``register_intent_case_tests`` call, no ``globals()`` argument.
+
+    Skills already calling :func:`register_intent_case_tests` explicitly
+    are skipped via the ``_ovoscope_intent_cases_registered`` marker.
+    """
+    # Tracked in pytest_pycollect_makemodule; this helper kept for symmetry
+    # / future use (e.g. a CLI hook).
+    return None
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_pycollect_makemodule(module_path, path, parent):
+    """Auto-register intent-case tests on shim modules that declare
+    ``ovoscope_intent_cases = {...}``.
+
+    The hookwrapper imports the module first, lets pytest build the
+    collector, then injects the generated TestCase classes into the
+    module's namespace so the standard Python-class collector finds them.
+    """
+    from ovoscope.intent_cases import autodiscover_from_conftest
+
+    outcome = yield
+    collector = outcome.get_result()
+    if collector is None:
+        return
+    try:
+        mod = collector.obj  # imports the module if not already loaded
+    except Exception:
+        return
+    if not hasattr(mod, "ovoscope_intent_cases"):
+        return
+    if getattr(mod, "_ovoscope_intent_cases_registered", False):
+        return
+    try:
+        autodiscover_from_conftest(Path(mod.__file__).parent, mod.__dict__)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ovoscope auto-discovery skipped for {mod.__file__}: {exc}")
+
+
 def pytest_collection_modifyitems(config, items):
     """In tolerant mode, mark every intent-case test as ``xfail(strict=False)``.
 
@@ -440,10 +513,18 @@ def pytest_runtest_setup(item):
 
 
 def _accuracy_summary(results):
-    """Aggregate results into pivot tables for reporting."""
+    """Aggregate results into pivot tables for reporting.
+
+    Adds, on top of the previous pivots, a per-utterance roll-up that
+    feeds the "hardest utterances" section of the Markdown report.
+    """
     by_pipeline: Dict[str, Dict[str, int]] = {}
     by_pipeline_lang: Dict[tuple, Dict[str, int]] = {}
     by_pipeline_intent: Dict[tuple, Dict[str, int]] = {}
+    # Cross-pipeline rollup: (lang, intent, utterance) -> {pass, total,
+    # failing_pipelines}. Lets us surface "which exact phrasing routes
+    # poorly across the whole stack" in one place.
+    by_utterance: Dict[tuple, Dict[str, object]] = {}
     total_pass = total = 0
     for r in results:
         total += 1
@@ -458,6 +539,16 @@ def _accuracy_summary(results):
             d["total"] += 1
             if r["passed"]:
                 d["pass"] += 1
+        utt_key = (r["lang"], r["intent"], r["utterance"])
+        u = by_utterance.setdefault(utt_key, {
+            "lang": r["lang"], "intent": r["intent"],
+            "utterance": r["utterance"],
+            "pass": 0, "total": 0, "failing_pipelines": []})
+        u["total"] += 1
+        if r["passed"]:
+            u["pass"] += 1
+        else:
+            u["failing_pipelines"].append(r["pipeline"])
     overall = (total_pass / total) if total else 0.0
     return {
         "overall_accuracy": overall,
@@ -466,7 +557,177 @@ def _accuracy_summary(results):
         "by_pipeline": by_pipeline,
         "by_pipeline_lang": {f"{p}|{l}": v for (p, l), v in by_pipeline_lang.items()},
         "by_pipeline_intent": {f"{p}|{i}": v for (p, i), v in by_pipeline_intent.items()},
+        "by_utterance": list(by_utterance.values()),
     }
+
+
+# ---------------------------------------------------------------------------
+# Baseline diff
+# ---------------------------------------------------------------------------
+def _result_key(r: dict) -> tuple:
+    """Stable identity for a single (pipeline, lang, intent, utterance) case."""
+    return (r.get("pipeline", ""), r.get("lang", ""),
+            r.get("intent", ""), r.get("utterance", ""))
+
+
+def _baseline_diff(baseline_results, current_results):
+    """Compare two result lists by case key, returning a structural diff.
+
+    Returns ``{"regressed": [...], "recovered": [...], "added": [...],
+    "removed": [...], "baseline_accuracy": float}``. Each item in
+    ``regressed`` / ``recovered`` is the matching *current* result dict
+    so callers can quote the offending utterance verbatim.
+    """
+    base_by_key = {_result_key(r): r for r in baseline_results or []}
+    cur_by_key = {_result_key(r): r for r in current_results or []}
+
+    regressed, recovered, added, removed = [], [], [], []
+    for k, cur in cur_by_key.items():
+        if k not in base_by_key:
+            added.append(cur)
+            continue
+        base = base_by_key[k]
+        if base.get("passed") and not cur.get("passed"):
+            regressed.append(cur)
+        elif (not base.get("passed")) and cur.get("passed"):
+            recovered.append(cur)
+    for k, base in base_by_key.items():
+        if k not in cur_by_key:
+            removed.append(base)
+
+    base_total = len(baseline_results or [])
+    base_pass = sum(1 for r in (baseline_results or []) if r.get("passed"))
+    base_acc = (base_pass / base_total) if base_total else 0.0
+
+    return {
+        "regressed": regressed, "recovered": recovered,
+        "added": added, "removed": removed,
+        "baseline_accuracy": base_acc, "baseline_passed": base_pass,
+        "baseline_total": base_total,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Markdown report
+# ---------------------------------------------------------------------------
+def _accuracy_markdown(summary, results, baseline_diff=None, top_n=10):
+    """Render the intent-case accuracy summary as Markdown.
+
+    Mirrors the table-and-collapsible-section style used by the existing
+    bus-coverage section in the gh-automations PR-comment workflow:
+    headline line, summary table, per-(pipeline,lang) and
+    per-(pipeline,intent) breakdowns in ``<details>`` blocks, then a
+    "hardest utterances" call-out and, when present, a baseline diff.
+    """
+    overall = summary["overall_accuracy"]
+    icon = "✅" if overall >= 0.9 else ("⚠️" if overall >= 0.7 else "❌")
+    lines = [
+        f"{icon} **{summary['passed']}/{summary['total']}** intent-case "
+        f"checks passed — overall accuracy **{overall:.1%}**.",
+        "",
+    ]
+
+    # --- Per-pipeline summary table (always visible) ---
+    lines.append("| Pipeline | Pass / Total | Accuracy |")
+    lines.append("|---|---:|---:|")
+    for pipe, d in sorted(summary["by_pipeline"].items()):
+        ratio = d["pass"] / d["total"] if d["total"] else 0.0
+        lines.append(f"| `{pipe}` | {d['pass']} / {d['total']} | {ratio:.1%} |")
+    lines.append("")
+
+    # --- Per-(pipeline, lang) ---
+    lines.append("<details><summary>Per-pipeline × language</summary>")
+    lines.append("")
+    lines.append("| Pipeline | Lang | Pass / Total | Accuracy |")
+    lines.append("|---|---|---:|---:|")
+    for key in sorted(summary["by_pipeline_lang"]):
+        pipe, lang = key.split("|", 1)
+        d = summary["by_pipeline_lang"][key]
+        ratio = d["pass"] / d["total"] if d["total"] else 0.0
+        lines.append(f"| `{pipe}` | `{lang}` | {d['pass']} / {d['total']} | {ratio:.1%} |")
+    lines.append("")
+    lines.append("</details>")
+    lines.append("")
+
+    # --- Per-(pipeline, intent) ---
+    lines.append("<details><summary>Per-pipeline × intent</summary>")
+    lines.append("")
+    lines.append("| Pipeline | Intent | Pass / Total | Accuracy |")
+    lines.append("|---|---|---:|---:|")
+    for key in sorted(summary["by_pipeline_intent"]):
+        pipe, intent = key.split("|", 1)
+        d = summary["by_pipeline_intent"][key]
+        ratio = d["pass"] / d["total"] if d["total"] else 0.0
+        lines.append(f"| `{pipe}` | `{intent}` | {d['pass']} / {d['total']} | {ratio:.1%} |")
+    lines.append("")
+    lines.append("</details>")
+    lines.append("")
+
+    # --- Hardest utterances (lowest cross-pipeline pass rate) ---
+    utts = list(summary.get("by_utterance", []))
+    # Only utterances that failed at least once and aren't no_match
+    hard = [u for u in utts
+            if u["total"] > 0 and u["pass"] < u["total"]
+            and u["intent"] != "no_match"]
+    hard.sort(key=lambda u: (u["pass"] / u["total"], -u["total"]))
+    if hard:
+        lines.append(f"<details><summary>Hardest utterances "
+                     f"(top {min(top_n, len(hard))})</summary>")
+        lines.append("")
+        lines.append("| Lang | Intent | Utterance | Pass / Total | Failing pipelines |")
+        lines.append("|---|---|---|---:|---|")
+        for u in hard[:top_n]:
+            fail_pipes = ", ".join(f"`{p}`" for p in sorted(set(u["failing_pipelines"])))
+            lines.append(f"| `{u['lang']}` | `{u['intent']}` "
+                         f"| {u['utterance']} "
+                         f"| {u['pass']} / {u['total']} | {fail_pipes} |")
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+
+    # --- Baseline diff (when supplied) ---
+    if baseline_diff is not None:
+        regressed = baseline_diff["regressed"]
+        recovered = baseline_diff["recovered"]
+        delta = overall - baseline_diff["baseline_accuracy"]
+        delta_str = f"{delta:+.1%}"
+        head = (f"vs baseline ({baseline_diff['baseline_passed']}/"
+                f"{baseline_diff['baseline_total']} = "
+                f"{baseline_diff['baseline_accuracy']:.1%}): "
+                f"{len(regressed)} regressed, {len(recovered)} recovered, "
+                f"Δ {delta_str}")
+        lines.append(f"**Baseline diff** — {head}")
+        lines.append("")
+        if regressed:
+            lines.append("<details open><summary>❌ Regressed "
+                         f"({len(regressed)})</summary>")
+            lines.append("")
+            lines.append("| Pipeline | Lang | Intent | Utterance |")
+            lines.append("|---|---|---|---|")
+            for r in regressed[:50]:
+                lines.append(f"| `{r['pipeline']}` | `{r['lang']}` | "
+                             f"`{r['intent']}` | {r['utterance']} |")
+            if len(regressed) > 50:
+                lines.append(f"| … | … | … | _+{len(regressed)-50} more_ |")
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
+        if recovered:
+            lines.append("<details><summary>✅ Recovered "
+                         f"({len(recovered)})</summary>")
+            lines.append("")
+            lines.append("| Pipeline | Lang | Intent | Utterance |")
+            lines.append("|---|---|---|---|")
+            for r in recovered[:50]:
+                lines.append(f"| `{r['pipeline']}` | `{r['lang']}` | "
+                             f"`{r['intent']}` | {r['utterance']} |")
+            if len(recovered) > 50:
+                lines.append(f"| … | … | … | _+{len(recovered)-50} more_ |")
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
@@ -500,43 +761,79 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
         ratio = d["pass"] / d["total"] if d["total"] else 0.0
         tr.write_line(f"  {key:48s}  {d['pass']:4d}/{d['total']:<4d}  {ratio:>6.1%}")
 
-    # Persist to JSON if requested.
+    # Load baseline (if any) and compute structural diff up-front so both
+    # the JSON / Markdown outputs and the gate can reuse it.
+    baseline_path = config.getoption("--ovoscope-accuracy-baseline")
+    baseline_diff = None
+    baseline_warning = None
+    if baseline_path:
+        try:
+            import json as _json
+            with open(baseline_path, "r", encoding="utf-8") as fh:
+                baseline_doc = _json.load(fh)
+            baseline_diff = _baseline_diff(
+                baseline_doc.get("results") or [],
+                accum["results"])
+        except Exception as exc:
+            baseline_warning = (f"could not read baseline "
+                                f"{baseline_path}: {exc}")
+            tr.write_line(f"\nWARNING: {baseline_warning}")
+
+    # Persist JSON.
     report_path = config.getoption("--ovoscope-accuracy-report")
     if report_path:
         import json
         import os
         os.makedirs(os.path.dirname(os.path.abspath(report_path)) or ".",
                     exist_ok=True)
+        doc = {"summary": summary, "results": accum["results"]}
+        if baseline_diff is not None:
+            doc["baseline_diff"] = {
+                "regressed": baseline_diff["regressed"],
+                "recovered": baseline_diff["recovered"],
+                "added": baseline_diff["added"],
+                "removed": baseline_diff["removed"],
+                "baseline_accuracy": baseline_diff["baseline_accuracy"],
+                "baseline_passed": baseline_diff["baseline_passed"],
+                "baseline_total": baseline_diff["baseline_total"],
+            }
         with open(report_path, "w", encoding="utf-8") as fh:
-            json.dump({"summary": summary, "results": accum["results"]},
-                      fh, indent=2)
+            json.dump(doc, fh, indent=2)
         tr.write_line(f"\nWrote accuracy report -> {report_path}")
 
-    # Gate the session on minimum / baseline accuracy.
+    # Persist Markdown (for PR-comment ingestion).
+    md_path = config.getoption("--ovoscope-accuracy-md")
+    if md_path:
+        import os
+        os.makedirs(os.path.dirname(os.path.abspath(md_path)) or ".",
+                    exist_ok=True)
+        top_n = config.getoption("--ovoscope-accuracy-top-n")
+        md = _accuracy_markdown(summary, accum["results"],
+                                baseline_diff=baseline_diff, top_n=top_n)
+        with open(md_path, "w", encoding="utf-8") as fh:
+            fh.write(md)
+        tr.write_line(f"Wrote accuracy markdown -> {md_path}")
+
+    # Gate the session.
     min_acc = config.getoption("--ovoscope-accuracy-min")
-    baseline_path = config.getoption("--ovoscope-accuracy-baseline")
     failures = []
     if min_acc is not None and summary["overall_accuracy"] < min_acc:
         failures.append(
             f"overall accuracy {summary['overall_accuracy']:.1%} < "
             f"required {min_acc:.1%}")
-    if baseline_path:
-        try:
-            import json as _json
-            with open(baseline_path, "r", encoding="utf-8") as fh:
-                base = _json.load(fh)["summary"]["overall_accuracy"]
-            if summary["overall_accuracy"] < base:
-                failures.append(
-                    f"overall accuracy {summary['overall_accuracy']:.1%} < "
-                    f"baseline {base:.1%} ({baseline_path})")
-        except Exception as exc:
-            tr.write_line(f"\nWARNING: could not read baseline "
-                          f"{baseline_path}: {exc}")
+    if baseline_diff is not None:
+        if baseline_diff["regressed"]:
+            top_regression = baseline_diff["regressed"][0]
+            failures.append(
+                f"{len(baseline_diff['regressed'])} cases regressed vs "
+                f"baseline (first: `{top_regression['pipeline']}` / "
+                f"`{top_regression['lang']}` / "
+                f"`{top_regression['intent']}` / "
+                f"{top_regression['utterance']!r})")
     if failures:
         tr.write_sep("!", "ovoscope accuracy gate FAILED")
         for f in failures:
             tr.write_line(f"  - {f}")
-        # Mark the session as failed.
         config._ovoscope_accuracy_gate_failed = True
 
 

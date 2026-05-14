@@ -397,43 +397,57 @@ def _resolve_intent_case_meta(item):
             getattr(func, "_intent_case_skill_id", ""))
 
 
-def pytest_configure(config):
-    """Auto-discover ``ovoscope_intent_cases`` declarations in conftest
-    modules so skills don't need to write any Python in their test files.
+def _autodiscover_intent_cases(config):
+    """Walk pytest's loaded test modules and trigger auto-discovery.
 
-    Walks every collected ``conftest`` module looking for a top-level
-    ``ovoscope_intent_cases`` dict; for each one found, generates the
-    full set of intent-case TestCase classes inside that conftest's
-    namespace. Skills already calling
-    :func:`ovoscope.intent_cases.register_intent_case_tests` explicitly
-    are unaffected (the explicit call marks the module as registered).
+    Pytest collects tests from files matching ``test_*.py`` (or
+    ``*_test.py``) — *not* from ``conftest.py``. So the auto-discovery
+    target is a thin shim module like ``test_intent_cases.py`` that
+    declares::
+
+        ovoscope_intent_cases = dict(skill_id=..., handlers=...)
+
+    On the very first ``pytest_pycollect_makemodule`` we resolve the
+    module, scan it for that declaration, and inject the generated
+    TestCase classes into its namespace before pytest collects items
+    from it. The user writes one variable assignment, no
+    ``register_intent_case_tests`` call, no ``globals()`` argument.
+
+    Skills already calling :func:`register_intent_case_tests` explicitly
+    are skipped via the ``_ovoscope_intent_cases_registered`` marker.
     """
-    import sys
+    # Tracked in pytest_pycollect_makemodule; this helper kept for symmetry
+    # / future use (e.g. a CLI hook).
+    return None
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_pycollect_makemodule(module_path, path, parent):
+    """Auto-register intent-case tests on shim modules that declare
+    ``ovoscope_intent_cases = {...}``.
+
+    The hookwrapper imports the module first, lets pytest build the
+    collector, then injects the generated TestCase classes into the
+    module's namespace so the standard Python-class collector finds them.
+    """
     from ovoscope.intent_cases import autodiscover_from_conftest
-    # We can't enumerate conftests directly until collection runs; instead
-    # piggy-back on the already-imported sys.modules. The pytest config
-    # phase runs after rootdir-conftests have imported, so any top-level
-    # `ovoscope_intent_cases = {...}` is already in sys.modules.
-    for mod in list(sys.modules.values()):
-        if mod is None or not hasattr(mod, "__file__"):
-            continue
-        try:
-            if not getattr(mod, "__file__", "").endswith("conftest.py"):
-                continue
-        except (AttributeError, TypeError):
-            continue
-        if getattr(mod, "_ovoscope_intent_cases_registered", False):
-            continue
-        try:
-            autodiscover_from_conftest(
-                Path(mod.__file__).parent,
-                mod.__dict__,
-            )
-        except Exception as exc:  # noqa: BLE001
-            # Non-fatal: a malformed config shouldn't prevent collection;
-            # surface in the logs instead.
-            print(f"ovoscope auto-discovery skipped for {mod.__file__}: "
-                  f"{exc}")
+
+    outcome = yield
+    collector = outcome.get_result()
+    if collector is None:
+        return
+    try:
+        mod = collector.obj  # imports the module if not already loaded
+    except Exception:
+        return
+    if not hasattr(mod, "ovoscope_intent_cases"):
+        return
+    if getattr(mod, "_ovoscope_intent_cases_registered", False):
+        return
+    try:
+        autodiscover_from_conftest(Path(mod.__file__).parent, mod.__dict__)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ovoscope auto-discovery skipped for {mod.__file__}: {exc}")
 
 
 def pytest_collection_modifyitems(config, items):

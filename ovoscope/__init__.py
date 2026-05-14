@@ -1286,6 +1286,14 @@ class GUICaptureSession:
 # ---------------------------------------------------------------------------
 # Public re-exports — see ovoscope/e2e.py for full docs
 # ---------------------------------------------------------------------------
+from ovoscope.intent_cases import (  # noqa: E402,F401
+    DEFAULT_IGNORE_MESSAGES,
+    DEFAULT_PIPELINE_FAMILIES,
+    IntentCase,
+    assert_intent_case,
+    load_intent_cases,
+    register_intent_case_tests,
+)
 from ovoscope.e2e import (  # noqa: E402,F401
     E2EPipelineHarness,
     detach_intent,

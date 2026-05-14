@@ -75,6 +75,11 @@ M2V_PIPELINE = [
     "ovos-m2v-pipeline-medium",
     "ovos-m2v-pipeline-low",
 ]
+# Nebulento — fuzzy intent matching (ConfidenceMatcherPipeline). Single OPM
+# entry point; the pipeline manager handles confidence-tier routing.
+NEBULENTO_PIPELINE = ["ovos-nebulento-pipeline-plugin"]
+# Palavreado — keyword/slot intent parser (ConfidenceMatcherPipeline).
+PALAVREADO_PIPELINE = ["palavreado"]
 
 # Standard test pipeline — all standard built-in stages.
 # This requires ovos-adapt-pipeline-plugin and ovos-padatious-pipeline-plugin.

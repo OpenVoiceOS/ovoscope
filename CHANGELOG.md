@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0a1](https://github.com/TigreGotico/ovoscope/tree/0.17.0a1) (2026-05-14)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.16.0a1...0.17.0a1)
+
+**Merged pull requests:**
+
+- feat\(intent-cases\): markdown reporter, baseline diff, auto-discovery, deterministic m2v warmup [\#60](https://github.com/TigreGotico/ovoscope/pull/60) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.16.0a1](https://github.com/TigreGotico/ovoscope/tree/0.16.0a1) (2026-05-14)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.15.0a1...0.16.0a1)

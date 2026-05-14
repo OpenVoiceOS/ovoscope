@@ -1,12 +1,12 @@
 # Changelog
 
-## [0.13.1a1](https://github.com/TigreGotico/ovoscope/tree/0.13.1a1) (2026-03-14)
+## [0.14.0a1](https://github.com/TigreGotico/ovoscope/tree/0.14.0a1) (2026-05-14)
 
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.13.0...0.13.1a1)
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.13.1...0.14.0a1)
 
 **Merged pull requests:**
 
-- fix: thread names in bus coverage report [\#52](https://github.com/TigreGotico/ovoscope/pull/52) ([JarbasAl](https://github.com/JarbasAl))
+- feat: add NEBULENTO\_PIPELINE and PALAVREADO\_PIPELINE stage groups [\#54](https://github.com/TigreGotico/ovoscope/pull/54) ([JarbasAl](https://github.com/JarbasAl))
 
 
 

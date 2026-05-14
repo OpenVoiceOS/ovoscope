@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0a1](https://github.com/TigreGotico/ovoscope/tree/0.15.0a1) (2026-05-14)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.14.0a1...0.15.0a1)
+
+**Merged pull requests:**
+
+- feat\(e2e\): reusable harness, bus helpers, and intent-registration shims [\#55](https://github.com/TigreGotico/ovoscope/pull/55) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.14.0a1](https://github.com/TigreGotico/ovoscope/tree/0.14.0a1) (2026-05-14)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.13.1...0.14.0a1)

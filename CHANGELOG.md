@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.0a1](https://github.com/TigreGotico/ovoscope/tree/0.16.0a1) (2026-05-14)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.15.0a1...0.16.0a1)
+
+**Merged pull requests:**
+
+- feat\(intent-cases\): file-based intent test layout + pytest accuracy gate [\#58](https://github.com/TigreGotico/ovoscope/pull/58) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.15.0a1](https://github.com/TigreGotico/ovoscope/tree/0.15.0a1) (2026-05-14)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.14.0a1...0.15.0a1)

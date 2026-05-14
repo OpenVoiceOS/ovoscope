@@ -253,11 +253,72 @@ def assert_intent_case(minicroft, skill_id: str, handlers: Dict[str, str],
 _SHARED_MINICROFT_KEY = "_ovoscope_shared_minicroft"
 
 
+def _wait_for_m2v_sync(mc, max_wait: float = 15.0,
+                       quiet_window: float = 0.5) -> float:
+    """Wait deterministically for the m2v pipeline to finish its
+    ``handle_sync_intents`` debounce after ``mycroft.ready``.
+
+    The m2v plugin (`ovos_m2v_pipeline/__init__.py:handle_sync_intents`)
+    sleeps 3 s then re-queries the adapt + padatious intent manifests.
+    Until that returns, the pipeline matches against an empty label set
+    and every utterance falls through. We avoid relying on a fixed
+    ``time.sleep`` by:
+
+      1. Subscribing to every ``padatious:register_intent`` /
+         ``register_intent`` event on the bus.
+      2. Emitting ``mycroft.ready`` (which triggers
+         ``handle_sync_intents``).
+      3. Waiting until no new register events have arrived for
+         ``quiet_window`` seconds AND at least one register event has
+         actually been observed (or ``max_wait`` is exhausted).
+      4. Adding a small constant grace period for the in-plugin
+         ``time.sleep(3)`` debounce to actually return.
+
+    Returns the seconds slept (for diagnostics).
+    """
+    seen = {"count": 0, "last_t": 0.0}
+
+    def on_register(_serialized):
+        seen["count"] += 1
+        seen["last_t"] = time.monotonic()
+
+    mc.bus.ee.on("padatious:register_intent",
+                 lambda _: on_register(None))
+    mc.bus.ee.on("register_intent", lambda _: on_register(None))
+
+    # Wildcard "message" listener catches the serialized form on FakeBus.
+    def on_any(serialized):
+        try:
+            t = serialized.get("type") if isinstance(serialized, dict) else None
+        except Exception:
+            return
+        if not t:
+            return
+        if t == "padatious:register_intent" or t == "register_intent":
+            on_register(None)
+
+    mc.bus.ee.on("message", on_any)
+
+    t0 = time.monotonic()
+    mc.bus.emit(Message("mycroft.ready", {}, {}))
+
+    # Wait for the burst of register events to settle.
+    while time.monotonic() - t0 < max_wait:
+        time.sleep(0.1)
+        if seen["count"] > 0 and (time.monotonic() - seen["last_t"]) > quiet_window:
+            break
+    # m2v's handle_sync_intents does an internal time.sleep(3) before the
+    # actual intent set update. Pad for that ceiling.
+    time.sleep(3.5)
+    return time.monotonic() - t0
+
+
 def _shared_minicroft(skill_id: str, langs: List[str], m2v_warmup: float):
     """Lazily create one MiniCroft and warm m2v's label index.
 
     Caches the instance on a process-global so every generated class
-    shares the same boot.
+    shares the same boot. ``m2v_warmup`` is now an *upper bound*: if the
+    deterministic event-based wait finishes faster, we return early.
     """
     cache = globals().setdefault(_SHARED_MINICROFT_KEY, {})
     key = (skill_id, tuple(langs))
@@ -265,13 +326,15 @@ def _shared_minicroft(skill_id: str, langs: List[str], m2v_warmup: float):
         LOG.set_level("CRITICAL")
         secondary = [l for l in langs if l != "en-US"]
         mc = get_minicroft([skill_id], secondary_langs=secondary or None)
-        # m2v consumes ``padatious:register_intent`` to (re)build its label
-        # index; ``mycroft.ready`` triggers ``handle_sync_intents``. Without
-        # this nudge the first m2v call logs "No model classes match
-        # registered intents" and falls through.
-        mc.bus.emit(Message("mycroft.ready", {}, {}))
         if m2v_warmup > 0:
-            time.sleep(m2v_warmup)
+            try:
+                _wait_for_m2v_sync(mc, max_wait=max(m2v_warmup, 5.0))
+            except Exception:
+                # If the deterministic wait fails for any reason
+                # (e.g. FakeBus internals change), fall back to a sleep
+                # so the suite still runs.
+                mc.bus.emit(Message("mycroft.ready", {}, {}))
+                time.sleep(m2v_warmup)
         cache[key] = mc
     return cache[key]
 
@@ -379,4 +442,66 @@ def register_intent_case_tests(
                                 doc)
         target_globals[cls_name] = cls
         created[cls_name] = cls
+    # Mark generated classes so the pytest auto-discovery hook can skip a
+    # cases_dir whose tests are already registered by an explicit call.
+    target_globals["_ovoscope_intent_cases_registered"] = True
+    return created
+
+
+# ---------------------------------------------------------------------------
+# Pytest auto-discovery (no Python boilerplate required in the skill).
+#
+# A skill can opt in by adding a ``conftest.py`` next to its
+# ``cases/`` directory containing:
+#
+#     ovoscope_intent_cases = dict(
+#         skill_id="my-skill.author",
+#         handlers={"DoX.intent": "MySkill.handle_do_x", ...},
+#     )
+#
+# The ``pytest_collect_directory`` hook on the ovoscope pytest plugin
+# discovers the conftest, walks ``<dir>/cases/`` and generates the same
+# TestCase classes ``register_intent_case_tests`` would have created —
+# zero boilerplate in the test module.
+# ---------------------------------------------------------------------------
+def autodiscover_from_conftest(conftest_dir: Union[str, Path],
+                               target_globals: dict) -> Dict[str, type]:
+    """Look for ``ovoscope_intent_cases`` config in a conftest namespace
+    and call :func:`register_intent_case_tests` accordingly.
+
+    The conftest must expose a dict like::
+
+        ovoscope_intent_cases = {
+            "skill_id": "my-skill.author",
+            "handlers": {"WhoAreYou.intent": "MySkill.handle_who", ...},
+            # optional overrides:
+            "cases_dir": "cases",
+            "pipelines": {"Custom": [...]},
+            "ignore_messages": [...],
+            "timeout": 30,
+            "m2v_warmup": 10.0,
+        }
+
+    Returns ``{}`` if the conftest has no ``ovoscope_intent_cases`` or
+    the cases directory does not exist.
+    """
+    cfg = target_globals.get("ovoscope_intent_cases")
+    if not cfg:
+        return {}
+    base = Path(conftest_dir)
+    cases_dir = Path(cfg.get("cases_dir", "cases"))
+    if not cases_dir.is_absolute():
+        cases_dir = base / cases_dir
+    if not cases_dir.is_dir():
+        return {}
+    return register_intent_case_tests(
+        target_globals,
+        skill_id=cfg["skill_id"],
+        handlers=cfg["handlers"],
+        cases_dir=cases_dir,
+        pipelines=cfg.get("pipelines"),
+        ignore_messages=cfg.get("ignore_messages"),
+        timeout=cfg.get("timeout", 30),
+        m2v_warmup=cfg.get("m2v_warmup", 10.0),
+    )
     return created

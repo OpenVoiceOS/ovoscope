@@ -43,11 +43,28 @@ class _SinkSkill:
     """
 
     def __init__(self, bus: Any, skill_id: str = "__ovoscope_sink__") -> None:
-        self.bus = bus
         self.skill_id = skill_id
         self._last_match: Optional[Message] = None
-        bus.on("intent.service.skills.activated", self._handle)
-        bus.on("intent_failure", self._handle_failure)
+        self._bus: Any = None
+        self.bus = bus
+
+    @property
+    def bus(self) -> Any:
+        return self._bus
+
+    @bus.setter
+    def bus(self, new_bus: Any) -> None:
+        # Detach handlers from the previous bus (if any) before rebinding.
+        if self._bus is not None:
+            try:
+                self._bus.remove("intent.service.skills.activated", self._handle)
+                self._bus.remove("intent_failure", self._handle_failure)
+            except Exception:
+                pass
+        self._bus = new_bus
+        if new_bus is not None:
+            new_bus.on("intent.service.skills.activated", self._handle)
+            new_bus.on("intent_failure", self._handle_failure)
 
     def _handle(self, message: Any) -> None:
         """Capture matched intent messages."""

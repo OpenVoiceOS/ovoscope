@@ -2,10 +2,12 @@
 
 import pytest
 
+from ovos_utils.fakebus import FakeBus
+
 from ovoscope.pipeline import _SinkSkill
 
 
-class _FakeBus:
+class _RecordingBus:
     def __init__(self):
         self.handlers = []
         self.removed = []
@@ -18,41 +20,39 @@ class _FakeBus:
 
 
 class TestSinkSkillBusHandling:
-    def test_constructs_with_bus_none(self):
-        # Regression: _SinkSkill(bus=None) used to crash because __init__
-        # called bus.on(...) before checking for None. PipelineHarness relies
-        # on this two-step construction (create skill, then attach bus after
-        # MiniCroft is built).
-        sink = _SinkSkill(bus=None)
-        assert sink.bus is None
+    def test_default_constructs_with_fakebus(self):
+        # Regression: previously _SinkSkill(bus=None) crashed and
+        # PipelineHarness relied on passing None then rebinding. Now bus
+        # defaults to a FakeBus so construction is always safe and the
+        # skill is immediately usable.
+        sink = _SinkSkill()
+        assert isinstance(sink.bus, FakeBus)
         assert sink._last_match is None
 
-    def test_attaches_when_bus_set_via_setter(self):
+    def test_explicit_none_falls_back_to_fakebus(self):
         sink = _SinkSkill(bus=None)
-        bus = _FakeBus()
-        sink.bus = bus
-        # Both subscriptions registered
-        events = [e for e, _ in bus.handlers]
-        assert "intent.service.skills.activated" in events
-        assert "intent_failure" in events
+        assert isinstance(sink.bus, FakeBus)
 
-    def test_constructs_with_live_bus(self):
-        bus = _FakeBus()
+    def test_constructs_with_supplied_bus(self):
+        bus = _RecordingBus()
         sink = _SinkSkill(bus=bus)
         events = [e for e, _ in bus.handlers]
         assert "intent.service.skills.activated" in events
         assert "intent_failure" in events
 
     def test_rebinding_bus_detaches_previous(self):
-        old = _FakeBus()
-        new = _FakeBus()
+        old = _RecordingBus()
+        new = _RecordingBus()
         sink = _SinkSkill(bus=old)
         sink.bus = new
-        # Old bus had its handlers removed
-        old_removed_events = [e for e, _ in old.removed]
-        assert "intent.service.skills.activated" in old_removed_events
-        assert "intent_failure" in old_removed_events
-        # New bus has fresh handlers
+        old_removed = [e for e, _ in old.removed]
+        assert "intent.service.skills.activated" in old_removed
+        assert "intent_failure" in old_removed
         new_events = [e for e, _ in new.handlers]
         assert "intent.service.skills.activated" in new_events
         assert "intent_failure" in new_events
+
+    def test_setting_bus_to_none_raises(self):
+        sink = _SinkSkill()
+        with pytest.raises(ValueError):
+            sink.bus = None

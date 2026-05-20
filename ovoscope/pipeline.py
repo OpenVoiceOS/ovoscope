@@ -42,11 +42,14 @@ class _SinkSkill:
     return it from :meth:`match`.
     """
 
-    def __init__(self, bus: Any, skill_id: str = "__ovoscope_sink__") -> None:
+    def __init__(self, bus: Optional[Any] = None, skill_id: str = "__ovoscope_sink__") -> None:
+        from ovos_utils.fakebus import FakeBus
+
         self.skill_id = skill_id
         self._last_match: Optional[Message] = None
-        self._bus: Any = None
-        self.bus = bus
+        self._bus: Any = bus if bus is not None else FakeBus()
+        self._bus.on("intent.service.skills.activated", self._handle)
+        self._bus.on("intent_failure", self._handle_failure)
 
     @property
     def bus(self) -> Any:
@@ -54,17 +57,17 @@ class _SinkSkill:
 
     @bus.setter
     def bus(self, new_bus: Any) -> None:
-        # Detach handlers from the previous bus (if any) before rebinding.
-        if self._bus is not None:
-            try:
-                self._bus.remove("intent.service.skills.activated", self._handle)
-                self._bus.remove("intent_failure", self._handle_failure)
-            except Exception:
-                pass
+        if new_bus is None:
+            raise ValueError("_SinkSkill.bus cannot be None; pass a real bus or omit to default to FakeBus.")
+        # Detach handlers from the previous bus before rebinding.
+        try:
+            self._bus.remove("intent.service.skills.activated", self._handle)
+            self._bus.remove("intent_failure", self._handle_failure)
+        except Exception:
+            pass
         self._bus = new_bus
-        if new_bus is not None:
-            new_bus.on("intent.service.skills.activated", self._handle)
-            new_bus.on("intent_failure", self._handle_failure)
+        new_bus.on("intent.service.skills.activated", self._handle)
+        new_bus.on("intent_failure", self._handle_failure)
 
     def _handle(self, message: Any) -> None:
         """Capture matched intent messages."""
@@ -122,8 +125,9 @@ class PipelineHarness:
         """Start MiniCroft with the specified pipeline and no skills."""
         from ovoscope import get_minicroft
 
-        # Inject internal sink skill to capture matched intents
-        sink_skill = _SinkSkill(bus=None)  # bus set after MiniCroft creation
+        # Inject internal sink skill to capture matched intents.
+        # Constructed with a default FakeBus; rebound to MiniCroft's real bus below.
+        sink_skill = _SinkSkill()
 
         self._mc = get_minicroft(
             skill_ids=[],

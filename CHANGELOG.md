@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.1a1](https://github.com/TigreGotico/ovoscope/tree/0.17.1a1) (2026-05-20)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.17.0a1...0.17.1a1)
+
+**Merged pull requests:**
+
+- fix\(pipeline-harness\): default \_SinkSkill bus to FakeBus [\#62](https://github.com/TigreGotico/ovoscope/pull/62) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.17.0a1](https://github.com/TigreGotico/ovoscope/tree/0.17.0a1) (2026-05-14)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.16.0a1...0.17.0a1)

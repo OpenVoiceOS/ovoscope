@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0a1](https://github.com/TigreGotico/ovoscope/tree/0.18.0a1) (2026-06-10)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.17.1a1...0.18.0a1)
+
+**Merged pull requests:**
+
+- feat\(phal\): plugin\_factories for MiniPHAL and PHALTest [\#65](https://github.com/TigreGotico/ovoscope/pull/65) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.17.1a1](https://github.com/TigreGotico/ovoscope/tree/0.17.1a1) (2026-05-20)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.17.0a1...0.17.1a1)

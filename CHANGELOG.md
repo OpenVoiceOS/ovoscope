@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0a1](https://github.com/TigreGotico/ovoscope/tree/0.19.0a1) (2026-06-12)
+
+[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.18.0a1...0.19.0a1)
+
+**Merged pull requests:**
+
+- feat: MiniVoiceLoop + simple/classic listener bus-sequence harnesses [\#67](https://github.com/TigreGotico/ovoscope/pull/67) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.18.0a1](https://github.com/TigreGotico/ovoscope/tree/0.18.0a1) (2026-06-10)
 
 [Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.17.1a1...0.18.0a1)

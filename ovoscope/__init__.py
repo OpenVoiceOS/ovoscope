@@ -1107,6 +1107,25 @@ except ImportError as e:
     else:
         raise
 
+from ovoscope.voice_loop import (  # noqa: F401
+    ListenerHarness,
+    MiniVoiceLoop,
+    MiniHotwordContainer,
+    MockFileMicrophone,
+    MockStreamingSTT,
+    get_mini_voice_loop,
+    VoiceLoopTest,
+)
+from ovoscope.simple_listener import (  # noqa: F401
+    MiniSimpleListener,
+    get_mini_simple_listener,
+)
+from ovoscope.classic_listener import (  # noqa: F401
+    MiniClassicListener,
+    bridge_recognizer_loop_to_bus,
+    classic_listener_available,
+)
+
 
 @dataclasses.dataclass
 class GUICaptureSession:

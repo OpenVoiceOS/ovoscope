@@ -11,6 +11,7 @@
 | [pydantic-integration.md](pydantic-integration.md) | Using `ovos-pydantic-models` with OvoScope |
 | [audio-testing.md](audio-testing.md) | `AudioServiceHarness`, `PlaybackServiceHarness` — testing audio services |
 | [listener.md](listener.md) | `MiniListener`, `get_mini_listener`, `ListenerTest`, `MockVADEngine`, `MockHotWordEngine`, `VADTest`, `WakeWordTest` — testing audio transformer plugins, STT pipeline, VAD, and wake-word |
+| [voice-loop.md](voice-loop.md) | `MiniVoiceLoop` / `MiniSimpleListener` / `MiniClassicListener` — file-driven bus-sequence testing for the ovos-dinkum, ovos-simple, and mycroft-classic listener services (wake-word → record-begin → utterance), with verifier-chain gating |
 | [gui-testing.md](gui-testing.md) | `GUICaptureSession` — asserting GUI page navigation and namespace values |
 | [bus-coverage.md](bus-coverage.md) | `BusCoverageTracker`, `BusCoverageReport` — measuring handler and emitter coverage per skill |
 ## Conceptual Model
@@ -84,6 +85,17 @@ from ovoscope.listener import (
     VADTest,             # declarative VAD test runner
     WakeWordTest,        # declarative WakeWord test runner
 )
+# Listener-service bus-sequence testing (dinkum / simple / classic)
+from ovoscope import (
+    MiniVoiceLoop,        # ovos-dinkum-listener: feed PCM chunks or an audio file
+    MiniSimpleListener,   # ovos-simple-listener: drive the loop over an audio file
+    MiniClassicListener,  # mycroft-classic-listener: best-effort file drive + bridge
+    get_mini_voice_loop,  # factory: create MiniVoiceLoop
+    VoiceLoopTest,        # declarative wake-word → bus-sequence test runner
+    MiniHotwordContainer, # controllable hotword container with a verifier chain
+    MockFileMicrophone,   # file-backed mic plugin shared across listener harnesses
+    MockStreamingSTT,     # configurable transcript STT mock
+)
 ```
 Type aliases also exported:
 ```python
@@ -115,12 +127,37 @@ msgs = listener.feed_audio(b"\x00" * 1024)
 listener.shutdown()
 ```
 
+## Listener-Service Bus-Sequence Testing
+
+OVOS has several listener **services** — ovos-dinkum-listener, ovos-simple-listener,
+and mycroft-classic-listener — each emitting the same `recognizer_loop:*` bus
+events.  `MiniVoiceLoop`, `MiniSimpleListener`, and `MiniClassicListener` each
+wire their real service to a `FakeBus` with mock mic/VAD/STT/wake-word plugins,
+drive it over an arbitrary audio file (or PCM frames), and capture the emitted
+sequence — sharing one set of assertion helpers.  `MiniVoiceLoop` also exercises
+the dinkum verifier-chain gate that decides whether a detection survives.
+
+See [voice-loop.md](voice-loop.md) for full API reference and usage patterns.
+
+```python
+from unittest.mock import Mock
+from ovoscope.voice_loop import MiniVoiceLoop, MockHotWordEngine
+
+ww = MockHotWordEngine("hey_mycroft", trigger_after=3)
+accepting = Mock(); accepting.verify.return_value = True
+
+with MiniVoiceLoop(ww_instances={"hey_mycroft": ww},
+                   verifiers=[accepting]) as vl:
+    msgs = vl.feed_chunks([b"\x00" * 512] * 5)
+    vl.assert_record_begin_emitted(msgs)
+```
+
 ## What OvoScope Does NOT Do
 - Does not start a real WebSocket MessageBus server — uses `FakeBus` (in-process pub/sub).
 - Does not load PHAL plugins or the audio service — only skills and the intent pipeline.
 - Does not test GUI rendering — GUI namespace messages are ignored by default (`ignore_gui=True`).
 - Does not test TTS — operates at the `recognizer_loop:utterance` level (see [audio-testing.md](audio-testing.md) for TTS lifecycle testing).
-- `MiniListener` covers `AudioTransformersService`, the STT pipeline, and mock VAD/WakeWord engines — not the full `DinkumVoiceLoop` state machine.
+- `MiniListener` covers `AudioTransformersService`, the STT pipeline, and mock VAD/WakeWord engines. `MiniVoiceLoop` / `MiniSimpleListener` / `MiniClassicListener` drive the dinkum, simple, and classic listener **services** from an audio file and capture the `recognizer_loop:*` bus sequence; the classic file drive is best-effort (energy-based pipeline).
 ## Quick Links
 | Resource | Path |
 |---|---|

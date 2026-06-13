@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0a3](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.0a3) (2026-06-13)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.0a2...0.19.0a3)
+
+**Merged pull requests:**
+
+- chore: remove agent-audit scratch files [\#71](https://github.com/OpenVoiceOS/ovoscope/pull/71) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.19.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.0a2) (2026-06-13)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.0a1...0.19.0a2)

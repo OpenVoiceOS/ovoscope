@@ -1,60 +1,68 @@
 # Changelog
 
-## [0.19.0a1](https://github.com/TigreGotico/ovoscope/tree/0.19.0a1) (2026-06-12)
+## [0.19.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.0a2) (2026-06-13)
 
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.18.0a1...0.19.0a1)
-
-**Merged pull requests:**
-
-- feat: MiniVoiceLoop + simple/classic listener bus-sequence harnesses [\#67](https://github.com/TigreGotico/ovoscope/pull/67) ([JarbasAl](https://github.com/JarbasAl))
-
-## [0.18.0a1](https://github.com/TigreGotico/ovoscope/tree/0.18.0a1) (2026-06-10)
-
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.17.1a1...0.18.0a1)
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.0a1...0.19.0a2)
 
 **Merged pull requests:**
 
-- feat\(phal\): plugin\_factories for MiniPHAL and PHALTest [\#65](https://github.com/TigreGotico/ovoscope/pull/65) ([JarbasAl](https://github.com/JarbasAl))
+- docs: standardize NGI0 Commons Fund attribution [\#69](https://github.com/OpenVoiceOS/ovoscope/pull/69) ([JarbasAl](https://github.com/JarbasAl))
 
-## [0.17.1a1](https://github.com/TigreGotico/ovoscope/tree/0.17.1a1) (2026-05-20)
+## [0.19.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.0a1) (2026-06-12)
 
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.17.0a1...0.17.1a1)
-
-**Merged pull requests:**
-
-- fix\(pipeline-harness\): default \_SinkSkill bus to FakeBus [\#62](https://github.com/TigreGotico/ovoscope/pull/62) ([JarbasAl](https://github.com/JarbasAl))
-
-## [0.17.0a1](https://github.com/TigreGotico/ovoscope/tree/0.17.0a1) (2026-05-14)
-
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.16.0a1...0.17.0a1)
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.18.0a1...0.19.0a1)
 
 **Merged pull requests:**
 
-- feat\(intent-cases\): markdown reporter, baseline diff, auto-discovery, deterministic m2v warmup [\#60](https://github.com/TigreGotico/ovoscope/pull/60) ([JarbasAl](https://github.com/JarbasAl))
+- feat: MiniVoiceLoop + simple/classic listener bus-sequence harnesses [\#67](https://github.com/OpenVoiceOS/ovoscope/pull/67) ([JarbasAl](https://github.com/JarbasAl))
 
-## [0.16.0a1](https://github.com/TigreGotico/ovoscope/tree/0.16.0a1) (2026-05-14)
+## [0.18.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.18.0a1) (2026-06-10)
 
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.15.0a1...0.16.0a1)
-
-**Merged pull requests:**
-
-- feat\(intent-cases\): file-based intent test layout + pytest accuracy gate [\#58](https://github.com/TigreGotico/ovoscope/pull/58) ([JarbasAl](https://github.com/JarbasAl))
-
-## [0.15.0a1](https://github.com/TigreGotico/ovoscope/tree/0.15.0a1) (2026-05-14)
-
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.14.0a1...0.15.0a1)
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.17.1a1...0.18.0a1)
 
 **Merged pull requests:**
 
-- feat\(e2e\): reusable harness, bus helpers, and intent-registration shims [\#55](https://github.com/TigreGotico/ovoscope/pull/55) ([JarbasAl](https://github.com/JarbasAl))
+- feat\(phal\): plugin\_factories for MiniPHAL and PHALTest [\#65](https://github.com/OpenVoiceOS/ovoscope/pull/65) ([JarbasAl](https://github.com/JarbasAl))
 
-## [0.14.0a1](https://github.com/TigreGotico/ovoscope/tree/0.14.0a1) (2026-05-14)
+## [0.17.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.17.1a1) (2026-05-20)
 
-[Full Changelog](https://github.com/TigreGotico/ovoscope/compare/0.13.1...0.14.0a1)
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.17.0a1...0.17.1a1)
 
 **Merged pull requests:**
 
-- feat: add NEBULENTO\_PIPELINE and PALAVREADO\_PIPELINE stage groups [\#54](https://github.com/TigreGotico/ovoscope/pull/54) ([JarbasAl](https://github.com/JarbasAl))
+- fix\(pipeline-harness\): default \_SinkSkill bus to FakeBus [\#62](https://github.com/OpenVoiceOS/ovoscope/pull/62) ([JarbasAl](https://github.com/JarbasAl))
+
+## [0.17.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.17.0a1) (2026-05-14)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.16.0a1...0.17.0a1)
+
+**Merged pull requests:**
+
+- feat\(intent-cases\): markdown reporter, baseline diff, auto-discovery, deterministic m2v warmup [\#60](https://github.com/OpenVoiceOS/ovoscope/pull/60) ([JarbasAl](https://github.com/JarbasAl))
+
+## [0.16.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.16.0a1) (2026-05-14)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.15.0a1...0.16.0a1)
+
+**Merged pull requests:**
+
+- feat\(intent-cases\): file-based intent test layout + pytest accuracy gate [\#58](https://github.com/OpenVoiceOS/ovoscope/pull/58) ([JarbasAl](https://github.com/JarbasAl))
+
+## [0.15.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.15.0a1) (2026-05-14)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.14.0a1...0.15.0a1)
+
+**Merged pull requests:**
+
+- feat\(e2e\): reusable harness, bus helpers, and intent-registration shims [\#55](https://github.com/OpenVoiceOS/ovoscope/pull/55) ([JarbasAl](https://github.com/JarbasAl))
+
+## [0.14.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.14.0a1) (2026-05-14)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.13.1...0.14.0a1)
+
+**Merged pull requests:**
+
+- feat: add NEBULENTO\_PIPELINE and PALAVREADO\_PIPELINE stage groups [\#54](https://github.com/OpenVoiceOS/ovoscope/pull/54) ([JarbasAl](https://github.com/JarbasAl))
 
 
 

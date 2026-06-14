@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.1a1) (2026-06-14)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.0a3...0.19.1a1)
+
+**Merged pull requests:**
+
+- fix: drop removed 'path' arg from pytest\_pycollect\_makemodule hook \(pytest\>=8 compat\) [\#73](https://github.com/OpenVoiceOS/ovoscope/pull/73) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.19.0a3](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.0a3) (2026-06-13)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.0a2...0.19.0a3)

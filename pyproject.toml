@@ -16,6 +16,10 @@ dependencies = [
     # Alpha pin: 2.0.4 stable not yet released; 2.0.4a2 is the minimum that
     # includes the FakeBus-compatible SkillManager changes ovoscope depends on.
     "ovos-core>=2.0.4a2",
+    # ovoscope ships a pytest plugin (pytest11 entry point) -> pytest is a runtime
+    # dependency. >=8 is required: the pytest_pycollect_makemodule hook dropped the
+    # 'path' argument in pytest 8.
+    "pytest>=8",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -31,7 +35,6 @@ audio = ["ovos-audio>=1.2.0"]
 dev = [
     "ovos-audio>=1.2.0",
     "ovos-pydantic-models>=0.1.0",
-    "pytest",
     "pytest-cov",
 ]
 

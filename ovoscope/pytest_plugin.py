@@ -422,7 +422,7 @@ def _autodiscover_intent_cases(config):
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_pycollect_makemodule(module_path, path, parent):
+def pytest_pycollect_makemodule(module_path, parent):
     """Auto-register intent-case tests on shim modules that declare
     ``ovoscope_intent_cases = {...}``.
 

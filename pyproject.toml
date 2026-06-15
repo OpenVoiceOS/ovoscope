@@ -32,9 +32,21 @@ classifiers = [
 [project.optional-dependencies]
 pydantic = ["ovos-pydantic-models>=0.1.0"]
 audio = ["ovos-audio>=1.2.0"]
+# End-to-end TTS intelligibility scoring (WER/CER round-trip via reference STT).
+# faster-whisper itself is pulled by the plugin — don't list it here to avoid
+# version skew.
+tts = [
+    "ovos-audio>=1.2.0",
+    "jiwer",
+    "ovos-utterance-normalizer",
+    "ovos-stt-plugin-fasterwhisper",
+]
 dev = [
     "ovos-audio>=1.2.0",
     "ovos-pydantic-models>=0.1.0",
+    "jiwer",
+    "ovos-utterance-normalizer",
+    "ovos-stt-plugin-fasterwhisper",
     "pytest-cov",
 ]
 

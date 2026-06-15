@@ -1096,6 +1096,28 @@ except ImportError as e:
         raise
 
 try:
+    from ovoscope.tts_intelligibility import (  # noqa: F401
+        TTSIntelligibilityHarness,
+        IntelligibilityReport,
+        UtteranceScore,
+        score_tts_intelligibility,
+    )
+except ImportError as e:
+    # Optional [tts] extra. Silence only when the missing module is one of the
+    # optional TTS-scoring deps; a logic error in a present lib must re-raise.
+    _TTS_OPTIONAL_MODULES = (
+        "jiwer",
+        "ovos_audio", "ovos_audio.audio",
+        "ovos_utterance_normalizer",
+        "ovos_stt_plugin_fasterwhisper",
+        "faster_whisper",
+    )
+    if isinstance(e, ModuleNotFoundError) and e.name in _TTS_OPTIONAL_MODULES:
+        pass
+    else:
+        raise
+
+try:
     from ovoscope.listener import (  # noqa: F401
         MiniListener,
         get_mini_listener,

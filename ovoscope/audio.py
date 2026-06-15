@@ -518,21 +518,32 @@ class PlaybackServiceHarness:
     Args:
         validate_source: Enable session-source validation in the service.
         disable_ocp: Disable legacy OCP in the encapsulated AudioService.
+        tts: TTS instance to drive the PlaybackService with. Defaults to a
+            fresh ``MockTTS()`` (backward compatible). Pass a real TTS plugin
+            to synthesise actual audio — the rendered WAV path of each
+            utterance is captured in :attr:`captured_wavs`.
     """
 
     def __init__(self, validate_source: bool = False,
-                 disable_ocp: bool = True) -> None:
+                 disable_ocp: bool = True,
+                 tts: Optional[TTS] = None) -> None:
         """Initialise harness parameters.
 
         Args:
             validate_source: Enable session-source validation.
             disable_ocp: Disable OCP audio plugin.
+            tts: TTS instance to inject. Defaults to ``MockTTS()`` when None.
         """
         self.validate_source: bool = validate_source
         self.disable_ocp: bool = disable_ocp
         self.bus: Optional[FakeBus] = None
         self.svc = None  # PlaybackService instance
-        self.mock_tts: Optional[MockTTS] = None
+        # ``mock_tts`` keeps its historic name for backward compatibility but
+        # holds whatever TTS was injected (real plugin or MockTTS).
+        self.tts: Optional[TTS] = tts
+        self.mock_tts: Optional[TTS] = None
+        # Paths captured from the ``play_audio`` side_effect, in playback order.
+        self.captured_wavs: List[str] = []
         self._play_audio_patcher = None
         self._audio_enabled_patcher = None
         self._audio_output_start = threading.Event()
@@ -558,15 +569,25 @@ class PlaybackServiceHarness:
         TTS.queue = Queue()
 
         self.bus = FakeBus()
-        self.mock_tts = MockTTS()
+        # Inject the provided TTS (real plugin) or fall back to MockTTS.
+        self.mock_tts = self.tts if self.tts is not None else MockTTS()
 
-        # Patch play_audio so no real audio device is accessed
+        # Patch play_audio so no real audio device is accessed. The side_effect
+        # records the first positional arg — the rendered WAV path
+        # (ovos_audio/playback.py: ``self.p = play_audio(data)``) — so callers
+        # can round-trip the synthesised audio through a reference STT.
         mock_proc = MagicMock()
         mock_proc.communicate.return_value = (b"", b"")
         mock_proc.wait.return_value = 0
 
+        self.captured_wavs = []
+
+        def _capture_play_audio(data, *args, **kwargs):
+            self.captured_wavs.append(data)
+            return mock_proc
+
         self._play_audio_patcher = patch(
-            "ovos_audio.playback.play_audio", return_value=mock_proc
+            "ovos_audio.playback.play_audio", side_effect=_capture_play_audio
         )
         self._play_audio_patcher.start()
 

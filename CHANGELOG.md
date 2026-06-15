@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.1a2](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.1a2) (2026-06-15)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.1a1...0.19.1a2)
+
+**Merged pull requests:**
+
+- feat: TTS end-to-end intelligibility harness [\#75](https://github.com/OpenVoiceOS/ovoscope/pull/75) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.19.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.1a1) (2026-06-14)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.0a3...0.19.1a1)

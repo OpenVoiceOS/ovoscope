@@ -188,5 +188,35 @@ class TestGracefulImport(unittest.TestCase):
         self.assertIn("OK", result.stdout)
 
 
+@unittest.skipUnless(TTS_AVAILABLE, "tts extra (jiwer/ovos-audio/normalizer) not installed")
+class TestSynthesisFailureResilience(unittest.TestCase):
+    """A get_tts crash must score as a total miss, not abort the whole run."""
+
+    def test_synthesis_failure_scores_total_miss(self):
+        from ovoscope import tts_intelligibility as ti
+
+        class BoomTTS:
+            def get_tts(self, *args, **kwargs):
+                raise RuntimeError("synthesis exploded")
+
+        class EchoSTT:
+            def execute(self, audio, language=None):
+                return "anything"
+
+        harness = ti.TTSIntelligibilityHarness(
+            BoomTTS(), lang="en-US", reference_stt=EchoSTT(), mode="direct",
+        )
+        with harness:
+            report = harness.score(["hello world", "good morning"])
+
+        # The run completes and every utterance is scored a total miss (WER 1.0)
+        # rather than the exception propagating and emitting no marker at all.
+        self.assertEqual(len(report.scores), 2)
+        self.assertEqual(report.mean_wer, 1.0)
+        # The report still serialises, so the test's marker can be emitted.
+        import json
+        json.loads(json.dumps(report.to_dict()))
+
+
 if __name__ == "__main__":
     unittest.main()

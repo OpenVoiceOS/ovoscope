@@ -47,6 +47,7 @@ from typing import Any, List, Optional
 import jiwer
 
 from ovos_plugin_manager.utils.audio import AudioFile
+from ovos_utils.log import LOG
 
 # Module-level singleton for the reference STT — model load is expensive.
 _REFERENCE_STT: Optional[Any] = None
@@ -343,10 +344,18 @@ class TTSIntelligibilityHarness:
             An :class:`UtteranceScore`. On synthesis/transcription failure the
             transcript is empty and WER/CER reflect a total miss.
         """
-        if self.mode == "playback":
-            wav_path = self._render_playback(utterance)
-        else:
-            wav_path = self._render_direct(utterance)
+        try:
+            if self.mode == "playback":
+                wav_path = self._render_playback(utterance)
+            else:
+                wav_path = self._render_direct(utterance)
+        except Exception as exc:
+            # A synthesis failure (engine crash, missing model/binary, bad audio)
+            # is itself an intelligibility failure: score it as a total miss so the
+            # report is still produced and a marker is still emitted, instead of
+            # letting the exception abort the run with "no scores reported".
+            LOG.error(f"TTS synthesis failed for {utterance!r}: {exc}")
+            wav_path = None
 
         transcript = ""
         if wav_path and os.path.isfile(wav_path):

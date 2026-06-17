@@ -304,12 +304,20 @@ class TTSIntelligibilityHarness:
         return self._copy_out(captured[-1])
 
     def _render_direct(self, utterance: str) -> Optional[str]:
-        """Synthesise via ``tts.get_tts`` directly; return the WAV path."""
-        wav_path = os.path.join(
-            self._tmpdir, f"direct_{abs(hash(utterance)) & 0xffffffff}.wav"
+        """Synthesise via ``tts.get_tts`` directly; return the rendered audio path.
+
+        The output extension follows the engine's ``audio_ext`` (``wav`` by
+        default) so engines that natively emit a non-PCM container (e.g. gTTS /
+        edge-tts write ``mp3``) produce a valid file instead of mp3 bytes in a
+        ``.wav`` that the WAV reader can't decode. ``_transcribe`` transcodes
+        non-WAV output to PCM before scoring.
+        """
+        ext = (getattr(self.tts, "audio_ext", "wav") or "wav").lstrip(".")
+        out_path = os.path.join(
+            self._tmpdir, f"direct_{abs(hash(utterance)) & 0xffffffff}.{ext}"
         )
-        self.tts.get_tts(utterance, wav_path, lang=self.lang, voice=self.voice)
-        return wav_path if os.path.isfile(wav_path) else None
+        self.tts.get_tts(utterance, out_path, lang=self.lang, voice=self.voice)
+        return out_path if os.path.isfile(out_path) else None
 
     def _copy_out(self, wav_path: str) -> Optional[str]:
         """Copy a rendered WAV into the harness temp dir before the cache prunes it."""
@@ -328,11 +336,47 @@ class TTSIntelligibilityHarness:
     # Scoring
     # ------------------------------------------------------------------
 
-    def _transcribe(self, wav_path: str) -> str:
-        """Round-trip a WAV through the reference STT and return the transcript."""
+    def _transcribe(self, audio_path: str) -> str:
+        """Round-trip rendered audio through the reference STT.
+
+        ``AudioFile`` decodes PCM WAV only, so any non-WAV container the engine
+        produced (mp3 from gTTS / edge-tts, etc.) is transcoded to a temporary
+        16 kHz mono PCM WAV first. The transcode uses PyAV, which is already a
+        faster-whisper dependency, so no extra requirement is introduced.
+        """
+        wav_path = self._ensure_wav(audio_path)
         with AudioFile(wav_path) as source:
             audio = source.read()
         return self.reference_stt.execute(audio, language=self.lang) or ""
+
+    def _ensure_wav(self, audio_path: str) -> str:
+        """Return a PCM-WAV path for ``audio_path``, transcoding if needed."""
+        if audio_path.lower().endswith(".wav"):
+            return audio_path
+        wav_path = os.path.splitext(audio_path)[0] + ".transcoded.wav"
+        import av  # bundled with faster-whisper
+        from av.audio.resampler import AudioResampler
+
+        in_container = av.open(audio_path)
+        out_container = av.open(wav_path, mode="w", format="wav")
+        out_stream = out_container.add_stream("pcm_s16le", rate=16000)
+        out_stream.layout = "mono"
+        resampler = AudioResampler(format="s16", layout="mono", rate=16000)
+        try:
+            for frame in in_container.decode(audio=0):
+                frame.pts = None
+                for rframe in resampler.resample(frame):
+                    for packet in out_stream.encode(rframe):
+                        out_container.mux(packet)
+            for rframe in resampler.resample(None):
+                for packet in out_stream.encode(rframe):
+                    out_container.mux(packet)
+            for packet in out_stream.encode(None):
+                out_container.mux(packet)
+        finally:
+            out_container.close()
+            in_container.close()
+        return wav_path
 
     def score_one(self, utterance: str) -> UtteranceScore:
         """Synthesise, transcribe, and score a single utterance.

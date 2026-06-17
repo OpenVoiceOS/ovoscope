@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.3a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.3a1) (2026-06-17)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.2a1...0.19.3a1)
+
+**Merged pull requests:**
+
+- fix\(tts-intelligibility\): transcode non-WAV engine output before scoring [\#79](https://github.com/OpenVoiceOS/ovoscope/pull/79) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.19.2a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.2a1) (2026-06-16)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.1a2...0.19.2a1)

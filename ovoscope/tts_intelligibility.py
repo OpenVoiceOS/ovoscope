@@ -339,10 +339,13 @@ class TTSIntelligibilityHarness:
     def _transcribe(self, audio_path: str) -> str:
         """Round-trip rendered audio through the reference STT.
 
-        ``AudioFile`` decodes PCM WAV only, so any non-WAV container the engine
-        produced (mp3 from gTTS / edge-tts, etc.) is transcoded to a temporary
-        16 kHz mono PCM WAV first. The transcode uses PyAV, which is already a
-        faster-whisper dependency, so no extra requirement is introduced.
+        The rendered file is normalised to a 16 kHz mono PCM WAV first. This
+        covers two cases the ``AudioFile`` -> STT path otherwise mishandles:
+        non-WAV containers (mp3 from gTTS / edge-tts, which ``AudioFile`` cannot
+        decode) and WAVs at a non-16 kHz rate (e.g. mimic's 44.1 kHz ``ap``
+        voice, which the STT reads at the wrong rate and hears sped-up). The
+        normalisation uses PyAV, already a faster-whisper dependency, so no
+        extra requirement is introduced.
         """
         wav_path = self._ensure_wav(audio_path)
         with AudioFile(wav_path) as source:
@@ -350,8 +353,13 @@ class TTSIntelligibilityHarness:
         return self.reference_stt.execute(audio, language=self.lang) or ""
 
     def _ensure_wav(self, audio_path: str) -> str:
-        """Return a PCM-WAV path for ``audio_path``, transcoding if needed."""
-        if audio_path.lower().endswith(".wav"):
+        """Return a 16 kHz mono PCM-WAV path for ``audio_path``.
+
+        Already-conforming WAVs (16 kHz, mono, 16-bit PCM) are returned as-is;
+        anything else (other container, rate, channel count, or sample format)
+        is transcoded with PyAV.
+        """
+        if self._is_pcm16k_mono(audio_path):
             return audio_path
         wav_path = os.path.splitext(audio_path)[0] + ".transcoded.wav"
         import av  # bundled with faster-whisper
@@ -377,6 +385,21 @@ class TTSIntelligibilityHarness:
             out_container.close()
             in_container.close()
         return wav_path
+
+    @staticmethod
+    def _is_pcm16k_mono(audio_path: str) -> bool:
+        """True if ``audio_path`` is already a 16 kHz mono 16-bit PCM WAV."""
+        if not audio_path.lower().endswith(".wav"):
+            return False
+        import wave
+
+        try:
+            with wave.open(audio_path, "rb") as w:
+                return (w.getframerate() == 16000
+                        and w.getnchannels() == 1
+                        and w.getsampwidth() == 2)
+        except (wave.Error, EOFError, OSError):
+            return False
 
     def score_one(self, utterance: str) -> UtteranceScore:
         """Synthesise, transcribe, and score a single utterance.

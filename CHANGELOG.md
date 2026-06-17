@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.4a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.4a1) (2026-06-17)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.3a1...0.19.4a1)
+
+**Merged pull requests:**
+
+- fix\(tts-intelligibility\): normalise rendered audio to 16kHz mono before STT [\#81](https://github.com/OpenVoiceOS/ovoscope/pull/81) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.19.3a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.19.3a1) (2026-06-17)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.2a1...0.19.3a1)

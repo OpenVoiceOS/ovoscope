@@ -733,8 +733,12 @@ class End2EndTest:
         if GLOBAL_BUS_COVERAGE:
             self.track_bus_coverage = True
 
-        # standardize to be a list
-        if isinstance(self.source_message, Message):
+        # standardize to be a list. Use "not a list" rather than an
+        # isinstance(Message) check: depending on installed versions the
+        # message class may come from ovos_bus_client / ovos_spec_tools /
+        # ovos_utils.fakebus, and a cross-class isinstance can be False — which
+        # would leave a single (non-iterable) Message and break later iteration.
+        if not isinstance(self.source_message, list):
             self.source_message = [self.source_message]
         if self.ignore_gui:
             # ensure we don't mutate a shared default list

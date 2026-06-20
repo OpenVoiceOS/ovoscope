@@ -1249,6 +1249,33 @@ class GUICaptureSession:
             f"but no matching gui.page.show message was captured.\nGot: {captured}"
         )
 
+    def assert_template_shown(self, namespace: str, template: str,
+                              values: Optional[Dict[str, Any]] = None,
+                              timeout: float = 2.0) -> None:
+        """Assert that a built-in ``SYSTEM_*`` template was shown.
+
+        Ergonomic helper for the template-based GUI: a skill calling a typed
+        method such as ``self.gui.show_weather(...)`` emits a
+        ``gui.page.show`` for the ``SYSTEM_weather`` template plus
+        ``gui.value.set`` for its data keys. This asserts both in one call.
+
+        Args:
+            namespace: GUI namespace (typically the skill ID).
+            template: Template name, with or without the ``SYSTEM_`` prefix
+                (``"weather"`` and ``"SYSTEM_weather"`` are equivalent).
+            values: Optional mapping of session-data keys to expected values;
+                each is checked via :meth:`assert_namespace_value`.
+            timeout: Maximum seconds to wait for the page-show message.
+
+        Raises:
+            AssertionError: If the template was not shown, or a listed value
+                was not set.
+        """
+        name = template if template.startswith("SYSTEM_") else f"SYSTEM_{template}"
+        self.assert_page_shown(namespace, name, timeout=timeout)
+        for key, value in (values or {}).items():
+            self.assert_namespace_value(namespace, key, value)
+
     def assert_namespace_value(self, namespace: str, key: str, value: Any) -> None:
         """Assert that a namespace key was set to a specific value.
 

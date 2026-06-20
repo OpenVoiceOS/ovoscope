@@ -78,7 +78,7 @@ def _record_inprocess(args: argparse.Namespace) -> int:
         Exit code (0 = success, 1 = failure).
     """
     try:
-        from ovoscope import End2EndTest, get_minicroft
+        from ovoscope import End2EndTest
         from ovos_utils.messagebus import Message
     except ImportError as exc:
         _die(f"ovoscope import failed: {exc}")
@@ -88,26 +88,29 @@ def _record_inprocess(args: argparse.Namespace) -> int:
     pipeline: Optional[List[str]] = args.pipeline.split(",") if args.pipeline else None
     timeout: float = args.timeout
 
+    src_msg = Message(
+        "recognizer_loop:utterance",
+        data={"utterances": [args.utterance], "lang": lang},
+    )
+
+    # from_message owns the MiniCroft lifecycle: it loads the skills, emits the
+    # source utterance, captures the response sequence, and stops MiniCroft.
+    # Loading a MiniCroft here as well would double-load the skill plugins.
     print(f"[record] Loading skills: {skill_ids}")
+    print(f"[record] Sending utterance: {args.utterance!r}")
     try:
-        mc = get_minicroft(skill_ids, lang=lang, pipeline=pipeline, max_wait=60)
+        from_message_kwargs = {"lang": lang, "timeout": timeout}
+        if pipeline is not None:
+            # MiniCroft's pipeline override kwarg is `default_pipeline`; it is
+            # forwarded through from_message -> get_minicroft -> MiniCroft.
+            from_message_kwargs["default_pipeline"] = pipeline
+        test = End2EndTest.from_message(src_msg, skill_ids, **from_message_kwargs)
     except TimeoutError:
         _die("MiniCroft did not reach READY state in time.")
 
-    try:
-        src_msg = Message(
-            "recognizer_loop:utterance",
-            data={"utterances": [args.utterance], "lang": lang},
-        )
-
-        print(f"[record] Sending utterance: {args.utterance!r}")
-        test = End2EndTest.from_message(src_msg, mc, timeout=timeout)
-
-        test.save(args.output)
-        print(f"[record] Fixture saved to {args.output}")
-        return 0
-    finally:
-        mc.stop()
+    test.save(args.output)
+    print(f"[record] Fixture saved to {args.output}")
+    return 0
 
 
 def _record_live(args: argparse.Namespace) -> int:

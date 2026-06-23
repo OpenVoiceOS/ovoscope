@@ -1100,6 +1100,20 @@ except ImportError as e:
         raise
 
 try:
+    from ovoscope.media import (  # noqa: F401
+        MockOCPBackend,
+        OCPPlayerHarness,
+        OCPCaptureSession,
+    )
+except ImportError as e:
+    # Optional [media] extra (ovos-media). Silence only when the missing module
+    # is ovos-media itself; a logic error in a present lib must re-raise.
+    if isinstance(e, ModuleNotFoundError) and e.name in ("ovos_media", "ovos_media.player"):
+        pass
+    else:
+        raise
+
+try:
     from ovoscope.tts_intelligibility import (  # noqa: F401
         TTSIntelligibilityHarness,
         IntelligibilityReport,

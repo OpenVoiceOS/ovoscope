@@ -20,7 +20,17 @@ from ovos_bus_client.message import Message
 from ovos_utils.fakebus import FakeBus
 from ovos_utils.ocp import MediaState
 
-from ovoscope.media import MockOCPBackend, OCPCaptureSession
+from ovoscope.media import MockOCPBackend, OCPCaptureSession, OCPPlayerHarness
+
+
+def test_media_harness_reexported_from_package() -> None:
+    """The ovos-media harness is reachable from the top-level package, like the
+    ovos-audio harness. (media.py imports ovos-media lazily, so the export does
+    not require the [media] extra to be installed.)"""
+    import ovoscope
+    assert ovoscope.OCPPlayerHarness is OCPPlayerHarness
+    assert ovoscope.OCPCaptureSession is OCPCaptureSession
+    assert ovoscope.MockOCPBackend is MockOCPBackend
 
 
 # ---------------------------------------------------------------------------

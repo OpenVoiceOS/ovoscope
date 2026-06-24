@@ -106,6 +106,50 @@ class TestGUICaptureSessionAssertions(unittest.TestCase):
         )]
         session.assert_namespace_has_key("weather", "current_temp")
 
+    # -- assert_template_shown (SYSTEM_* template model) --
+
+    def test_assert_template_shown_with_prefix(self) -> None:
+        """Full SYSTEM_ name should match the shown template."""
+        session = self._make_session()
+        session.messages = [self._page_show_msg("weatherskill", "SYSTEM_weather")]
+        session.assert_template_shown("weatherskill", "SYSTEM_weather")
+
+    def test_assert_template_shown_without_prefix(self) -> None:
+        """Short name is normalized to the SYSTEM_ prefix."""
+        session = self._make_session()
+        session.messages = [self._page_show_msg("weatherskill", "SYSTEM_weather")]
+        session.assert_template_shown("weatherskill", "weather")
+
+    def test_assert_template_shown_with_values(self) -> None:
+        """Template + accompanying session-data values both asserted."""
+        session = self._make_session()
+        session.messages = [
+            self._page_show_msg("weatherskill", "SYSTEM_weather"),
+            self._value_set_msg("weatherskill", {"current_temp": 22,
+                                                 "condition": "Sunny"}),
+        ]
+        session.assert_template_shown("weatherskill", "weather",
+                                      values={"current_temp": 22,
+                                              "condition": "Sunny"})
+
+    def test_assert_template_shown_missing_template(self) -> None:
+        """Template never shown should raise."""
+        session = self._make_session()
+        session.messages = [self._page_show_msg("weatherskill", "SYSTEM_text")]
+        with self.assertRaises(AssertionError):
+            session.assert_template_shown("weatherskill", "weather", timeout=0.1)
+
+    def test_assert_template_shown_wrong_value(self) -> None:
+        """Template shown but a listed value differs should raise."""
+        session = self._make_session()
+        session.messages = [
+            self._page_show_msg("weatherskill", "SYSTEM_weather"),
+            self._value_set_msg("weatherskill", {"current_temp": 22}),
+        ]
+        with self.assertRaises(AssertionError):
+            session.assert_template_shown("weatherskill", "weather",
+                                          values={"current_temp": 99})
+
     # -- assert_namespace_cleared --
 
     def test_assert_namespace_cleared_match(self) -> None:

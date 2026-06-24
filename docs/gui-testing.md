@@ -225,6 +225,30 @@ Setting `ignore_gui=True` (the default on `End2EndTest`) keeps the ordered
 message sequence clean while `GUICaptureSession` captures the GUI events
 independently.
 
+## Template-Based GUI (`SYSTEM_*` templates)
+
+Skills that use the typed template API (`self.gui.show_weather(...)`,
+`show_text(...)`, `show_list(...)`, …) emit a `gui.page.show` for a built-in
+`SYSTEM_*` template plus `gui.value.set` for its data keys. `assert_template_shown`
+checks both in one call:
+
+```python
+with GUICaptureSession(mc.bus) as gui:
+    mc.bus.emit(Message("recognizer_loop:utterance",
+                        {"utterances": ["what's the weather"], "lang": "en-US"}))
+    import time; time.sleep(2)
+    # the SYSTEM_ prefix is optional ("weather" == "SYSTEM_weather")
+    gui.assert_template_shown(
+        "ovos-skill-weather.openvoiceos",
+        "weather",
+        values={"current_temp": 22, "condition": "Sunny"},
+    )
+```
+
+This is the recommended assertion for the template-based GUI: it does not care
+which display backend (Qt, pyhtmx, …) renders the template — only that the skill
+requested the right `SYSTEM_*` template with the right session data.
+
 ## What `GUICaptureSession` Does NOT Cover
 
 - Full GUI rendering — only bus messages are captured; no QML engine is run.

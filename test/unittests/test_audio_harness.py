@@ -439,5 +439,59 @@ class TestAudioCaptureSession(unittest.TestCase):
             cap.assert_sequence("recognizer_loop:audio_output_end")
 
 
+# ---------------------------------------------------------------------------
+# TestAudioHarnessNamespaceBridging
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(AUDIO_AVAILABLE, "ovos-audio (audio extra) not installed")
+class TestAudioHarnessNamespaceBridging(unittest.TestCase):
+    """The audio harness subscribes on the ovos.* SPEC topics while ovos-audio
+    emits the LEGACY topics. These tests pin that the FakeBus namespace bridging
+    is what connects them, and that turning it off isolates a single namespace.
+    """
+
+    def test_ducking_works_via_bridging_default(self) -> None:
+        """Default harness (bridging on): ovos-audio's legacy
+        recognizer_loop:audio_output_start reaches the spec-subscribed
+        _lower_volume_on_speak via modernize bridging."""
+        with AudioServiceHarness() as h:  # modernize/emit_legacy default on
+            h.play(["http://example.com/song.mp3"])
+            h.bus.emit(Message("recognizer_loop:audio_output_start"))
+            start = time.monotonic()
+            while h.backend.lower_volume_calls == 0 and time.monotonic() - start < 2.0:
+                time.sleep(0.01)
+            h.assert_volume_lowered()
+
+    def test_ducking_via_spec_topic_directly(self) -> None:
+        """A SPEC producer (ovos.audio.output.started) also reaches the
+        spec-subscribed ducking handler — the harness exercises the new namespace
+        natively too."""
+        from ovos_spec_tools import SpecMessage
+        with AudioServiceHarness() as h:
+            h.play(["http://example.com/song.mp3"])
+            h.bus.emit(Message(str(SpecMessage.AUDIO_OUTPUT_STARTED)))
+            start = time.monotonic()
+            while h.backend.lower_volume_calls == 0 and time.monotonic() - start < 2.0:
+                time.sleep(0.01)
+            h.assert_volume_lowered()
+
+    def test_no_bridging_isolates_legacy_from_spec(self) -> None:
+        """With bridging OFF, a legacy emit does NOT reach the spec-subscribed
+        ducking handler — proving the harness can exercise a single namespace."""
+        with AudioServiceHarness(modernize=False, emit_legacy=False) as h:
+            h.play(["http://example.com/song.mp3"])
+            h.bus.emit(Message("recognizer_loop:audio_output_start"))
+            time.sleep(0.3)  # give any (incorrect) bridge a chance to fire
+            self.assertEqual(h.backend.lower_volume_calls, 0)
+
+    def test_speak_lifecycle_via_bridging(self) -> None:
+        """PlaybackService emits legacy audio_output_start/end; the harness
+        observes them on the spec topics via bridging (default on)."""
+        with PlaybackServiceHarness() as h:
+            h.speak("namespace test")
+            h.assert_audio_output_started()
+            h.assert_audio_output_ended()
+
+
 if __name__ == "__main__":
     unittest.main()

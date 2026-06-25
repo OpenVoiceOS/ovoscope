@@ -33,6 +33,7 @@ from typing import ClassVar, Dict, Generator, List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 from ovos_bus_client.message import Message
+from ovos_spec_tools import SpecMessage
 from ovos_plugin_manager.templates.audio import AudioBackend
 from ovos_plugin_manager.templates.tts import TTS
 from ovos_utils.fakebus import FakeBus
@@ -227,17 +228,28 @@ class AudioServiceHarness:
 
     def __init__(self, backend_name: str = "mock",
                  validate_source: bool = False,
-                 disable_ocp: bool = True) -> None:
+                 disable_ocp: bool = True,
+                 modernize: bool = True,
+                 emit_legacy: bool = True) -> None:
         """Initialise harness parameters.
 
         Args:
             backend_name: Name for the MockAudioBackend instance.
             validate_source: Enable source-session validation in AudioService.
             disable_ocp: Disable OCP plugin during tests.
+            modernize: FakeBus also emits the ovos.* spec topic when a legacy
+                topic is emitted (legacy producer -> spec listener). ovos-audio
+                emits legacy audio_output_start/end; the harness subscribes on
+                the spec topics, so this bridge is what connects them.
+            emit_legacy: FakeBus also emits the legacy topic when an ovos.* spec
+                topic is emitted (spec producer -> legacy listener). Set both
+                False to exercise a single namespace with no bridging.
         """
         self.backend_name: str = backend_name
         self.validate_source: bool = validate_source
         self.disable_ocp: bool = disable_ocp
+        self.modernize: bool = modernize
+        self.emit_legacy: bool = emit_legacy
         self.bus: Optional[FakeBus] = None
         self.service = None  # AudioService instance
         self.backend: Optional[MockAudioBackend] = None
@@ -250,7 +262,8 @@ class AudioServiceHarness:
         """
         from ovos_audio.audio import AudioService
 
-        self.bus = FakeBus()
+        self.bus = FakeBus(modernize=self.modernize,
+                           emit_legacy=self.emit_legacy)
         self.backend = MockAudioBackend(config={}, bus=self.bus,
                                         name=self.backend_name)
 
@@ -282,9 +295,9 @@ class AudioServiceHarness:
                     self.service._get_track_length)
         self.bus.on("mycroft.audio.service.seek_forward", self.service._seek_forward)
         self.bus.on("mycroft.audio.service.seek_backward", self.service._seek_backward)
-        self.bus.on("recognizer_loop:audio_output_start",
+        self.bus.on(SpecMessage.AUDIO_OUTPUT_STARTED,
                     self.service._lower_volume_on_speak)
-        self.bus.on("recognizer_loop:audio_output_end",
+        self.bus.on(SpecMessage.AUDIO_OUTPUT_ENDED,
                     self.service._restore_volume_on_speak)
         self.bus.on("recognizer_loop:record_begin",
                     self.service._lower_volume_on_record)
@@ -508,8 +521,8 @@ class PlaybackServiceHarness:
     """Context manager wrapping PlaybackService with a MockTTS on a FakeBus.
 
     PlaybackService is a ``Thread``; this harness starts it and wires it to the
-    provided FakeBus so tests can emit ``speak`` messages and observe the
-    resulting ``recognizer_loop:audio_output_start/end`` events.
+    provided FakeBus so tests can emit ``ovos.utterance.speak`` messages and
+    observe the resulting ``ovos.audio.output.started/ended`` events.
 
     The harness patches ``ovos_utils.sound.play_audio`` so no actual audio
     device is accessed. It also drains ``TTS.queue`` before construction to
@@ -526,16 +539,27 @@ class PlaybackServiceHarness:
 
     def __init__(self, validate_source: bool = False,
                  disable_ocp: bool = True,
-                 tts: Optional[TTS] = None) -> None:
+                 tts: Optional[TTS] = None,
+                 modernize: bool = True,
+                 emit_legacy: bool = True) -> None:
         """Initialise harness parameters.
 
         Args:
             validate_source: Enable session-source validation.
             disable_ocp: Disable OCP audio plugin.
             tts: TTS instance to inject. Defaults to ``MockTTS()`` when None.
+            modernize: FakeBus also emits the ovos.* spec topic when a legacy
+                topic is emitted (legacy producer -> spec listener). PlaybackService
+                emits legacy audio_output_start/end and mic.listen; the harness
+                subscribes on the spec topics, so this bridge connects them.
+            emit_legacy: FakeBus also emits the legacy topic when an ovos.* spec
+                topic is emitted (spec producer -> legacy listener). Set both
+                False to exercise a single namespace with no bridging.
         """
         self.validate_source: bool = validate_source
         self.disable_ocp: bool = disable_ocp
+        self.modernize: bool = modernize
+        self.emit_legacy: bool = emit_legacy
         self.bus: Optional[FakeBus] = None
         self.svc = None  # PlaybackService instance
         # ``mock_tts`` keeps its historic name for backward compatibility but
@@ -568,7 +592,8 @@ class PlaybackServiceHarness:
                     break
         TTS.queue = Queue()
 
-        self.bus = FakeBus()
+        self.bus = FakeBus(modernize=self.modernize,
+                           emit_legacy=self.emit_legacy)
         # Inject the provided TTS (real plugin) or fall back to MockTTS.
         self.mock_tts = self.tts if self.tts is not None else MockTTS()
 
@@ -603,11 +628,11 @@ class PlaybackServiceHarness:
             self.mock_tts.init(self.bus, self.svc.playback_thread)
 
             # Subscribe lifecycle events for synchronisation
-            self.bus.on("recognizer_loop:audio_output_start",
+            self.bus.on(SpecMessage.AUDIO_OUTPUT_STARTED,
                         lambda m: self._audio_output_start.set())
-            self.bus.on("recognizer_loop:audio_output_end",
+            self.bus.on(SpecMessage.AUDIO_OUTPUT_ENDED,
                         lambda m: self._audio_output_end.set())
-            self.bus.on("mycroft.mic.listen",
+            self.bus.on(SpecMessage.MIC_LISTEN,
                         lambda m: self._mic_listen.set())
 
         except Exception:
@@ -660,7 +685,7 @@ class PlaybackServiceHarness:
         self._audio_output_end.clear()
         self._mic_listen.clear()
 
-        self.bus.emit(Message("speak", {
+        self.bus.emit(Message(SpecMessage.SPEAK, {
             "utterance": utterance,
             "lang": "en-US",
             "expect_response": expect_response,
@@ -692,31 +717,31 @@ class PlaybackServiceHarness:
         )
 
     def assert_audio_output_started(self, timeout: float = 3.0) -> None:
-        """Assert that recognizer_loop:audio_output_start was emitted.
+        """Assert that ovos.audio.output.started was emitted.
 
         Args:
             timeout: Seconds to wait for the event.
         """
         assert self._audio_output_start.wait(timeout), \
-            "recognizer_loop:audio_output_start was not emitted"
+            "ovos.audio.output.started was not emitted"
 
     def assert_audio_output_ended(self, timeout: float = 3.0) -> None:
-        """Assert that recognizer_loop:audio_output_end was emitted.
+        """Assert that ovos.audio.output.ended was emitted.
 
         Args:
             timeout: Seconds to wait for the event.
         """
         assert self._audio_output_end.wait(timeout), \
-            "recognizer_loop:audio_output_end was not emitted"
+            "ovos.audio.output.ended was not emitted"
 
     def assert_mic_listen(self, timeout: float = 3.0) -> None:
-        """Assert that mycroft.mic.listen was emitted after speech.
+        """Assert that ovos.mic.listen was emitted after speech.
 
         Args:
             timeout: Seconds to wait for the event.
         """
         assert self._mic_listen.wait(timeout), \
-            "mycroft.mic.listen was not emitted"
+            "ovos.mic.listen was not emitted"
 
 
 # ---------------------------------------------------------------------------
@@ -740,9 +765,18 @@ class AudioCaptureSession:
     """
 
     bus: FakeBus
+    # capture BOTH the legacy and the ovos.* spec topics of the migrating audio
+    # messages. The capture session observes the raw "message" wire stream, which
+    # carries the producer's ORIGINAL topic only (FakeBus' namespace bridging
+    # re-dispatches the counterpart as a typed event, not a second "message"
+    # event). Listing both namespaces lets the session record the sequence
+    # whether the producer emits legacy or spec, so harness users can assert on
+    # either namespace.
     track_prefixes: List[str] = dataclasses.field(default_factory=lambda: [
         "mycroft.audio.",
+        "ovos.audio.output",
         "recognizer_loop:audio_output",
+        "ovos.mic.listen",
         "mycroft.mic.listen",
     ])
     messages: List[Message] = dataclasses.field(default_factory=list)

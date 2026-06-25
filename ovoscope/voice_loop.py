@@ -501,10 +501,21 @@ class ListenerHarness:
 
     Args:
         bus: Optional :class:`FakeBus` to capture on.  Defaults to a fresh bus.
+        modernize: When a fresh bus is created, also emit the ovos.* spec topic
+            whenever a legacy topic is emitted (legacy producer -> spec
+            listener). The listener callbacks emit legacy ``recognizer_loop:*``
+            topics; this bridge is what lets a spec-topic subscriber observe
+            them. Ignored when *bus* is supplied.
+        emit_legacy: When a fresh bus is created, also emit the legacy topic
+            whenever an ovos.* spec topic is emitted (spec producer -> legacy
+            listener). Set both False to exercise a single namespace with no
+            bridging. Ignored when *bus* is supplied.
     """
 
-    def __init__(self, bus: Optional[FakeBus] = None) -> None:
-        self.bus: FakeBus = bus if bus is not None else FakeBus()
+    def __init__(self, bus: Optional[FakeBus] = None,
+                 modernize: bool = True, emit_legacy: bool = True) -> None:
+        self.bus: FakeBus = bus if bus is not None else FakeBus(
+            modernize=modernize, emit_legacy=emit_legacy)
         self._messages: List[Message] = []
         self._last_messages: List[Message] = []
         self.bus.on("message", self._capture)
@@ -696,6 +707,12 @@ class MiniVoiceLoop(ListenerHarness):
             :class:`MockStreamingSTT` returning no transcript).  Used by
             :meth:`feed_file`.
         bus: Optional :class:`FakeBus` to capture on.  Defaults to a fresh bus.
+        modernize: When a fresh bus is created, also emit the ovos.* spec topic
+            whenever a legacy topic is emitted (legacy producer -> spec
+            listener). Ignored when *bus* is supplied.
+        emit_legacy: When a fresh bus is created, also emit the legacy topic
+            whenever an ovos.* spec topic is emitted. Set both False to exercise
+            a single namespace with no bridging. Ignored when *bus* is supplied.
 
     Raises:
         RuntimeError: If *voice_loop* is ``None`` and ovos-dinkum-listener is not
@@ -720,8 +737,10 @@ class MiniVoiceLoop(ListenerHarness):
         vad_instance: Optional[Any] = None,
         stt_instance: Optional[Any] = None,
         bus: Optional[FakeBus] = None,
+        modernize: bool = True,
+        emit_legacy: bool = True,
     ) -> None:
-        super().__init__(bus)
+        super().__init__(bus, modernize=modernize, emit_legacy=emit_legacy)
 
         self.hotwords: Optional[MiniHotwordContainer] = None
         if voice_loop is not None:
@@ -924,6 +943,8 @@ def get_mini_voice_loop(
     vad_instance: Optional[Any] = None,
     stt_instance: Optional[Any] = None,
     bus: Optional[FakeBus] = None,
+    modernize: bool = True,
+    emit_legacy: bool = True,
 ) -> MiniVoiceLoop:
     """Factory: create a ready-to-feed :class:`MiniVoiceLoop`.
 
@@ -935,6 +956,12 @@ def get_mini_voice_loop(
         stt_instance: Optional streaming STT engine (defaults to
             :class:`MockStreamingSTT`).
         bus: Optional :class:`FakeBus` to capture on.
+        modernize: When a fresh bus is created, also emit the ovos.* spec topic
+            whenever a legacy topic is emitted (legacy producer -> spec
+            listener). Ignored when *bus* is supplied.
+        emit_legacy: When a fresh bus is created, also emit the legacy topic
+            whenever an ovos.* spec topic is emitted. Set both False to exercise
+            a single namespace with no bridging. Ignored when *bus* is supplied.
 
     Returns:
         A fully initialised :class:`MiniVoiceLoop`.
@@ -957,6 +984,8 @@ def get_mini_voice_loop(
         vad_instance=vad_instance,
         stt_instance=stt_instance,
         bus=bus,
+        modernize=modernize,
+        emit_legacy=emit_legacy,
     )
 
 

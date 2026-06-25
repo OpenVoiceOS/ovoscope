@@ -228,6 +228,13 @@ class E2EPipelineHarness(unittest.TestCase):
     SKILL_ID: ClassVar[str] = "test_skill_ovoscope"
     DEFAULT_LANG: ClassVar[str] = "en-US"
     STARTUP_MAX_WAIT: ClassVar[float] = 60.0
+    # Namespace-migration flags forwarded to the harness MiniCroft / FakeBus.
+    # MODERNIZE on: a legacy emit (recognizer_loop:utterance) also dispatches its
+    # ovos.* spec counterpart (ovos.utterance.handle); EMIT_LEGACY on: a spec emit
+    # also dispatches the legacy topic. Both default on. Subclasses set BOTH False
+    # to drive a single isolated namespace.
+    MODERNIZE: ClassVar[bool] = True
+    EMIT_LEGACY: ClassVar[bool] = True
 
     mc: ClassVar[Any]
     pipeline: ClassVar[Any]
@@ -252,6 +259,8 @@ class E2EPipelineHarness(unittest.TestCase):
             lang=cls.DEFAULT_LANG,
             default_pipeline=[cls.PIPELINE_ID],
             max_wait=cls.STARTUP_MAX_WAIT,
+            modernize=cls.MODERNIZE,
+            emit_legacy=cls.EMIT_LEGACY,
         )
         cls.pipeline = cls.mc.intents.pipeline_plugins[cls.PIPELINE_ID]
 

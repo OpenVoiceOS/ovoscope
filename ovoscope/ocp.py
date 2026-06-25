@@ -67,6 +67,15 @@ class OCPTest:
         patch_targets: Additional ``requests``-like module paths to patch
             (e.g. ``["my_skill.http_client.requests"]``).  The default
             target is ``"requests.Session.get"``.
+        modernize: Forwarded to the harness ``MiniCroft`` / ``FakeBus``. When
+            on (default), emitting a LEGACY topic also dispatches its ovos.*
+            spec counterpart (legacy producer -> spec listener). The OCP flow
+            is driven by ``recognizer_loop:utterance``; bridging lets it be
+            observed on / driven from ``ovos.utterance.handle`` too.
+        emit_legacy: Forwarded to the harness. When on (default), emitting an
+            ovos.* spec topic also dispatches the legacy one (spec producer ->
+            legacy listener). Set BOTH False to exercise a single namespace
+            with no cross-namespace bridging.
 
     Example::
 
@@ -86,6 +95,8 @@ class OCPTest:
     lang: str = "en-US"
     timeout: float = 20.0
     patch_targets: List[str] = field(default_factory=list)
+    modernize: bool = True
+    emit_legacy: bool = True
 
     def execute(self) -> List[Message]:
         """Run the OCP test with optional HTTP mocking.
@@ -100,7 +111,9 @@ class OCPTest:
 
         captured: List[Message] = []
 
-        mc = get_minicroft(self.skill_ids, lang=self.lang, max_wait=60)
+        mc = get_minicroft(self.skill_ids, lang=self.lang, max_wait=60,
+                           modernize=self.modernize,
+                           emit_legacy=self.emit_legacy)
         mc.bus.on("message", lambda m: captured.append(
             Message.deserialize(m) if isinstance(m, str) else m
         ))

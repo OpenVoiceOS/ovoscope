@@ -20,7 +20,13 @@ TestMiniListenerWakeWord (9 tests) — MiniListener WakeWord integration
 TestVADTest              (5 tests) — VADTest declarative helper
 TestWakeWordTest         (5 tests) — WakeWordTest declarative helper
 """
+import importlib.util
+import time
 import unittest
+from unittest.mock import MagicMock
+
+from ovos_bus_client.message import Message
+from ovos_spec_tools import SpecMessage
 
 from ovoscope.listener import (
     MockHotWordEngine,
@@ -30,6 +36,10 @@ from ovoscope.listener import (
     WakeWordTest,
     get_mini_listener,
 )
+
+# MiniListener.listen() routes audio through AudioTransformersService before
+# emitting recognizer_loop:utterance, which requires ovos-dinkum-listener.
+DINKUM_AVAILABLE = importlib.util.find_spec("ovos_dinkum_listener") is not None
 
 
 _BASE_CONFIG = {"listener": {"audio_transformers": {}}}
@@ -439,6 +449,74 @@ class TestWakeWordTest(unittest.TestCase):
         """WakeWordTest without ww_instances or ww_plugin raises RuntimeError."""
         with self.assertRaises(RuntimeError):
             WakeWordTest(audio_chunks=[b"\x00" * 512] * 3).execute()
+
+
+# ---------------------------------------------------------------------------
+# TestMiniListenerNamespaceBridging
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(
+    DINKUM_AVAILABLE, "ovos-dinkum-listener not installed"
+)
+class TestMiniListenerNamespaceBridging(unittest.TestCase):
+    """MiniListener.listen() emits the LEGACY ``recognizer_loop:utterance``
+    (migrated to ``ovos.utterance.handle``).  These tests pin that the FakeBus
+    namespace bridging connects the two namespaces, and that turning it off
+    isolates a single namespace.
+    """
+
+    @staticmethod
+    def _stt(transcript):
+        stt = MagicMock()
+        stt.execute.return_value = transcript
+        return stt
+
+    def test_utterance_legacy_reaches_spec_via_bridging(self):
+        """Default harness (bridging on): the legacy utterance emitted by
+        listen() also reaches a subscriber on the spec topic."""
+        listener = get_mini_listener(stt_instance=self._stt("hello world"))
+        legacy_hits, spec_hits = [], []
+        listener.bus.on("recognizer_loop:utterance", lambda m: legacy_hits.append(m))
+        listener.bus.on(str(SpecMessage.UTTERANCE), lambda m: spec_hits.append(m))
+        try:
+            listener.listen(b"\x00" * 1024, language="en-us")
+            time.sleep(0.05)
+            self.assertTrue(legacy_hits, "legacy recognizer_loop:utterance not seen")
+            self.assertTrue(spec_hits, "spec ovos.utterance.handle not seen via bridge")
+        finally:
+            listener.shutdown()
+
+    def test_utterance_spec_native(self):
+        """A SPEC producer (ovos.utterance.handle) reaches a spec subscriber
+        natively — the harness bus exercises the new namespace too."""
+        listener = get_mini_listener()
+        spec_hits = []
+        listener.bus.on(str(SpecMessage.UTTERANCE), lambda m: spec_hits.append(m))
+        try:
+            listener.bus.emit(Message(str(SpecMessage.UTTERANCE),
+                                      {"utterances": ["hi"], "lang": "en-us"}))
+            time.sleep(0.05)
+            self.assertTrue(spec_hits, "spec ovos.utterance.handle not delivered")
+        finally:
+            listener.shutdown()
+
+    def test_no_bridging_isolates_legacy_from_spec(self):
+        """With bridging OFF, the legacy utterance emitted by listen() does NOT
+        reach a spec-only subscriber."""
+        listener = get_mini_listener(
+            stt_instance=self._stt("hello world"),
+            modernize=False, emit_legacy=False,
+        )
+        legacy_hits, spec_hits = [], []
+        listener.bus.on("recognizer_loop:utterance", lambda m: legacy_hits.append(m))
+        listener.bus.on(str(SpecMessage.UTTERANCE), lambda m: spec_hits.append(m))
+        try:
+            listener.listen(b"\x00" * 1024, language="en-us")
+            time.sleep(0.1)
+            self.assertTrue(legacy_hits, "legacy utterance should still fire")
+            self.assertEqual(spec_hits, [], "spec topic must not fire with bridging off")
+        finally:
+            listener.shutdown()
 
 
 if __name__ == "__main__":

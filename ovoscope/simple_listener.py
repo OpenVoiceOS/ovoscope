@@ -100,6 +100,14 @@ class MiniSimpleListener(ListenerHarness):
         max_silence_seconds: Trailing silence that ends a command.
         max_speech_seconds: Hard cap on command length.
         bus: Optional :class:`FakeBus` to capture on.
+        modernize: When a fresh bus is created, also emit the ovos.* spec topic
+            whenever a legacy topic is emitted (legacy producer -> spec
+            listener). The ``_SimpleBusCallbacks`` emit legacy
+            ``recognizer_loop:*`` topics; this bridge lets a spec-topic
+            subscriber observe them. Ignored when *bus* is supplied.
+        emit_legacy: When a fresh bus is created, also emit the legacy topic
+            whenever an ovos.* spec topic is emitted. Set both False to exercise
+            a single namespace with no bridging. Ignored when *bus* is supplied.
 
     Raises:
         RuntimeError: If ovos-simple-listener is not installed.
@@ -119,8 +127,10 @@ class MiniSimpleListener(ListenerHarness):
         max_silence_seconds: float = 0.1,
         max_speech_seconds: float = 8.0,
         bus: Optional[FakeBus] = None,
+        modernize: bool = True,
+        emit_legacy: bool = True,
     ) -> None:
-        super().__init__(bus)
+        super().__init__(bus, modernize=modernize, emit_legacy=emit_legacy)
 
         try:
             from ovos_simple_listener import SimpleListener
@@ -202,6 +212,8 @@ def get_mini_simple_listener(
     vad_instance: Optional[Any] = None,
     stt_instance: Optional[Any] = None,
     bus: Optional[FakeBus] = None,
+    modernize: bool = True,
+    emit_legacy: bool = True,
 ) -> MiniSimpleListener:
     """Factory: create a ready-to-feed :class:`MiniSimpleListener`.
 
@@ -211,6 +223,12 @@ def get_mini_simple_listener(
         stt_instance: Streaming STT engine (defaults to
             :class:`MockStreamingSTT`).
         bus: Optional :class:`FakeBus` to capture on.
+        modernize: When a fresh bus is created, also emit the ovos.* spec topic
+            whenever a legacy topic is emitted (legacy producer -> spec
+            listener). Ignored when *bus* is supplied.
+        emit_legacy: When a fresh bus is created, also emit the legacy topic
+            whenever an ovos.* spec topic is emitted. Set both False to exercise
+            a single namespace with no bridging. Ignored when *bus* is supplied.
 
     Returns:
         A fully initialised :class:`MiniSimpleListener`.
@@ -220,4 +238,6 @@ def get_mini_simple_listener(
         vad_instance=vad_instance,
         stt_instance=stt_instance,
         bus=bus,
+        modernize=modernize,
+        emit_legacy=emit_legacy,
     )

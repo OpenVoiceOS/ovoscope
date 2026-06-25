@@ -95,6 +95,15 @@ class PipelineHarness:
         pipeline: List of OPM pipeline stage IDs to load.
         pipeline_config: Per-stage config overrides keyed by stage ID.
         lang: Language tag (default ``"en-US"``).
+        modernize: Forwarded to the harness ``MiniCroft`` / ``FakeBus``. When
+            on (default), emitting a LEGACY topic also dispatches its ovos.*
+            spec counterpart (legacy producer -> spec listener). Utterances are
+            injected via ``recognizer_loop:utterance``; bridging lets them also
+            drive / be observed on ``ovos.utterance.handle``.
+        emit_legacy: Forwarded to the harness. When on (default), emitting an
+            ovos.* spec topic also dispatches the legacy one (spec producer ->
+            legacy listener). Set BOTH False to exercise a single namespace
+            with no cross-namespace bridging.
 
     Example::
 
@@ -111,10 +120,14 @@ class PipelineHarness:
         pipeline: Optional[List[str]] = None,
         pipeline_config: Optional[Dict[str, Dict[str, Any]]] = None,
         lang: str = "en-US",
+        modernize: bool = True,
+        emit_legacy: bool = True,
     ) -> None:
         self.pipeline: List[str] = pipeline or []
         self.pipeline_config: Dict[str, Dict[str, Any]] = pipeline_config or {}
         self.lang: str = lang
+        self.modernize: bool = modernize
+        self.emit_legacy: bool = emit_legacy
         self._mc: Any = None
 
     # ------------------------------------------------------------------
@@ -135,6 +148,8 @@ class PipelineHarness:
             default_pipeline=self.pipeline or None,
             extra_skills={"__ovoscope_sink__": sink_skill},
             max_wait=60,
+            modernize=self.modernize,
+            emit_legacy=self.emit_legacy,
         )
 
         # Update sink skill's bus reference now that MiniCroft is created

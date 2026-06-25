@@ -269,7 +269,9 @@ class OCPPlayerHarness:
     """
 
     def __init__(self, backend_namespace: str = "audio",
-                 backend_factory: Optional[Callable[[FakeBus], AudioBackend]] = None) -> None:
+                 backend_factory: Optional[Callable[[FakeBus], AudioBackend]] = None,
+                 modernize: bool = True,
+                 emit_legacy: bool = True) -> None:
         """Initialise harness parameters.
 
         Args:
@@ -284,9 +286,22 @@ class OCPPlayerHarness:
                 backend would otherwise reach. Note the mock-only assertion helpers
                 (:meth:`assert_backend_paused`, ``backend.played_uris``) assume a
                 :class:`MockOCPBackend` and may not apply to a real backend.
+            modernize: FakeBus also emits the ovos.* spec topic when a legacy
+                topic is emitted (legacy producer -> spec listener). OCPMediaPlayer
+                subscribes to the LEGACY duck/cork topics
+                (recognizer_loop:audio_output_start/end, record_begin/end); this
+                bridge lets a spec-namespace producer's ovos.audio.output.* /
+                ovos.listener.record.* reach those legacy handlers.
+            emit_legacy: FakeBus also emits the legacy topic when an ovos.* spec
+                topic is emitted (spec producer -> legacy listener). Because the
+                player subscribes on the legacy topics, this is the bridge that
+                connects a spec producer to the player. Set both False to exercise
+                a single namespace with no bridging.
         """
         self.backend_namespace: str = backend_namespace
         self.backend_factory = backend_factory
+        self.modernize: bool = modernize
+        self.emit_legacy: bool = emit_legacy
         self.bus: Optional[FakeBus] = None
         self.player = None  # OCPMediaPlayer instance
         self.backend: Optional[AudioBackend] = None
@@ -301,7 +316,8 @@ class OCPPlayerHarness:
         """
         from ovos_media.player import OCPMediaPlayer
 
-        self.bus = FakeBus()
+        self.bus = FakeBus(modernize=self.modernize,
+                           emit_legacy=self.emit_legacy)
         if self.backend_factory is not None:
             self.backend = self.backend_factory(self.bus)
             # A config-loaded backend gets name/namespace from
@@ -624,9 +640,18 @@ class OCPCaptureSession:
     """
 
     bus: FakeBus
+    # capture BOTH the legacy and the ovos.* spec topics of the duck/cork
+    # messages the player consumes. The session observes the raw "message" wire
+    # stream, which carries the producer's ORIGINAL topic only (FakeBus' namespace
+    # bridging re-dispatches the counterpart as a typed event, not a second
+    # "message" event). Listing both namespaces lets the session record the
+    # sequence whether the producer emits legacy or spec.
     track_prefixes: List[str] = dataclasses.field(default_factory=lambda: [
         "ovos.common_play.",
         "ovos.audio.",
+        "recognizer_loop:audio_output",
+        "ovos.listener.record",
+        "recognizer_loop:record",
     ])
     messages: List[Message] = dataclasses.field(default_factory=list)
 

@@ -190,6 +190,45 @@ with OCPPlayerHarness() as h:
     # Player auto-advances or stops depending on queue + autoplay config
 ```
 
+### Driving a Real OCP Backend
+
+By default `OCPPlayerHarness` injects a `MockOCPBackend` and mocks out
+`AudioService`, so it exercises the **player state machine** but never the real
+backend routing. To test a **real** OCP audio backend end-to-end — e.g. assert
+that playing a uri makes a Music Assistant backend call its server — pass a
+`backend_factory`: a `bus -> AudioBackend` callable. The harness then wires a
+*real* `AudioService` (no autoload) with your backend as its sole service, so the
+player's `play -> load_track -> LOADED_MEDIA -> backend.play()` path actually
+reaches it.
+
+```python
+from ovoscope.media import OCPPlayerHarness
+from ovos_utils.ocp import MediaEntry, PlaybackType
+
+def make_backend(bus):
+    backend = MAssOCPAudioService(config={"url": "http://mass.local:8095"}, bus=bus)
+    backend.api = mock_client          # mock the network client the backend reaches
+    backend.player_state = {"available": True}
+    return backend
+
+with OCPPlayerHarness(backend_factory=make_backend) as h:
+    h.play(MediaEntry(uri="library://track/42", playback=PlaybackType.AUDIO))
+    h.backend.api.play_media.assert_called_once_with(queue_id, "library://track/42")
+```
+
+Notes:
+
+- The factory **owns mocking** any network client the real backend would reach.
+- Deferred uris (`library://`, `{sei}//…`) are resolved by the OCP pipeline's
+  stream extractors *before* the player in production; the harness loads no
+  extractor plugins, so it bypasses the player's stream validation when a backend
+  factory is used.
+- `name`/`namespace` are supplied by the harness if the backend lacks them
+  (normally set by `BaseMediaService.load_services()`, which the harness bypasses).
+- The mock-only helpers (`assert_backend_paused`, `backend.played_uris`) assume a
+  `MockOCPBackend` and may not apply to a real backend — assert on the backend's
+  own state/spies instead.
+
 ## OCPCaptureSession
 
 `OCPCaptureSession` — `ovoscope/media.py`
@@ -244,6 +283,12 @@ with OCPPlayerHarness() as h:
 ### OCPPlayerHarness
 
 `OCPPlayerHarness` — `ovoscope/media.py`
+
+**Constructor:** `OCPPlayerHarness(backend_namespace="audio", backend_factory=None)`.
+`backend_factory` is an optional `bus -> AudioBackend` callable; when given, the
+harness drives that real backend through a real `AudioService` (see
+[Driving a Real OCP Backend](#driving-a-real-ocp-backend)) instead of the default
+`MockOCPBackend`.
 
 **Control methods** (each emits the corresponding bus message + `time.sleep(0.05)`):
 

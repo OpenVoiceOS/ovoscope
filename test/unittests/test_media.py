@@ -212,3 +212,87 @@ class TestOCPCaptureSessionMessageAccumulation:
         self.bus.emit(Message("ovos.common_play.play"))  # should not be captured
         session.stop()
         assert session.message_types == ["custom.prefix.event"]
+
+
+try:
+    import ovos_media  # noqa: F401
+    _HAS_OVOS_MEDIA = True
+except ImportError:
+    _HAS_OVOS_MEDIA = False
+
+
+if _HAS_OVOS_MEDIA:
+    from ovos_plugin_manager.templates.media import AudioPlayerBackend
+
+    class _RecordingBackend(AudioPlayerBackend):
+        """A real OCP ``MediaBackend`` stand-in built by a factory.
+
+        Subclasses the genuine ``AudioPlayerBackend`` (not ``MockOCPBackend``) so
+        its ``load_track`` emits the real ``ovos.common_play.media.state``
+        ``LOADED_MEDIA`` event the live ``AudioService`` routes on. Records the uri
+        its ``play()`` is driven with — analogous to a Music Assistant backend
+        calling ``client.play_media(uri)`` — so a test can assert the player's play
+        path actually reached the injected backend.
+        """
+
+        def __init__(self, bus):
+            super().__init__(config={}, bus=bus)
+            self.play_calls = []
+            self.is_playing = False
+
+        def supported_uris(self):
+            return ["library", "http", "https"]
+
+        def play(self, repeat: bool = False):
+            self.is_playing = True
+            self.play_calls.append(self._now_playing)
+
+        def stop(self):
+            self.is_playing = False
+            return True
+
+        def pause(self):
+            pass
+
+        def resume(self):
+            pass
+
+        def lower_volume(self):
+            pass
+
+        def restore_volume(self):
+            pass
+
+        def get_track_length(self):
+            return 0
+
+        def get_track_position(self):
+            return 0
+
+        def set_track_position(self, milliseconds):
+            pass
+
+
+@pytest.mark.skipif(not _HAS_OVOS_MEDIA,
+                    reason="requires the [media] extra (ovos-media)")
+class TestOCPPlayerHarnessBackendInjection:
+    """OCPPlayerHarness(backend_factory=...) drives a real injected backend."""
+
+    def test_default_factory_is_mock_backend(self) -> None:
+        with OCPPlayerHarness() as h:
+            assert isinstance(h.backend, MockOCPBackend)
+            assert type(h.backend) is MockOCPBackend
+
+    def test_injected_backend_is_used(self) -> None:
+        with OCPPlayerHarness(backend_factory=_RecordingBackend) as h:
+            assert isinstance(h.backend, _RecordingBackend)
+            # name is supplied by the harness when the backend lacks one
+            assert getattr(h.backend, "name", None)
+
+    def test_player_drives_injected_backend_play(self) -> None:
+        from ovos_utils.ocp import MediaEntry, PlaybackType
+        with OCPPlayerHarness(backend_factory=_RecordingBackend) as h:
+            h.play(MediaEntry(uri="library://track/42",
+                              playback=PlaybackType.AUDIO))
+            assert h.backend.is_playing is True
+            assert h.backend.play_calls == ["library://track/42"]

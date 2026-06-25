@@ -10,6 +10,9 @@
 | [end2end-test.md](end2end-test.md) | `End2EndTest` — full test runner reference |
 | [pydantic-integration.md](pydantic-integration.md) | Using `ovos-pydantic-models` with OvoScope |
 | [audio-testing.md](audio-testing.md) | `AudioServiceHarness`, `PlaybackServiceHarness` — testing audio services |
+| [media-testing.md](media-testing.md) | `OCPPlayerHarness`, `OCPCaptureSession`, `MockOCPBackend` — testing the `ovos-media` OCP player (and driving a real OCP backend) |
+| [media-provider-testing.md](media-provider-testing.md) | `MediaProviderHarness` — testing `opm.media.provider` catalog/search plugins |
+| [ocp.md](ocp.md) | `OCPTest` — testing legacy OCP search skills (`@ocp_search`) |
 | [listener.md](listener.md) | `MiniListener`, `get_mini_listener`, `ListenerTest`, `MockVADEngine`, `MockHotWordEngine`, `VADTest`, `WakeWordTest` — testing audio transformer plugins, STT pipeline, VAD, and wake-word |
 | [voice-loop.md](voice-loop.md) | `MiniVoiceLoop` / `MiniSimpleListener` / `MiniClassicListener` — file-driven bus-sequence testing for the ovos-dinkum, ovos-simple, and mycroft-classic listener services (wake-word → record-begin → utterance), with verifier-chain gating |
 | [gui-testing.md](gui-testing.md) | `GUICaptureSession` — asserting GUI page navigation and namespace values |

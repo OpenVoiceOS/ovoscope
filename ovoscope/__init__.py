@@ -1113,6 +1113,11 @@ except ImportError as e:
     else:
         raise
 
+# MediaProvider (catalog/search) harness — duck-typed, stdlib-only at import time,
+# so it needs no optional dependency guard (the provider package + mediavocab are
+# only needed by the *test* that uses it, not by ovoscope itself).
+from ovoscope.media_provider import MediaProviderHarness  # noqa: F401,E402
+
 try:
     from ovoscope.tts_intelligibility import (  # noqa: F401
         TTSIntelligibilityHarness,

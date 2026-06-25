@@ -421,33 +421,39 @@ def _autodiscover_intent_cases(config):
     return None
 
 
-@pytest.hookimpl(hookwrapper=True)
+@pytest.hookimpl(wrapper=True)
 def pytest_pycollect_makemodule(module_path, parent):
     """Auto-register intent-case tests on shim modules that declare
     ``ovoscope_intent_cases = {...}``.
 
-    The hookwrapper imports the module first, lets pytest build the
+    The hook wrapper imports the module first, lets pytest build the
     collector, then injects the generated TestCase classes into the
     module's namespace so the standard Python-class collector finds them.
+
+    Uses the modern ``wrapper=True`` hook-wrapper protocol (pluggy >=1.2 /
+    pytest >=7.2): the downstream result arrives from ``yield`` and is
+    returned unchanged. The legacy ``hookwrapper=True`` /
+    ``outcome.get_result()`` protocol is removed in pytest 10, so we adopt
+    the new one to stay loadable under pytest 8 and 9.
     """
     from ovoscope.intent_cases import autodiscover_from_conftest
 
-    outcome = yield
-    collector = outcome.get_result()
+    collector = yield
     if collector is None:
-        return
+        return collector
     try:
         mod = collector.obj  # imports the module if not already loaded
     except Exception:
-        return
+        return collector
     if not hasattr(mod, "ovoscope_intent_cases"):
-        return
+        return collector
     if getattr(mod, "_ovoscope_intent_cases_registered", False):
-        return
+        return collector
     try:
         autodiscover_from_conftest(Path(mod.__file__).parent, mod.__dict__)
     except Exception as exc:  # noqa: BLE001
         print(f"ovoscope auto-discovery skipped for {mod.__file__}: {exc}")
+    return collector
 
 
 def pytest_collection_modifyitems(config, items):

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.22.0a1) (2026-06-25)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.21.1a1...0.22.0a1)
+
+**Merged pull requests:**
+
+- feat: stream audio frames through MiniListener for multi-frame decoders [\#86](https://github.com/OpenVoiceOS/ovoscope/pull/86) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.21.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.21.1a1) (2026-06-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.21.0a1...0.21.1a1)

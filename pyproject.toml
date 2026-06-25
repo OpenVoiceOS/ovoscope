@@ -16,6 +16,12 @@ dependencies = [
     # Alpha pin: 2.0.4 stable not yet released; 2.0.4a2 is the minimum that
     # includes the FakeBus-compatible SkillManager changes ovoscope depends on.
     "ovos-core>=2.0.4a2",
+    # The audio harness emits/observes the ovos.* spec topics while ovos-audio
+    # still produces the legacy topics. >=0.12.0a1 is the first FakeBus that
+    # mirrors MessageBusClient's legacy<->ovos.* namespace migration (ovos-utils
+    # #381), so a legacy producer reaches a spec listener (and vice-versa) on the
+    # test double. Prerelease floor pin: resolves without --pre.
+    "ovos-utils>=0.12.0a1",
     # ovoscope ships a pytest plugin (pytest11 entry point) -> pytest is a runtime
     # dependency. >=8 is required: the pytest_pycollect_makemodule hook dropped the
     # 'path' argument in pytest 8.

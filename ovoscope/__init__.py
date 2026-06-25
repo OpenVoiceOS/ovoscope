@@ -301,7 +301,19 @@ class MiniCroft(SkillManager):
                  lang: Optional[str] = None,
                  secondary_langs: Optional[List[str]] = None,
                  pipeline_config: Optional[Dict[str, Dict]] = None,
+                 modernize: bool = True,
+                 emit_legacy: bool = True,
                  *args, **kwargs):
+        # Namespace-migration flags forwarded to the harness FakeBus so callers
+        # can choose which bus namespace(s) to exercise:
+        #   modernize=True   emitting a legacy topic ALSO emits the ovos.* spec
+        #                    topic (legacy producer -> spec listener)
+        #   emit_legacy=True emitting an ovos.* spec topic ALSO emits the legacy
+        #                    topic (spec producer -> legacy listener)
+        # Both default on (mirrors MessageBusClient). Set BOTH False to isolate a
+        # single namespace and assert no cross-namespace bridging occurs.
+        self._modernize = modernize
+        self._emit_legacy = emit_legacy
         self._isolated_config = isolate_config
         self._original_xdg_configs: Optional[List[LocalConf]] = None
 
@@ -376,7 +388,8 @@ class MiniCroft(SkillManager):
                 LOG.debug(f"ovoscope: pipeline_config patched '{plugin_key}'")
 
         self.boot_messages: List[Message] = []
-        bus = FakeBus()
+        bus = FakeBus(modernize=self._modernize,
+                      emit_legacy=self._emit_legacy)
         bus.on("message", self.handle_boot_message)
         self.skill_ids = skill_ids
         self.extra_skills = extra_skills or {}

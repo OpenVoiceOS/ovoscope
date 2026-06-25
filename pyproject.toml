@@ -37,8 +37,10 @@ classifiers = [
 
 [project.optional-dependencies]
 pydantic = ["ovos-pydantic-models>=0.1.0"]
-# The audio harness emits/asserts on the OVOS spec bus namespace via SpecMessage.
-audio = ["ovos-audio>=1.3.0a1", "ovos-spec-tools>=0.9.0a1"]
+# The audio harness emits/asserts on the OVOS spec bus namespace via SpecMessage,
+# and the FakeBus bridging (ovos-utils) imports NamespaceTranslator — new in
+# ovos-spec-tools 0.10.0a1, so that is the real floor.
+audio = ["ovos-audio>=1.3.0a1", "ovos-spec-tools>=0.10.0a1"]
 # OCP / ovos-media player harnesses (ovoscope.media: OCPPlayerHarness, ...).
 media = ["ovos-media>=0.0.2a3"]
 # MiniListener plugin_instances path (feed_audio_stream) needs the dinkum

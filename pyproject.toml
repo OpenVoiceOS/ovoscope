@@ -49,7 +49,7 @@ tts = [
     "ovos-stt-plugin-fasterwhisper",
 ]
 dev = [
-    "ovos-audio>=1.2.0",
+    "ovos-audio>=1.3.0a1",
     "ovos-media>=0.0.2a3",
     "ovos-dinkum-listener>=0.7.2a1",
     "ovos-pydantic-models>=0.1.0",

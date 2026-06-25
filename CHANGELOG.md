@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.22.1a1) (2026-06-25)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.22.0a1...0.22.1a1)
+
+**Merged pull requests:**
+
+- fix: pytest 9 compatibility for the pytest11 plugin [\#88](https://github.com/OpenVoiceOS/ovoscope/pull/88) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.22.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.22.0a1) (2026-06-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.21.1a1...0.22.0a1)

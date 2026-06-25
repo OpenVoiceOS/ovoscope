@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.0a1) (2026-06-25)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.22.1a1...1.0.0a1)
+
+**Breaking changes:**
+
+- feat!: audio harness on OVOS spec bus namespace [\#92](https://github.com/OpenVoiceOS/ovoscope/pull/92) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.22.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.22.1a1) (2026-06-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.22.0a1...0.22.1a1)

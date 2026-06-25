@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.21.0a1) (2026-06-25)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.20.0a1...0.21.0a1)
+
+**Merged pull requests:**
+
+- feat: export ovos-media OCP harness from the package + add \[media\] extra [\#89](https://github.com/OpenVoiceOS/ovoscope/pull/89) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.20.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.20.0a1) (2026-06-24)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.19.4a1...0.20.0a1)

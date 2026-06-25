@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.21.1a1) (2026-06-25)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.21.0a1...0.21.1a1)
+
+**Merged pull requests:**
+
+- fix: repair ovoscope record in-process path \(default\_pipeline kwarg + from\_message skill\_ids\) [\#85](https://github.com/OpenVoiceOS/ovoscope/pull/85) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.21.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.21.0a1) (2026-06-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.20.0a1...0.21.0a1)

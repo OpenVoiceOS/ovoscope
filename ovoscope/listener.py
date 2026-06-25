@@ -283,6 +283,13 @@ class MiniListener:
         ww_instances: Optional mapping of hotword name →
             :class:`HotWordEngine` (or mock) instance.  Multiple wake-word
             engines can be registered simultaneously.
+        modernize: FakeBus also emits the ovos.* spec topic when a legacy
+            topic is emitted (legacy producer -> spec listener). The listener
+            pipeline emits legacy ``recognizer_loop:*`` topics; this bridge is
+            what lets a spec-topic subscriber observe them.
+        emit_legacy: FakeBus also emits the legacy topic when an ovos.* spec
+            topic is emitted (spec producer -> legacy listener). Set both False
+            to exercise a single namespace with no bridging.
 
     Example::
 
@@ -308,8 +315,11 @@ class MiniListener:
         stt_instance: Optional[Any] = None,
         vad_instance: Optional[Any] = None,
         ww_instances: Optional[Dict[str, Any]] = None,
+        modernize: bool = True,
+        emit_legacy: bool = True,
     ) -> None:
-        self.bus: FakeBus = FakeBus()
+        self.bus: FakeBus = FakeBus(modernize=modernize,
+                                    emit_legacy=emit_legacy)
         self._messages: List[Message] = []
         self._stt_instance: Optional[Any] = stt_instance
         self._vad: Optional[Any] = vad_instance
@@ -688,6 +698,8 @@ def get_mini_listener(
     vad_instance: Optional[Any] = None,
     ww_plugin: Optional[str] = None,
     ww_instances: Optional[Dict[str, Any]] = None,
+    modernize: bool = True,
+    emit_legacy: bool = True,
 ) -> MiniListener:
     """Factory: create a ready-to-use :class:`MiniListener`.
 
@@ -717,6 +729,11 @@ def get_mini_listener(
         ww_instances: Mapping of hotword name → engine instance.  Supports
             multiple simultaneous wake-word engines.  Takes precedence over
             *ww_plugin*.
+        modernize: FakeBus also emits the ovos.* spec topic when a legacy topic
+            is emitted (legacy producer -> spec listener).
+        emit_legacy: FakeBus also emits the legacy topic when an ovos.* spec
+            topic is emitted (spec producer -> legacy listener). Set both False
+            to exercise a single namespace with no bridging.
 
     Returns:
         A fully initialised :class:`MiniListener` ready to receive audio.
@@ -770,6 +787,8 @@ def get_mini_listener(
         stt_instance=stt_instance,
         vad_instance=resolved_vad,
         ww_instances=resolved_ww,
+        modernize=modernize,
+        emit_legacy=emit_legacy,
     )
 
 

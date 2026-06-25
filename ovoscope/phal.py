@@ -58,6 +58,14 @@ class MiniPHAL:
             is always wired to the harness ``FakeBus``.  Takes precedence over
             *plugin_instances* for the same plugin_id.
         config: Per-plugin configuration overrides keyed by plugin_id.
+        modernize: FakeBus also emits the ovos.* spec topic when a legacy topic
+            is emitted (legacy producer -> spec listener). PHAL plugins do not use
+            any of the migrated audio/listener topics, so this only matters for a
+            plugin that happens to consume/produce a migrated topic; it is threaded
+            for consistency with the audio/media harnesses.
+        emit_legacy: FakeBus also emits the legacy topic when an ovos.* spec topic
+            is emitted (spec producer -> legacy listener). Set both False to
+            exercise a single namespace with no bridging.
 
     Example::
 
@@ -86,12 +94,16 @@ class MiniPHAL:
         plugin_instances: Optional[Dict[str, Any]] = None,
         plugin_factories: Optional[Dict[str, Callable[[FakeBus], Any]]] = None,
         config: Optional[Dict[str, Dict[str, Any]]] = None,
+        modernize: bool = True,
+        emit_legacy: bool = True,
     ) -> None:
         self.plugin_ids: List[str] = plugin_ids or []
         self.plugin_instances: Dict[str, Any] = plugin_instances or {}
         self.plugin_factories: Dict[str, Callable[[FakeBus], Any]] = plugin_factories or {}
         self.config: Dict[str, Dict[str, Any]] = config or {}
-        self._bus: FakeBus = FakeBus()
+        self.modernize: bool = modernize
+        self.emit_legacy: bool = emit_legacy
+        self._bus: FakeBus = FakeBus(modernize=modernize, emit_legacy=emit_legacy)
         self._captured: List[Message] = []
         self._loaded: Dict[str, Any] = {}
 
@@ -249,6 +261,9 @@ class PHALTest:
             Use this when the plugin must be constructed with the harness bus.
         config: Per-plugin config overrides.
         timeout: Maximum seconds to wait for expected messages (default 5.0).
+        modernize: Forwarded to :class:`MiniPHAL` — FakeBus bridges legacy->spec.
+        emit_legacy: Forwarded to :class:`MiniPHAL` — FakeBus bridges spec->legacy.
+            Set both False to exercise a single namespace with no bridging.
 
     Example::
 
@@ -271,6 +286,8 @@ class PHALTest:
     plugin_factories: Dict[str, Callable[[FakeBus], Any]] = field(default_factory=dict)
     config: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     timeout: float = 5.0
+    modernize: bool = True
+    emit_legacy: bool = True
 
     def execute(self) -> List[Message]:
         """Run the test: load plugins, emit trigger, assert expectations.
@@ -286,6 +303,8 @@ class PHALTest:
             plugin_instances=self.plugin_instances,
             plugin_factories=self.plugin_factories,
             config=self.config,
+            modernize=self.modernize,
+            emit_legacy=self.emit_legacy,
         ) as phal:
             phal.emit(self.trigger_message, wait=0.1)
 

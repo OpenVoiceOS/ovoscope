@@ -297,7 +297,14 @@ class MiniClassicListener(ListenerHarness):
             :class:`MockHotWordEngine`).
         stt_instance: STT engine for the built loop (defaults to
             :class:`MockStreamingSTT`).
-        bus: Optional :class:`FakeBus` to capture on.
+        bus: Optional :class:`FakeBus` to capture on.  When ``None`` a fresh
+            :class:`FakeBus` is built using *modernize* / *emit_legacy*.
+        modernize: When a fresh bus is built, have :class:`FakeBus` also emit the
+            ovos.* spec topic whenever a legacy topic is emitted (legacy ->
+            spec bridging).  Ignored when *bus* is supplied.  Defaults to True.
+        emit_legacy: When a fresh bus is built, have :class:`FakeBus` also emit
+            the legacy topic whenever an ovos.* spec topic is emitted (spec ->
+            legacy bridging).  Ignored when *bus* is supplied.  Defaults to True.
 
     Raises:
         RuntimeError: If *recognizer_loop* is ``None`` and
@@ -311,7 +318,13 @@ class MiniClassicListener(ListenerHarness):
         wakeword: Optional[Any] = None,
         stt_instance: Optional[Any] = None,
         bus: Optional[FakeBus] = None,
+        modernize: bool = True,
+        emit_legacy: bool = True,
     ) -> None:
+        if bus is None:
+            bus = FakeBus(modernize=modernize, emit_legacy=emit_legacy)
+        self.modernize: bool = modernize
+        self.emit_legacy: bool = emit_legacy
         super().__init__(bus)
         self._built = recognizer_loop is None
         self._wakeword = wakeword

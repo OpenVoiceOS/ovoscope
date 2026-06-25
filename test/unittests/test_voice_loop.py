@@ -20,9 +20,13 @@ TestVoiceLoopTest         — declarative helper
 """
 import inspect
 import io
+import time
 import unittest
 import wave
 from unittest.mock import Mock
+
+from ovos_bus_client.message import Message
+from ovos_spec_tools import SpecMessage
 
 from ovoscope.voice_loop import (
     MiniHotwordContainer,
@@ -296,6 +300,77 @@ class TestVoiceLoopTest(unittest.TestCase):
             audio_file=_wav(),
             expect_utterance="hello world",
         ).execute()
+
+
+# ---------------------------------------------------------------------------
+# TestMiniVoiceLoopNamespaceBridging
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(HAS_DINKUM, "ovos-dinkum-listener not installed")
+class TestMiniVoiceLoopNamespaceBridging(unittest.TestCase):
+    """The MiniVoiceLoop callbacks emit the LEGACY ``recognizer_loop:*`` topics;
+    ``record_begin``/``record_end``/``utterance`` are migrated to the ovos.*
+    spec namespace.  These tests pin that the FakeBus namespace bridging
+    connects the two namespaces, and that turning it off isolates one.
+    """
+
+    def test_full_loop_legacy_reaches_spec_via_bridging(self):
+        """Default loop (bridging on): the legacy record-begin/record-end/
+        utterance emitted while driving the full loop are also delivered to
+        subscribers on the spec topics."""
+        with MiniVoiceLoop(
+            ww_instances={"hey_mycroft": MockHotWordEngine(trigger_after=2)},
+            stt_instance=MockStreamingSTT(transcript="hello world"),
+        ) as vl:
+            spec = {"begin": [], "end": [], "utt": []}
+            vl.bus.on(str(SpecMessage.LISTENER_RECORD_STARTED),
+                      lambda m: spec["begin"].append(m))
+            vl.bus.on(str(SpecMessage.LISTENER_RECORD_ENDED),
+                      lambda m: spec["end"].append(m))
+            vl.bus.on(str(SpecMessage.UTTERANCE),
+                      lambda m: spec["utt"].append(m))
+
+            msgs = vl.feed_file(_wav())
+            time.sleep(0.05)
+            legacy_types = [m.msg_type for m in msgs]
+            self.assertIn("recognizer_loop:record_begin", legacy_types)
+            self.assertTrue(spec["begin"],
+                            "ovos.listener.record.started not seen via bridge")
+            self.assertTrue(spec["end"],
+                            "ovos.listener.record.ended not seen via bridge")
+            self.assertTrue(spec["utt"],
+                            "ovos.utterance.handle not seen via bridge")
+
+    def test_record_begin_spec_native(self):
+        """A SPEC producer reaches a spec subscriber natively."""
+        with MiniVoiceLoop(
+            ww_instances={"hey_mycroft": MockHotWordEngine(trigger_after=2)},
+        ) as vl:
+            spec_hits = []
+            vl.bus.on(str(SpecMessage.LISTENER_RECORD_STARTED),
+                      lambda m: spec_hits.append(m))
+            vl.bus.emit(Message(str(SpecMessage.LISTENER_RECORD_STARTED)))
+            time.sleep(0.05)
+            self.assertTrue(spec_hits,
+                            "ovos.listener.record.started not delivered natively")
+
+    def test_no_bridging_isolates_legacy_from_spec(self):
+        """With bridging OFF, a legacy record-begin does NOT reach a spec-only
+        subscriber."""
+        with MiniVoiceLoop(
+            ww_instances={"hey_mycroft": MockHotWordEngine(trigger_after=2)},
+            modernize=False, emit_legacy=False,
+        ) as vl:
+            legacy_hits, spec_hits = [], []
+            vl.bus.on("recognizer_loop:record_begin",
+                      lambda m: legacy_hits.append(m))
+            vl.bus.on(str(SpecMessage.LISTENER_RECORD_STARTED),
+                      lambda m: spec_hits.append(m))
+            vl.bus.emit(Message("recognizer_loop:record_begin"))
+            time.sleep(0.1)
+            self.assertTrue(legacy_hits, "legacy record_begin should still fire")
+            self.assertEqual(spec_hits, [],
+                             "spec topic must not fire with bridging off")
 
 
 if __name__ == "__main__":

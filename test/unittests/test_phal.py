@@ -235,3 +235,69 @@ class TestPluginFactories:
         )
         captured = t.execute()
         assert any(m.msg_type == "ovos.resp" for m in captured)
+
+
+# ---------------------------------------------------------------------------
+# Namespace bridging
+# ---------------------------------------------------------------------------
+
+try:
+    from ovos_spec_tools import SpecMessage
+    _HAS_SPEC_TOOLS = True
+except ImportError:
+    _HAS_SPEC_TOOLS = False
+
+
+@pytest.mark.skipif(not _HAS_SPEC_TOOLS,
+                    reason="requires ovos-spec-tools (SpecMessage)")
+class TestMiniPHALNamespaceBridging:
+    """PHAL plugins communicate over arbitrary plugin-specific topics and touch
+    NONE of the legacy<->ovos.* migrated topics, so the harness has no migrated
+    topic of its own to drive. These tests instead verify that the harness
+    ``FakeBus`` performs the same namespace bridging as the audio/media harnesses
+    (so a PHAL plugin that *did* consume/produce a migrated topic would
+    interoperate across both namespaces), and that the ``modernize``/``emit_legacy``
+    flags are threaded through ``MiniPHAL`` to that bus.
+    """
+
+    def test_bus_bridges_legacy_to_spec_by_default(self) -> None:
+        """Default harness (bridging on): a LEGACY emit on the harness bus is
+        delivered to a SPEC-topic subscriber (modernize bridging)."""
+        spec_topic = str(SpecMessage.SPEAK)  # ovos.utterance.speak
+        with MiniPHAL() as phal:
+            seen = []
+            phal._bus.on(spec_topic, lambda m: seen.append(m))
+            phal._bus.emit(Message("speak", {"utterance": "hi"}))
+            time.sleep(0.05)
+            assert [m.data["utterance"] for m in seen] == ["hi"]
+
+    def test_bus_bridges_spec_to_legacy_by_default(self) -> None:
+        """Default harness (bridging on): a SPEC emit on the harness bus is
+        delivered to a LEGACY-topic subscriber (emit_legacy bridging)."""
+        spec_topic = str(SpecMessage.SPEAK)
+        with MiniPHAL() as phal:
+            seen = []
+            phal._bus.on("speak", lambda m: seen.append(m))
+            phal._bus.emit(Message(spec_topic, {"utterance": "bye"}))
+            time.sleep(0.05)
+            assert [m.data["utterance"] for m in seen] == ["bye"]
+
+    def test_no_bridging_isolates_namespaces(self) -> None:
+        """With modernize=False, emit_legacy=False the harness bus keeps each
+        namespace isolated — a LEGACY emit does NOT reach a SPEC subscriber."""
+        spec_topic = str(SpecMessage.SPEAK)
+        with MiniPHAL(modernize=False, emit_legacy=False) as phal:
+            seen = []
+            phal._bus.on(spec_topic, lambda m: seen.append(m))
+            phal._bus.emit(Message("speak", {"utterance": "legacy only"}))
+            time.sleep(0.1)
+            assert seen == []
+
+    def test_phal_test_threads_bridging_flags(self) -> None:
+        """PHALTest forwards modernize/emit_legacy to MiniPHAL (default True)."""
+        t = PHALTest(
+            plugin_ids=[],
+            trigger_message=Message("harmless.trigger"),
+        )
+        assert t.modernize is True
+        assert t.emit_legacy is True

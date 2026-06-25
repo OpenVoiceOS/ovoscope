@@ -13,6 +13,8 @@
 # limitations under the License.
 """Unit tests for ovoscope.media (MockOCPBackend, OCPCaptureSession, OCPPlayerHarness)."""
 
+import time
+
 import pytest
 from unittest.mock import MagicMock
 
@@ -296,3 +298,65 @@ class TestOCPPlayerHarnessBackendInjection:
                               playback=PlaybackType.AUDIO))
             assert h.backend.is_playing is True
             assert h.backend.play_calls == ["library://track/42"]
+
+
+# ---------------------------------------------------------------------------
+# Namespace bridging
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _HAS_OVOS_MEDIA,
+                    reason="requires the [media] extra (ovos-media)")
+class TestOCPHarnessNamespaceBridging:
+    """OCPMediaPlayer subscribes to the LEGACY duck/cork topics
+    (``recognizer_loop:audio_output_start/end``, ``recognizer_loop:record_begin/end``)
+    which OVOS is migrating to the ``ovos.*`` spec namespace
+    (``ovos.audio.output.*`` / ``ovos.listener.record.*``). These tests pin that
+    the harness FakeBus namespace bridging connects a SPEC-namespace producer to
+    those legacy handlers, and that turning the bridge off isolates a single
+    namespace.
+
+    The observable behaviour is the *cork* path: while PLAYING, a record-start
+    event pauses the player (``handle_cork_request``).
+    """
+
+    @staticmethod
+    def _play_then(h):
+        """Drive the player into PLAYING with an AUDIO MediaEntry."""
+        from ovos_utils.ocp import MediaEntry, PlaybackType, PlayerState
+        h.play(MediaEntry(uri="http://example.com/song.mp3",
+                          playback=PlaybackType.AUDIO))
+        h.assert_player_state(PlayerState.PLAYING)
+
+    def test_cork_via_legacy_topic_natively(self) -> None:
+        """The legacy ``recognizer_loop:record_begin`` corks (pauses) the player —
+        the namespace the player subscribes on works natively."""
+        from ovos_utils.ocp import PlayerState
+        with OCPPlayerHarness() as h:  # bridging default on
+            self._play_then(h)
+            h.bus.emit(Message("recognizer_loop:record_begin"))
+            time.sleep(0.05)
+            h.assert_player_state(PlayerState.PAUSED)
+
+    def test_cork_via_spec_topic_through_bridging(self) -> None:
+        """A SPEC producer emitting ``ovos.listener.record.started`` reaches the
+        legacy-subscribed ``handle_cork_request`` via emit_legacy bridging and
+        corks (pauses) the player."""
+        from ovos_spec_tools import SpecMessage
+        from ovos_utils.ocp import PlayerState
+        with OCPPlayerHarness() as h:  # bridging default on
+            self._play_then(h)
+            h.bus.emit(Message(str(SpecMessage.LISTENER_RECORD_STARTED)))
+            time.sleep(0.05)
+            h.assert_player_state(PlayerState.PAUSED)
+
+    def test_no_bridging_isolates_spec_from_legacy(self) -> None:
+        """With bridging OFF, a SPEC ``ovos.listener.record.started`` emit does
+        NOT reach the legacy-subscribed cork handler — the player stays PLAYING,
+        proving the harness can exercise a single namespace."""
+        from ovos_spec_tools import SpecMessage
+        from ovos_utils.ocp import PlayerState
+        with OCPPlayerHarness(modernize=False, emit_legacy=False) as h:
+            self._play_then(h)
+            h.bus.emit(Message(str(SpecMessage.LISTENER_RECORD_STARTED)))
+            time.sleep(0.2)  # give any (incorrect) bridge a chance to fire
+            h.assert_player_state(PlayerState.PLAYING)

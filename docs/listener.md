@@ -68,6 +68,32 @@ assert any(m.msg_type == "recognizer_loop:utterance" for m in msgs)
 listener.shutdown()
 ```
 
+**Streaming real ggwave audio** — the ggwave decoder only fires after it has
+accumulated enough frames, so feed the whole waveform with `feed_audio_stream`,
+which keeps every message emitted across the stream (unlike `feed_audio`, which
+clears its buffer on each call):
+
+```python
+import ggwave, numpy as np
+from ovos_audio_transformer_plugin_ggwave import GGWavePlugin
+from ovoscope.listener import get_mini_listener
+
+# real ggwave waveform (48kHz float32 → 16kHz int16, as the mic would deliver it)
+wf = np.frombuffer(ggwave.encode("UTT:turn on the lights", protocolId=1, volume=20),
+                   dtype=np.float32)
+mic = np.interp(np.linspace(0, len(wf) - 1, int(len(wf) * 16000 / 48000)),
+                np.arange(len(wf)), wf)
+audio = (np.clip(mic, -1, 1) * 32767).astype(np.int16).tobytes()
+
+plugin = GGWavePlugin(config={"start_enabled": True, "sample_rate": 16000})
+listener = get_mini_listener(
+    plugin_instances={"ovos-audio-transformer-plugin-ggwave": plugin}
+)
+msgs = listener.feed_audio_stream(audio, chunk_size=2048)
+assert any(m.msg_type == "recognizer_loop:utterance" for m in msgs)
+listener.shutdown()
+```
+
 **Full pipeline testing** (STT with real WAV):
 
 ```python
@@ -105,6 +131,7 @@ listener.shutdown()
 |--------|-----------|-------------|
 | `feed_audio(chunk)` — `ovoscope/listener.py:351` | `(bytes) → List[Message]` | Calls `AudioTransformersService.feed_audio()`. Requires `ovos-dinkum-listener`. |
 | `feed_speech(chunk)` — `ovoscope/listener.py:371` | `(bytes) → List[Message]` | Calls `AudioTransformersService.feed_speech()`. Requires `ovos-dinkum-listener`. |
+| `feed_audio_stream(chunks, feed, chunk_size)` | `(bytes\|list[bytes], str, int) → List[Message]` | Streams frames in order **without** clearing between them; aggregates all emitted messages. Use for decoders that fire after many frames (ggwave). |
 | `transform(chunk)` — `ovoscope/listener.py:390` | `(bytes) → tuple[bytes, dict, List[Message]]` | Full transform pipeline; returns `(audio, ctx, messages)`. Requires `ovos-dinkum-listener`. |
 | `listen(audio, ...)` — `ovoscope/listener.py:410` | `(audio, language, stt_instance, ...) → List[Message]` | Full pipeline: audio → transformers → STT → utterance message. Requires `ovos-dinkum-listener`. |
 

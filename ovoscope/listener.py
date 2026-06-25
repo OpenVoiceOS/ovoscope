@@ -402,6 +402,59 @@ class MiniListener:
         audio, ctx = self.transformers.transform(chunk)
         return audio, ctx, list(self._messages)
 
+    def feed_audio_stream(
+        self,
+        chunks: Union[bytes, List[bytes]],
+        feed: str = "feed_audio",
+        chunk_size: int = 2048,
+    ) -> List[Message]:
+        """Stream a sequence of audio frames and aggregate emitted messages.
+
+        Unlike :meth:`feed_audio` / :meth:`feed_speech`, which clear the
+        capture buffer on every call, this feeds each frame in order and keeps
+        every message emitted across the **whole** stream.  This is required
+        for transformers whose decoder only fires after accumulating many
+        frames of audio (e.g. ggwave data-over-sound).
+
+        Args:
+            chunks: Either a flat ``bytes`` object (split into *chunk_size*
+                frames internally) or a pre-segmented ``List[bytes]`` of frames.
+            feed: Which transformer feed to drive per frame —
+                ``"feed_audio"`` (non-speech) or ``"feed_speech"``.
+            chunk_size: Bytes per frame when *chunks* is a flat ``bytes``
+                object (ignored when *chunks* is already a list).
+
+        Returns:
+            All ``Message`` objects emitted on the bus across every frame.
+
+        Raises:
+            RuntimeError: If ``ovos-dinkum-listener`` is not installed.
+            ValueError: If *feed* is not a recognised feed method.
+        """
+        if self.transformers is None:
+            raise RuntimeError(
+                "ovos-dinkum-listener is required for feed_audio_stream. "
+                "Install it with: pip install ovos-dinkum-listener"
+            )
+        if feed not in ("feed_audio", "feed_speech"):
+            raise ValueError(
+                f"feed must be 'feed_audio' or 'feed_speech', got {feed!r}"
+            )
+
+        if isinstance(chunks, bytes):
+            frames = [
+                chunks[i:i + chunk_size]
+                for i in range(0, len(chunks), chunk_size)
+            ]
+        else:
+            frames = list(chunks)
+
+        feeder = getattr(self.transformers, feed)
+        self._messages.clear()
+        for frame in frames:
+            feeder(frame)
+        return list(self._messages)
+
     def listen(
         self,
         audio: Union[bytes, str, Path],
@@ -758,8 +811,17 @@ class ListenerTest:
     """Raw audio bytes to inject into the pipeline."""
 
     feed_method: str = "feed_audio"
-    """Which feed method to call: ``"feed_audio"``, ``"feed_speech"``, or
-    ``"transform"``."""
+    """Which feed method to call: ``"feed_audio"``, ``"feed_speech"``,
+    ``"feed_audio_stream"``, ``"transform"``, or ``"listen"``.
+
+    Use ``"feed_audio_stream"`` for transformers that decode only after
+    accumulating many frames (e.g. ggwave): *audio_input* is split into
+    *chunk_size* frames, fed in order, and all emitted messages are
+    aggregated across the whole stream."""
+
+    chunk_size: int = 2048
+    """Frame size (bytes) used to split *audio_input* when *feed_method* is
+    ``"feed_audio_stream"``."""
 
     expected_types: List[str] = field(default_factory=list)
     """Message types that MUST appear in the captured output."""
@@ -787,11 +849,14 @@ class ListenerTest:
             stt_instance=self.stt_instance,
         )
         try:
-            method = getattr(listener, self.feed_method)
             if self.feed_method == "listen":
                 messages = listener.listen(self.audio_input)
+            elif self.feed_method == "feed_audio_stream":
+                messages = listener.feed_audio_stream(
+                    self.audio_input, chunk_size=self.chunk_size
+                )
             else:
-                result = method(self.audio_input)
+                result = getattr(listener, self.feed_method)(self.audio_input)
                 if self.feed_method == "transform":
                     messages: List[Message] = result[2]
                 else:

@@ -33,6 +33,7 @@ from typing import ClassVar, Dict, Generator, List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 from ovos_bus_client.message import Message
+from ovos_spec_tools import SpecMessage
 from ovos_plugin_manager.templates.audio import AudioBackend
 from ovos_plugin_manager.templates.tts import TTS
 from ovos_utils.fakebus import FakeBus
@@ -282,9 +283,9 @@ class AudioServiceHarness:
                     self.service._get_track_length)
         self.bus.on("mycroft.audio.service.seek_forward", self.service._seek_forward)
         self.bus.on("mycroft.audio.service.seek_backward", self.service._seek_backward)
-        self.bus.on("recognizer_loop:audio_output_start",
+        self.bus.on(SpecMessage.AUDIO_OUTPUT_STARTED,
                     self.service._lower_volume_on_speak)
-        self.bus.on("recognizer_loop:audio_output_end",
+        self.bus.on(SpecMessage.AUDIO_OUTPUT_ENDED,
                     self.service._restore_volume_on_speak)
         self.bus.on("recognizer_loop:record_begin",
                     self.service._lower_volume_on_record)
@@ -508,8 +509,8 @@ class PlaybackServiceHarness:
     """Context manager wrapping PlaybackService with a MockTTS on a FakeBus.
 
     PlaybackService is a ``Thread``; this harness starts it and wires it to the
-    provided FakeBus so tests can emit ``speak`` messages and observe the
-    resulting ``recognizer_loop:audio_output_start/end`` events.
+    provided FakeBus so tests can emit ``ovos.utterance.speak`` messages and
+    observe the resulting ``ovos.audio.output.started/ended`` events.
 
     The harness patches ``ovos_utils.sound.play_audio`` so no actual audio
     device is accessed. It also drains ``TTS.queue`` before construction to
@@ -603,11 +604,11 @@ class PlaybackServiceHarness:
             self.mock_tts.init(self.bus, self.svc.playback_thread)
 
             # Subscribe lifecycle events for synchronisation
-            self.bus.on("recognizer_loop:audio_output_start",
+            self.bus.on(SpecMessage.AUDIO_OUTPUT_STARTED,
                         lambda m: self._audio_output_start.set())
-            self.bus.on("recognizer_loop:audio_output_end",
+            self.bus.on(SpecMessage.AUDIO_OUTPUT_ENDED,
                         lambda m: self._audio_output_end.set())
-            self.bus.on("mycroft.mic.listen",
+            self.bus.on(SpecMessage.MIC_LISTEN,
                         lambda m: self._mic_listen.set())
 
         except Exception:
@@ -660,7 +661,7 @@ class PlaybackServiceHarness:
         self._audio_output_end.clear()
         self._mic_listen.clear()
 
-        self.bus.emit(Message("speak", {
+        self.bus.emit(Message(SpecMessage.SPEAK, {
             "utterance": utterance,
             "lang": "en-US",
             "expect_response": expect_response,
@@ -692,31 +693,31 @@ class PlaybackServiceHarness:
         )
 
     def assert_audio_output_started(self, timeout: float = 3.0) -> None:
-        """Assert that recognizer_loop:audio_output_start was emitted.
+        """Assert that ovos.audio.output.started was emitted.
 
         Args:
             timeout: Seconds to wait for the event.
         """
         assert self._audio_output_start.wait(timeout), \
-            "recognizer_loop:audio_output_start was not emitted"
+            "ovos.audio.output.started was not emitted"
 
     def assert_audio_output_ended(self, timeout: float = 3.0) -> None:
-        """Assert that recognizer_loop:audio_output_end was emitted.
+        """Assert that ovos.audio.output.ended was emitted.
 
         Args:
             timeout: Seconds to wait for the event.
         """
         assert self._audio_output_end.wait(timeout), \
-            "recognizer_loop:audio_output_end was not emitted"
+            "ovos.audio.output.ended was not emitted"
 
     def assert_mic_listen(self, timeout: float = 3.0) -> None:
-        """Assert that mycroft.mic.listen was emitted after speech.
+        """Assert that ovos.mic.listen was emitted after speech.
 
         Args:
             timeout: Seconds to wait for the event.
         """
         assert self._mic_listen.wait(timeout), \
-            "mycroft.mic.listen was not emitted"
+            "ovos.mic.listen was not emitted"
 
 
 # ---------------------------------------------------------------------------
@@ -742,8 +743,8 @@ class AudioCaptureSession:
     bus: FakeBus
     track_prefixes: List[str] = dataclasses.field(default_factory=lambda: [
         "mycroft.audio.",
-        "recognizer_loop:audio_output",
-        "mycroft.mic.listen",
+        "ovos.audio.output",
+        "ovos.mic.listen",
     ])
     messages: List[Message] = dataclasses.field(default_factory=list)
 

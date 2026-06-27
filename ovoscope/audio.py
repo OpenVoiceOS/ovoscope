@@ -512,6 +512,26 @@ class MockTTS(TTS):
         """Clear the list of recorded spoken utterances."""
         self.spoken_utterances.clear()
 
+    def __del__(self) -> None:
+        """No-op destructor.
+
+        ``TTS.__del__`` chains into ``TTS.shutdown() -> TTS.stop() ->
+        TTS.playback.stop()``. ``TTS.playback`` is a **class-level** attribute
+        shared by every TTS instance in the process, so when an earlier
+        harness's MockTTS is garbage-collected its inherited destructor stops
+        whatever PlaybackThread is *currently* registered there — which, by
+        then, belongs to a later, still-running harness. The victim thread sets
+        ``_terminated`` and exits mid-run, so its queued speak never plays and
+        ``ovos.audio.output.ended`` is never emitted, hanging the next
+        ``speak()`` wait.
+
+        GC timing is nondeterministic, so the failure surfaces as a flaky
+        ``TimeoutError`` only after several harness instances have been created
+        and collected. The harness already manages thread lifecycle explicitly
+        via ``PlaybackService.shutdown()`` on context exit, so a MockTTS
+        instance must never tear down the shared playback thread on collection.
+        """
+
 
 # ---------------------------------------------------------------------------
 # PlaybackServiceHarness

@@ -34,6 +34,7 @@ from ovos_bus_client.message import Message
 from ovos_utils.fakebus import FakeBus
 
 if AUDIO_AVAILABLE:
+    from ovos_plugin_manager.templates.tts import TTS
     from ovoscope.audio import (
         AudioCaptureSession,
         AudioServiceHarness,
@@ -491,6 +492,79 @@ class TestAudioHarnessNamespaceBridging(unittest.TestCase):
             h.speak("namespace test")
             h.assert_audio_output_started()
             h.assert_audio_output_ended()
+
+
+@unittest.skipUnless(AUDIO_AVAILABLE, "ovos-audio (audio extra) not installed")
+class TestPlaybackServiceHarnessIsolation(unittest.TestCase):
+    """Repeated, independent harness instances must not interfere.
+
+    Regression for the shared ``TTS.playback`` class-attribute hazard: a
+    garbage-collected MockTTS from an earlier harness used to stop the
+    PlaybackThread of a *later*, still-running harness (via the inherited
+    ``TTS.__del__`` -> ``TTS.stop`` -> ``TTS.playback.stop()`` chain). The
+    victim thread terminated mid-run, its queued speak never played, and the
+    next ``speak()`` hung until timeout. Because GC timing is nondeterministic
+    this manifested as a flaky ``TimeoutError`` only after several
+    create/destroy cycles.
+    """
+
+    def test_many_sequential_harnesses_each_complete_speaks(self) -> None:
+        """Boot and tear down many harnesses, forcing GC between them, and
+        require every speak in every harness to complete deterministically."""
+        import gc
+
+        for i in range(12):
+            with PlaybackServiceHarness() as h:
+                for tag in ("a", "b", "c"):
+                    # unique sentences so the persistent TTS cache never
+                    # short-circuits synthesis — each must drive real playback
+                    h.speak(f"iter {i} part {tag}", timeout=8.0)
+                    self.assertIn(f"iter {i} part {tag}",
+                                  h.mock_tts.spoken_utterances)
+            # provoke collection of the just-exited MockTTS *now*, while a
+            # fresh harness will shortly own TTS.playback. Pre-fix, this is
+            # exactly what killed the next harness's playback thread.
+            gc.collect()
+
+    def test_stale_mock_destructor_does_not_kill_live_thread(self) -> None:
+        """A finished harness's MockTTS destructor must not terminate the
+        playback thread that a *later* harness now owns.
+
+        Deterministic reproduction of the GC race: keep a reference to harness
+        A's MockTTS so it outlives A, open harness B (which registers its own
+        thread on the shared ``TTS.playback`` class attribute), then run A's
+        destructor. Pre-fix, ``MockTTS.__del__`` chained into
+        ``TTS.playback.stop()`` and terminated B's live thread; B's next speak
+        would then hang. With the no-op destructor, B is unaffected.
+        """
+        # Harness A — produce a MockTTS that survives the context exit.
+        with PlaybackServiceHarness() as ha:
+            ha.speak("harness A warmup", timeout=8.0)
+        stale_mock = ha.mock_tts
+
+        # Harness B now owns the shared TTS.playback thread.
+        with PlaybackServiceHarness() as hb:
+            self.assertIs(TTS.playback, hb.svc.playback_thread)
+            self.assertTrue(hb.svc.playback_thread.is_alive())
+
+            # Fire harness A's destructor explicitly (what GC would do).
+            stale_mock.__del__()
+
+            # The precise invariant: A's destructor must not have flagged B's
+            # thread for termination. ``_terminated`` is checked at the top of
+            # the playback loop, so a single in-flight speak can still slip
+            # through even when set — but the thread would then exit on its next
+            # iteration, hanging a subsequent speak. Assert the flag directly.
+            self.assertFalse(
+                hb.svc.playback_thread._terminated,
+                "stale MockTTS destructor terminated the live playback thread",
+            )
+
+            # And B must keep working across multiple speaks (the loop must not
+            # have exited).
+            for n in range(3):
+                hb.speak(f"harness B speak {n}", timeout=8.0)
+            self.assertTrue(hb.svc.playback_thread.is_alive())
 
 
 if __name__ == "__main__":

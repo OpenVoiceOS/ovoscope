@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.1a1) (2026-06-27)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.0.0a1...1.0.1a1)
+
+**Merged pull requests:**
+
+- fix: guard None blacklisted\_skills/intents in final-session check [\#98](https://github.com/OpenVoiceOS/ovoscope/pull/98) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.0.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.0a1) (2026-06-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.22.1a1...1.0.0a1)

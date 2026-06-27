@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.2a1) (2026-06-27)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.0.1a1...1.0.2a1)
+
+**Merged pull requests:**
+
+- fix: MockTTS destructor must not stop the shared playback thread [\#100](https://github.com/OpenVoiceOS/ovoscope/pull/100) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.0.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.1a1) (2026-06-27)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.0.0a1...1.0.1a1)

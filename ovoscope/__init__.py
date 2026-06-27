@@ -941,8 +941,8 @@ class End2EndTest:
             assert sess.time_format == expected_sess.time_format, f"❌ final session time_format doesn't match"
             assert sess.site_id == expected_sess.site_id, f"❌ final session site_id doesn't match"
             assert sess.session_id == expected_sess.session_id, f"❌ final session session_id doesn't match"
-            assert set(sess.blacklisted_skills) == set(expected_sess.blacklisted_skills), f"❌ final session blacklisted_skills doesn't match"
-            assert set(sess.blacklisted_intents) == set(expected_sess.blacklisted_intents), f"❌ final session blacklisted_intents doesn't match"
+            assert set(sess.blacklisted_skills or []) == set(expected_sess.blacklisted_skills or []), f"❌ final session blacklisted_skills doesn't match"
+            assert set(sess.blacklisted_intents or []) == set(expected_sess.blacklisted_intents or []), f"❌ final session blacklisted_intents doesn't match"
             if self.verbose:
                 print(f"✅ final session matches: {expected_sess.serialize()}")
 

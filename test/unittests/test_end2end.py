@@ -19,7 +19,9 @@ SKILL_ID = "ovoscope-unittest-e2e.test"
 # Handler lifecycle messages emitted by add_event() wrappers.
 # Tests that don't care about lifecycle use this to filter noise.
 HANDLER_LIFECYCLE = ["mycroft.skill.handler.start",
-                     "mycroft.skill.handler.complete"]
+                     "mycroft.skill.handler.complete",
+                     "recognizer_loop:audio_output_start",
+                     "recognizer_loop:audio_output_end"]
 
 # Minimal pipeline: only Adapt-high so we get predictable no-match / match
 ADAPT_ONLY = ["ovos-adapt-pipeline-plugin-high"]

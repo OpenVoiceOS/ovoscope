@@ -396,24 +396,16 @@ class MiniCroft(SkillManager):
         # TTS mock: speak_dialog(…, wait=True) blocks in wait_while_speaking on
         # recognizer_loop:audio_output_end. With no real TTS that event never
         # arrives, so the handler stalls until the dispatcher's §8.3 timeout. We
-        # schedule a short-delay emit to unblock it.
-        #
-        # Full bus.emit, like the real audio service: recognizer_loop:audio_output_end
-        # is a genuine bus message in production, so the harness publishes it the
-        # same way — through on_message (namespace migration + capture), where any
-        # bus observer would see it. SessionManager.handle_audio_output_end then
-        # flips is_speaking=False on the one live session object the ovos-bus-client
-        # SessionManager singleton keeps per id, so every holder of that session sees
-        # it. Capture position is faithful: with speak(wait=False) the handler emits
-        # its end-marker first, so this lands after the EOF and is not captured; with
-        # speak(wait=True) the handler blocks in wait_while_speaking until this
-        # arrives, so it deterministically precedes the end-marker and is captured —
-        # exactly as a real deployment would record it.
+        # emit audio_output_start synchronously (duck) and schedule a short-delay
+        # audio_output_end (unduck) to simulate the full TTS playback lifecycle.
         def _mock_tts(message):
-            sess = SessionManager.get(message)
+            # TTS playback begins — duck immediately.
+            # message.forward copies source/destination/session from the speak,
+            # matching what the real audio service would do.
+            bus.emit(message.forward("recognizer_loop:audio_output_start"))
+            # TTS playback ends after a short delay — unduck
             threading.Timer(0.1, lambda: bus.emit(
-                Message("recognizer_loop:audio_output_end",
-                        context={"session": sess.serialize()})
+                message.forward("recognizer_loop:audio_output_end")
             )).start()
 
         bus.on(SpecMessage.SPEAK, _mock_tts)

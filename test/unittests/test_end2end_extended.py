@@ -21,7 +21,9 @@ from ovoscope import (
 
 SKILL_ID = "ovoscope-extended-test.test"
 HANDLER_LIFECYCLE = ["mycroft.skill.handler.start",
-                     "mycroft.skill.handler.complete"]
+                     "mycroft.skill.handler.complete",
+                     "recognizer_loop:audio_output_start",
+                     "recognizer_loop:audio_output_end"]
 ADAPT_ONLY = ["ovos-adapt-pipeline-plugin-high"]
 
 

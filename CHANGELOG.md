@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.4.0a1) (2026-06-29)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.3.0a1...1.4.0a1)
+
+**Merged pull requests:**
+
+- feat: skill\_id lifecycle filter + eof\_count for End2EndTest [\#110](https://github.com/OpenVoiceOS/ovoscope/pull/110) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.3.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.3.0a1) (2026-06-29)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.2.0a1...1.3.0a1)

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.3.0a1) (2026-06-29)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.2.0a1...1.3.0a1)
+
+**Merged pull requests:**
+
+- feat: emit recognizer\_loop:audio\_output\_start in \_mock\_tts alongside audio\_output\_end [\#108](https://github.com/OpenVoiceOS/ovoscope/pull/108) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.2.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.2.0a1) (2026-06-29)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.1.0a2...1.2.0a1)

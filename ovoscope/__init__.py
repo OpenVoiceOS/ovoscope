@@ -398,28 +398,12 @@ class MiniCroft(SkillManager):
         # arrives, so the handler stalls until the dispatcher's §8.3 timeout. We
         # emit audio_output_start synchronously (duck) and schedule a short-delay
         # audio_output_end (unduck) to simulate the full TTS playback lifecycle.
-        #
-        # Full bus.emit, like the real audio service: both events are genuine bus
-        # messages in production, so the harness publishes them the same way —
-        # through on_message (namespace migration + capture), where any bus observer
-        # would see them. SessionManager.handle_audio_output_end then flips
-        # is_speaking=False on the one live session object the ovos-bus-client
-        # SessionManager singleton keeps per id, so every holder of that session
-        # sees it. Capture position is faithful: with speak(wait=False) the handler
-        # emits its end-marker first, so the delayed message lands after the EOF and
-        # is not captured; with speak(wait=True) the handler blocks in
-        # wait_while_speaking until audio_output_end arrives, so it deterministically
-        # precedes the end-marker and is captured — exactly as a real deployment
-        # would record it.
         def _mock_tts(message):
-            sess = SessionManager.get(message)
             # TTS playback begins — duck immediately
-            bus.emit(Message("recognizer_loop:audio_output_start",
-                             context={"session": sess.serialize()}))
+            bus.emit(message.forward("recognizer_loop:audio_output_start"))
             # TTS playback ends after a short delay — unduck
             threading.Timer(0.1, lambda: bus.emit(
-                Message("recognizer_loop:audio_output_end",
-                        context={"session": sess.serialize()})
+                message.forward("recognizer_loop:audio_output_end")
             )).start()
 
         bus.on(SpecMessage.SPEAK, _mock_tts)

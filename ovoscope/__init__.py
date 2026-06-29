@@ -393,12 +393,19 @@ class MiniCroft(SkillManager):
                       emit_legacy=self._emit_legacy)
         bus.on("message", self.handle_boot_message)
 
-        # TTS mock: speak_dialog(…, wait=True) blocks on
-        # recognizer_loop:audio_output_end. Since there is no real TTS we
-        # schedule a short-delay emit to unblock the handler.
-        # This uses bus.ee.emit (not bus.emit) to bypass FakeBus's
-        # namespace-migration and on_message side effects so the synthetic
-        # event does not appear in test captures or reset session state.
+        # TTS mock: speak_dialog(…, wait=True) blocks in wait_while_speaking on
+        # recognizer_loop:audio_output_end. With no real TTS that event never
+        # arrives, so the handler stalls until the dispatcher's §8.3 timeout. We
+        # schedule a short-delay emit to unblock it.
+        #
+        # Deliberately bus.ee.emit, NOT bus.emit: audio_output_end is a synthetic
+        # *hardware/audio* event, not a message a component emitted with an
+        # authoritative session. bus.emit would run FakeBus.on_message, which —
+        # like the real MessageBusClient — rebuilds the Session from the message and
+        # calls SessionManager.update(), wholesale-replacing the cached session. A
+        # contentless synthetic event would thereby clobber transient state
+        # (is_speaking, active_skills). bus.ee.emit fires only the topic handlers,
+        # which is the correct semantics for injecting a fake audio event.
         def _mock_tts(message):
             sess = SessionManager.get(message)
             threading.Timer(0.1, lambda: bus.ee.emit(

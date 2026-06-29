@@ -656,9 +656,16 @@ class CaptureSession:
     async_responses: List[Message] = dataclasses.field(default_factory=list)
 
     eof_msgs: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_EOF)
+    # end capture only after an eof message has been seen this many times. Use >1
+    # when the scenario produces N concurrent lifecycles that each terminate on the
+    # same eof topic (e.g. two ovos.utterance.handled — one per utterance — when a
+    # stop interrupts a running skill), so capture spans all of them.
+    eof_count: int = 1
     ignore_messages: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_IGNORED)
     async_messages: List[str] = dataclasses.field(default_factory=list) # these come from an external thread and might come in any order
     done: threading.Event = dataclasses.field(default_factory=lambda: threading.Event())
+    _eof_lock: threading.Lock = dataclasses.field(default_factory=lambda: threading.Lock())
+    _eof_seen: int = 0
 
     def handle_message(self, msg: str):
         if self.done.is_set():
@@ -670,7 +677,10 @@ class CaptureSession:
             self.responses.append(msg)
 
     def handle_end_of_test(self, msg: Message):
-        self.done.set()
+        with self._eof_lock:
+            self._eof_seen += 1
+            if self._eof_seen >= self.eof_count:
+                self.done.set()
 
     def __post_init__(self):
         self.minicroft.bus.on("message", self.handle_message)
@@ -680,6 +690,8 @@ class CaptureSession:
     def capture(self, source_message: Message, timeout=20):
         test_message = deepcopy(source_message)  # ensure object not mutated by ovos-core
         self.done.clear()
+        with self._eof_lock:
+            self._eof_seen = 0
         self.minicroft.bus.emit(test_message)
         self.done.wait(timeout)
 
@@ -709,7 +721,16 @@ class End2EndTest:
     # message type runtime modifiers
     ##############################
     eof_msgs: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_EOF) # if received, end message capture
+    eof_count: int = 1 # end capture only after an eof message has been seen this many times (one per concurrent lifecycle terminating on the same topic)
     ignore_messages: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_IGNORED) # pretend any message in this list was not emitted for testing purposes
+    # Assert only the messages belonging to a single dispatch lifecycle, identified
+    # by message.context["skill_id"]. When set, captured messages whose skill_id does
+    # not match are dropped before assertion. This isolates one lifecycle's §8 trio +
+    # §9 terminals from a CONCURRENT lifecycle whose messages interleave
+    # non-deterministically (e.g. stopping a skill that is mid-dispatch: the stop
+    # dispatch and the interrupted skill's own completion race). Run the same
+    # scenario once per skill_id to assert each lifecycle deterministically.
+    skill_id: Optional[str] = None
     ignore_gui: bool = True # ignore the gui namespace bus messages, usually unwanted unless explicitly testing gui integration
     async_messages: List[str] = dataclasses.field(default_factory=list) # these come from an external thread and might come in any order, validate they are received outside the main test
 
@@ -823,6 +844,7 @@ class End2EndTest:
         # the capture session will store all messages until capture.finish()
         #  even if multiple messages are emitted
         capture = CaptureSession(self.minicroft, eof_msgs=self.eof_msgs,
+                                 eof_count=self.eof_count,
                                  ignore_messages=self.ignore_messages,
                                  async_messages=self.async_messages)
         for idx, source_message in enumerate(self.source_message):
@@ -833,6 +855,14 @@ class End2EndTest:
 
         # final message list
         messages = capture.finish()
+
+        # isolate a single dispatch lifecycle by skill_id — drop messages from a
+        # concurrent (interleaving) lifecycle so the assertion is deterministic.
+        if self.skill_id is not None:
+            messages = [m for m in messages
+                        if (m.context or {}).get("skill_id") == self.skill_id]
+            if self.verbose:
+                print(f"💡 filtered to skill_id='{self.skill_id}': {len(messages)} messages")
 
         if _bus_tracker is not None:
             _bus_tracker.stop_tracking()
@@ -907,7 +937,7 @@ class End2EndTest:
                     assert received.context[k] == v, f"❌ message context mismatch for key '{k}' - expected '{v}' | got '{received.context[k]}'"
                     if self.verbose:
                         print(f"✅ got expected message context '{k}: '{v}'")
-            if self.test_routing:
+            if self.test_routing and self.skill_id is None:
                 r_src = received.context.get("source")
                 r_dst = received.context.get("destination")
                 if expected.msg_type in self.keep_original_src:

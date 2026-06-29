@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.2.0a1) (2026-06-29)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.1.0a2...1.2.0a1)
+
+**Merged pull requests:**
+
+- feat: MockTTS publishes audio\_output\_end via the full bus \(faithful\) [\#106](https://github.com/OpenVoiceOS/ovoscope/pull/106) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.1.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.1.0a2) (2026-06-29)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.1.0a1...1.1.0a2)

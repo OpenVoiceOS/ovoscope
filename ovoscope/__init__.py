@@ -15,6 +15,7 @@ from ovos_plugin_manager.skills import find_skill_plugins
 from ovos_utils.fakebus import FakeBus
 from ovos_utils.log import LOG
 from ovos_utils.process_utils import ProcessState
+from ovos_spec_tools import SpecMessage
 from ovos_workshop.skills.ovos import OVOSSkill
 
 SerializedMessage = Dict[str, Union[str, Dict[str, Any]]]
@@ -391,6 +392,23 @@ class MiniCroft(SkillManager):
         bus = FakeBus(modernize=self._modernize,
                       emit_legacy=self._emit_legacy)
         bus.on("message", self.handle_boot_message)
+
+        # TTS mock: speak_dialog(…, wait=True) blocks on
+        # recognizer_loop:audio_output_end. Since there is no real TTS we
+        # schedule a short-delay emit to unblock the handler.
+        # This uses bus.ee.emit (not bus.emit) to bypass FakeBus's
+        # namespace-migration and on_message side effects so the synthetic
+        # event does not appear in test captures or reset session state.
+        def _mock_tts(message):
+            sess = SessionManager.get(message)
+            threading.Timer(0.1, lambda: bus.ee.emit(
+                "recognizer_loop:audio_output_end",
+                Message("recognizer_loop:audio_output_end",
+                        context={"session": sess.serialize()})
+            )).start()
+
+        bus.on(SpecMessage.SPEAK, _mock_tts)
+
         self.skill_ids = skill_ids
         self.extra_skills = extra_skills or {}
 

@@ -398,18 +398,20 @@ class MiniCroft(SkillManager):
         # arrives, so the handler stalls until the dispatcher's §8.3 timeout. We
         # schedule a short-delay emit to unblock it.
         #
-        # Deliberately bus.ee.emit, NOT bus.emit: audio_output_end is a synthetic
-        # *hardware/audio* event, not a message a component emitted with an
-        # authoritative session. bus.emit would run FakeBus.on_message, which —
-        # like the real MessageBusClient — rebuilds the Session from the message and
-        # calls SessionManager.update(), wholesale-replacing the cached session. A
-        # contentless synthetic event would thereby clobber transient state
-        # (is_speaking, active_skills). bus.ee.emit fires only the topic handlers,
-        # which is the correct semantics for injecting a fake audio event.
+        # Full bus.emit, like the real audio service: recognizer_loop:audio_output_end
+        # is a genuine bus message in production, so the harness publishes it the
+        # same way — through on_message (namespace migration + capture), where any
+        # bus observer would see it. SessionManager.handle_audio_output_end then
+        # flips is_speaking=False on the one live session object the ovos-bus-client
+        # SessionManager singleton keeps per id, so every holder of that session sees
+        # it. Capture position is faithful: with speak(wait=False) the handler emits
+        # its end-marker first, so this lands after the EOF and is not captured; with
+        # speak(wait=True) the handler blocks in wait_while_speaking until this
+        # arrives, so it deterministically precedes the end-marker and is captured —
+        # exactly as a real deployment would record it.
         def _mock_tts(message):
             sess = SessionManager.get(message)
-            threading.Timer(0.1, lambda: bus.ee.emit(
-                "recognizer_loop:audio_output_end",
+            threading.Timer(0.1, lambda: bus.emit(
                 Message("recognizer_loop:audio_output_end",
                         context={"session": sess.serialize()})
             )).start()

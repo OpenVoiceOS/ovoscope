@@ -399,7 +399,9 @@ class MiniCroft(SkillManager):
         # emit audio_output_start synchronously (duck) and schedule a short-delay
         # audio_output_end (unduck) to simulate the full TTS playback lifecycle.
         def _mock_tts(message):
-            # TTS playback begins — duck immediately
+            # TTS playback begins — duck immediately.
+            # message.forward copies source/destination/session from the speak,
+            # matching what the real audio service would do.
             bus.emit(message.forward("recognizer_loop:audio_output_start"))
             # TTS playback ends after a short delay — unduck
             threading.Timer(0.1, lambda: bus.emit(

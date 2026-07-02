@@ -142,19 +142,21 @@ under grant agreement No [101135429](https://cordis.europa.eu/project/id/1011354
 ---
 
 ## License
+
 [Apache 2.0](LICENSE)
+
 ---
+
 ## Contributing
+
 PRs are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
 ---
+
 ## AI Disclosure
+
 Parts of this project are developed with the assistance of AI tools.
-In the interest of transparency, two files are maintained as a public record of AI involvement:
-- **[FAQ.md](FAQ.md)** — Frequently asked questions that emerged from real development sessions,
-  including design rationale, gotchas, and usage patterns. Many entries were authored or
-  refined with AI assistance during the process of building and testing this framework.
-- **[MAINTENANCE_REPORT.md](MAINTENANCE_REPORT.md)** — A chronological log of changes made to
-  this repository. Each entry records what was changed, why, which AI model was involved, what
+
   actions it took, and what human oversight was applied. This log is updated after every
   significant AI-assisted session.
 These files are intentionally published so that contributors and users can understand how the

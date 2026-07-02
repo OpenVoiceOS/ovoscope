@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.5.0a1) (2026-07-02)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.4.0a1...1.5.0a1)
+
+**Merged pull requests:**
+
+- feat: add a pipeline\_id filter to End2EndTest [\#112](https://github.com/OpenVoiceOS/ovoscope/pull/112) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.4.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.4.0a1) (2026-06-29)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.3.0a1...1.4.0a1)

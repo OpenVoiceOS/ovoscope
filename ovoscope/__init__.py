@@ -731,6 +731,13 @@ class End2EndTest:
     # dispatch and the interrupted skill's own completion race). Run the same
     # scenario once per skill_id to assert each lifecycle deterministically.
     skill_id: Optional[str] = None
+    # Like skill_id, but isolates a lifecycle by its producing pipeline_id
+    # (OVOS-PIPELINE-1 §3.1, stamped on the dispatch context). Use this when the
+    # dispatch and a concurrent lifecycle share a skill_id — e.g. a targeted stop
+    # whose Match.skill_id IS the interrupted skill (OVOS-STOP-1 §3.1): both carry
+    # that skill_id, but only the stop dispatch carries the stop plugin's
+    # pipeline_id. Applied together with skill_id when both are set.
+    pipeline_id: Optional[str] = None
     ignore_gui: bool = True # ignore the gui namespace bus messages, usually unwanted unless explicitly testing gui integration
     async_messages: List[str] = dataclasses.field(default_factory=list) # these come from an external thread and might come in any order, validate they are received outside the main test
 
@@ -863,6 +870,11 @@ class End2EndTest:
                         if (m.context or {}).get("skill_id") == self.skill_id]
             if self.verbose:
                 print(f"💡 filtered to skill_id='{self.skill_id}': {len(messages)} messages")
+        if self.pipeline_id is not None:
+            messages = [m for m in messages
+                        if (m.context or {}).get("pipeline_id") == self.pipeline_id]
+            if self.verbose:
+                print(f"💡 filtered to pipeline_id='{self.pipeline_id}': {len(messages)} messages")
 
         if _bus_tracker is not None:
             _bus_tracker.stop_tracking()
@@ -937,7 +949,7 @@ class End2EndTest:
                     assert received.context[k] == v, f"❌ message context mismatch for key '{k}' - expected '{v}' | got '{received.context[k]}'"
                     if self.verbose:
                         print(f"✅ got expected message context '{k}: '{v}'")
-            if self.test_routing and self.skill_id is None:
+            if self.test_routing and self.skill_id is None and self.pipeline_id is None:
                 r_src = received.context.get("source")
                 r_dst = received.context.get("destination")
                 if expected.msg_type in self.keep_original_src:

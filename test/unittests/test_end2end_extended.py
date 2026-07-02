@@ -65,6 +65,25 @@ class TwoLifecycleSkill(OVOSSkill):
             self.bus.emit(Message("ovos.utterance.handled", context=ctx))
 
 
+class SharedSkillIdSkill(OVOSSkill):
+    """Emits two lifecycles that share a context skill_id but differ in
+    pipeline_id — the shape produced when a targeted stop (OVOS-STOP-1 §3.1)
+    interrupts a running skill: both carry the target's skill_id, only the stop
+    dispatch carries the stop plugin's pipeline_id. Exercises the pipeline_id
+    filter. Each lifecycle ends on the shared ``ovos.utterance.handled``."""
+
+    def initialize(self):
+        self.add_event("unittest.shared_skill_id", self.handle_shared)
+
+    def handle_shared(self, message: Message):
+        for pid in ("pipe.a", "pipe.b"):
+            ctx = dict(message.context)
+            ctx["skill_id"] = "shared.skill"
+            ctx["pipeline_id"] = pid
+            self.bus.emit(Message(f"{pid}.step", context=ctx))
+            self.bus.emit(Message("ovos.utterance.handled", context=ctx))
+
+
 def _session(sid="ext-test", pipeline=None):
     s = Session(sid)
     s.lang = "en-US"
@@ -997,6 +1016,63 @@ class TestMessageCountVerbose(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             test.execute(timeout=10)
+
+
+class TestPipelineIdFilter(unittest.TestCase):
+    """The pipeline_id filter isolates a lifecycle when a shared skill_id can't."""
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+        self.mc = get_minicroft([SKILL_ID],
+                                extra_skills={SKILL_ID: SharedSkillIdSkill})
+
+    def tearDown(self):
+        self.mc.stop()
+        LOG.set_level("CRITICAL")
+
+    def _common_kwargs(self):
+        return dict(
+            minicroft=self.mc,
+            skill_ids=[SKILL_ID],
+            eof_msgs=["ovos.utterance.handled"],
+            eof_count=2,
+            test_routing=False,
+            test_active_skills=False,
+            test_final_session=False,
+            ignore_messages=DEFAULT_IGNORED + HANDLER_LIFECYCLE,
+            verbose=False,
+        )
+
+    def test_pipeline_id_isolates_when_skill_id_shared(self):
+        # both lifecycles share skill_id="shared.skill"; only pipeline_id differs
+        src = _make_custom("unittest.shared_skill_id")
+        test = End2EndTest(
+            source_message=src,
+            pipeline_id="pipe.a",
+            expected_messages=[
+                Message("pipe.a.step", {},
+                        {"skill_id": "shared.skill", "pipeline_id": "pipe.a"}),
+                Message("ovos.utterance.handled", {},
+                        {"skill_id": "shared.skill", "pipeline_id": "pipe.a"}),
+            ],
+            **self._common_kwargs(),
+        )
+        test.execute(timeout=10)
+
+    def test_pipeline_id_filters_the_other(self):
+        src = _make_custom("unittest.shared_skill_id")
+        test = End2EndTest(
+            source_message=src,
+            pipeline_id="pipe.b",
+            expected_messages=[
+                Message("pipe.b.step", {},
+                        {"skill_id": "shared.skill", "pipeline_id": "pipe.b"}),
+                Message("ovos.utterance.handled", {},
+                        {"skill_id": "shared.skill", "pipeline_id": "pipe.b"}),
+            ],
+            **self._common_kwargs(),
+        )
+        test.execute(timeout=10)
 
 
 class TestSkillIdFilter(unittest.TestCase):

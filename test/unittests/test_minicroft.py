@@ -3,12 +3,16 @@ import threading
 import unittest
 
 from ovos_bus_client.message import Message
+from ovos_spec_tools import SpecMessage
 from ovos_utils.log import LOG
 from ovos_workshop.skills.ovos import OVOSSkill
 
 from ovos_bus_client.session import SessionManager
 
 from ovoscope import MiniCroft, get_minicroft, DEFAULT_TEST_PIPELINE, LIGHT_TEST_PIPELINE, ADAPT_PIPELINE
+
+LEGACY_UTTERANCE = "recognizer_loop:utterance"
+SPEC_UTTERANCE = str(SpecMessage.UTTERANCE)  # ovos.utterance.handle
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +326,76 @@ class TestMiniCroftPipelineConfig(unittest.TestCase):
         cfg_after = Configuration().get("intents", {})
         self.assertIsNone(cfg_after.get("plugin_a"))
         self.assertIsNone(cfg_after.get("plugin_b"))
+
+
+class TestMiniCroftNamespaceBridging(unittest.TestCase):
+    """MiniCroft is the e2e harness bus. Utterances are injected on the LEGACY
+    topic (``recognizer_loop:utterance``); these tests pin that MiniCroft's
+    FakeBus bridges that to/from the ovos.* SPEC topic
+    (``ovos.utterance.handle``) so an e2e test can drive EITHER namespace, and
+    that disabling the bridge isolates a single namespace.
+    """
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+
+    def tearDown(self):
+        LOG.set_level("CRITICAL")
+
+    def _emit_and_collect(self, mc, emit_topic, watch_topic, *, timeout=3.0):
+        seen = []
+        got = threading.Event()
+
+        def _on(msg):
+            if isinstance(msg, str):
+                msg = Message.deserialize(msg)
+            seen.append(msg)
+            got.set()
+
+        mc.bus.on(watch_topic, _on)
+        try:
+            mc.bus.emit(Message(
+                emit_topic,
+                data={"utterances": ["hello world"], "lang": "en-US"},
+            ))
+            got.wait(timeout)
+        finally:
+            mc.bus.remove(watch_topic, _on)
+        return seen
+
+    def test_legacy_utterance_observed_on_spec_topic(self):
+        """Default (bridging on): a legacy recognizer_loop:utterance injected
+        into the e2e harness is observed on ovos.utterance.handle (modernize)."""
+        mc = get_minicroft([])  # modernize/emit_legacy default on
+        try:
+            seen = self._emit_and_collect(mc, LEGACY_UTTERANCE, SPEC_UTTERANCE)
+            self.assertTrue(seen, "legacy utterance was not bridged to the spec topic")
+            self.assertEqual(seen[0].data["utterances"], ["hello world"])
+        finally:
+            mc.stop()
+
+    def test_spec_utterance_reaches_legacy_listener(self):
+        """An utterance injected on the SPEC topic reaches a LEGACY listener
+        (emit_legacy) — the intent pipeline keys off the legacy topic."""
+        mc = get_minicroft([])
+        try:
+            seen = self._emit_and_collect(mc, SPEC_UTTERANCE, LEGACY_UTTERANCE)
+            self.assertTrue(seen, "spec utterance was not bridged to the legacy topic")
+            self.assertEqual(seen[0].data["utterances"], ["hello world"])
+        finally:
+            mc.stop()
+
+    def test_no_bridging_isolates_legacy_from_spec(self):
+        """With bridging OFF, a legacy emit does NOT reach a spec-only
+        subscriber — the e2e harness exercises a single isolated namespace."""
+        mc = get_minicroft([], modernize=False, emit_legacy=False)
+        try:
+            seen = self._emit_and_collect(mc, LEGACY_UTTERANCE, SPEC_UTTERANCE,
+                                          timeout=0.5)
+            self.assertEqual(seen, [],
+                             "legacy emit must not reach the spec topic when bridging is off")
+        finally:
+            mc.stop()
 
 
 if __name__ == "__main__":

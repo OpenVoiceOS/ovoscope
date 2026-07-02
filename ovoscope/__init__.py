@@ -15,6 +15,7 @@ from ovos_plugin_manager.skills import find_skill_plugins
 from ovos_utils.fakebus import FakeBus
 from ovos_utils.log import LOG
 from ovos_utils.process_utils import ProcessState
+from ovos_spec_tools import SpecMessage
 from ovos_workshop.skills.ovos import OVOSSkill
 
 SerializedMessage = Dict[str, Union[str, Dict[str, Any]]]
@@ -75,6 +76,11 @@ M2V_PIPELINE = [
     "ovos-m2v-pipeline-medium",
     "ovos-m2v-pipeline-low",
 ]
+# Nebulento — fuzzy intent matching (ConfidenceMatcherPipeline). Single OPM
+# entry point; the pipeline manager handles confidence-tier routing.
+NEBULENTO_PIPELINE = ["ovos-nebulento-pipeline-plugin"]
+# Palavreado — keyword/slot intent parser (ConfidenceMatcherPipeline).
+PALAVREADO_PIPELINE = ["palavreado"]
 
 # Standard test pipeline — all standard built-in stages.
 # This requires ovos-adapt-pipeline-plugin and ovos-padatious-pipeline-plugin.
@@ -296,7 +302,19 @@ class MiniCroft(SkillManager):
                  lang: Optional[str] = None,
                  secondary_langs: Optional[List[str]] = None,
                  pipeline_config: Optional[Dict[str, Dict]] = None,
+                 modernize: bool = True,
+                 emit_legacy: bool = True,
                  *args, **kwargs):
+        # Namespace-migration flags forwarded to the harness FakeBus so callers
+        # can choose which bus namespace(s) to exercise:
+        #   modernize=True   emitting a legacy topic ALSO emits the ovos.* spec
+        #                    topic (legacy producer -> spec listener)
+        #   emit_legacy=True emitting an ovos.* spec topic ALSO emits the legacy
+        #                    topic (spec producer -> legacy listener)
+        # Both default on (mirrors MessageBusClient). Set BOTH False to isolate a
+        # single namespace and assert no cross-namespace bridging occurs.
+        self._modernize = modernize
+        self._emit_legacy = emit_legacy
         self._isolated_config = isolate_config
         self._original_xdg_configs: Optional[List[LocalConf]] = None
 
@@ -371,8 +389,27 @@ class MiniCroft(SkillManager):
                 LOG.debug(f"ovoscope: pipeline_config patched '{plugin_key}'")
 
         self.boot_messages: List[Message] = []
-        bus = FakeBus()
+        bus = FakeBus(modernize=self._modernize,
+                      emit_legacy=self._emit_legacy)
         bus.on("message", self.handle_boot_message)
+
+        # TTS mock: speak_dialog(…, wait=True) blocks in wait_while_speaking on
+        # recognizer_loop:audio_output_end. With no real TTS that event never
+        # arrives, so the handler stalls until the dispatcher's §8.3 timeout. We
+        # emit audio_output_start synchronously (duck) and schedule a short-delay
+        # audio_output_end (unduck) to simulate the full TTS playback lifecycle.
+        def _mock_tts(message):
+            # TTS playback begins — duck immediately.
+            # message.forward copies source/destination/session from the speak,
+            # matching what the real audio service would do.
+            bus.emit(message.forward("recognizer_loop:audio_output_start"))
+            # TTS playback ends after a short delay — unduck
+            threading.Timer(0.1, lambda: bus.emit(
+                message.forward("recognizer_loop:audio_output_end")
+            )).start()
+
+        bus.on(SpecMessage.SPEAK, _mock_tts)
+
         self.skill_ids = skill_ids
         self.extra_skills = extra_skills or {}
 
@@ -619,9 +656,16 @@ class CaptureSession:
     async_responses: List[Message] = dataclasses.field(default_factory=list)
 
     eof_msgs: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_EOF)
+    # end capture only after an eof message has been seen this many times. Use >1
+    # when the scenario produces N concurrent lifecycles that each terminate on the
+    # same eof topic (e.g. two ovos.utterance.handled — one per utterance — when a
+    # stop interrupts a running skill), so capture spans all of them.
+    eof_count: int = 1
     ignore_messages: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_IGNORED)
     async_messages: List[str] = dataclasses.field(default_factory=list) # these come from an external thread and might come in any order
     done: threading.Event = dataclasses.field(default_factory=lambda: threading.Event())
+    _eof_lock: threading.Lock = dataclasses.field(default_factory=lambda: threading.Lock())
+    _eof_seen: int = 0
 
     def handle_message(self, msg: str):
         if self.done.is_set():
@@ -633,7 +677,10 @@ class CaptureSession:
             self.responses.append(msg)
 
     def handle_end_of_test(self, msg: Message):
-        self.done.set()
+        with self._eof_lock:
+            self._eof_seen += 1
+            if self._eof_seen >= self.eof_count:
+                self.done.set()
 
     def __post_init__(self):
         self.minicroft.bus.on("message", self.handle_message)
@@ -643,6 +690,8 @@ class CaptureSession:
     def capture(self, source_message: Message, timeout=20):
         test_message = deepcopy(source_message)  # ensure object not mutated by ovos-core
         self.done.clear()
+        with self._eof_lock:
+            self._eof_seen = 0
         self.minicroft.bus.emit(test_message)
         self.done.wait(timeout)
 
@@ -672,7 +721,23 @@ class End2EndTest:
     # message type runtime modifiers
     ##############################
     eof_msgs: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_EOF) # if received, end message capture
+    eof_count: int = 1 # end capture only after an eof message has been seen this many times (one per concurrent lifecycle terminating on the same topic)
     ignore_messages: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_IGNORED) # pretend any message in this list was not emitted for testing purposes
+    # Assert only the messages belonging to a single dispatch lifecycle, identified
+    # by message.context["skill_id"]. When set, captured messages whose skill_id does
+    # not match are dropped before assertion. This isolates one lifecycle's §8 trio +
+    # §9 terminals from a CONCURRENT lifecycle whose messages interleave
+    # non-deterministically (e.g. stopping a skill that is mid-dispatch: the stop
+    # dispatch and the interrupted skill's own completion race). Run the same
+    # scenario once per skill_id to assert each lifecycle deterministically.
+    skill_id: Optional[str] = None
+    # Like skill_id, but isolates a lifecycle by its producing pipeline_id
+    # (OVOS-PIPELINE-1 §3.1, stamped on the dispatch context). Use this when the
+    # dispatch and a concurrent lifecycle share a skill_id — e.g. a targeted stop
+    # whose Match.skill_id IS the interrupted skill (OVOS-STOP-1 §3.1): both carry
+    # that skill_id, but only the stop dispatch carries the stop plugin's
+    # pipeline_id. Applied together with skill_id when both are set.
+    pipeline_id: Optional[str] = None
     ignore_gui: bool = True # ignore the gui namespace bus messages, usually unwanted unless explicitly testing gui integration
     async_messages: List[str] = dataclasses.field(default_factory=list) # these come from an external thread and might come in any order, validate they are received outside the main test
 
@@ -728,8 +793,12 @@ class End2EndTest:
         if GLOBAL_BUS_COVERAGE:
             self.track_bus_coverage = True
 
-        # standardize to be a list
-        if isinstance(self.source_message, Message):
+        # standardize to be a list. Use "not a list" rather than an
+        # isinstance(Message) check: depending on installed versions the
+        # message class may come from ovos_bus_client / ovos_spec_tools /
+        # ovos_utils.fakebus, and a cross-class isinstance can be False — which
+        # would leave a single (non-iterable) Message and break later iteration.
+        if not isinstance(self.source_message, list):
             self.source_message = [self.source_message]
         if self.ignore_gui:
             # ensure we don't mutate a shared default list
@@ -782,6 +851,7 @@ class End2EndTest:
         # the capture session will store all messages until capture.finish()
         #  even if multiple messages are emitted
         capture = CaptureSession(self.minicroft, eof_msgs=self.eof_msgs,
+                                 eof_count=self.eof_count,
                                  ignore_messages=self.ignore_messages,
                                  async_messages=self.async_messages)
         for idx, source_message in enumerate(self.source_message):
@@ -792,6 +862,19 @@ class End2EndTest:
 
         # final message list
         messages = capture.finish()
+
+        # isolate a single dispatch lifecycle by skill_id — drop messages from a
+        # concurrent (interleaving) lifecycle so the assertion is deterministic.
+        if self.skill_id is not None:
+            messages = [m for m in messages
+                        if (m.context or {}).get("skill_id") == self.skill_id]
+            if self.verbose:
+                print(f"💡 filtered to skill_id='{self.skill_id}': {len(messages)} messages")
+        if self.pipeline_id is not None:
+            messages = [m for m in messages
+                        if (m.context or {}).get("pipeline_id") == self.pipeline_id]
+            if self.verbose:
+                print(f"💡 filtered to pipeline_id='{self.pipeline_id}': {len(messages)} messages")
 
         if _bus_tracker is not None:
             _bus_tracker.stop_tracking()
@@ -866,7 +949,7 @@ class End2EndTest:
                     assert received.context[k] == v, f"❌ message context mismatch for key '{k}' - expected '{v}' | got '{received.context[k]}'"
                     if self.verbose:
                         print(f"✅ got expected message context '{k}: '{v}'")
-            if self.test_routing:
+            if self.test_routing and self.skill_id is None and self.pipeline_id is None:
                 r_src = received.context.get("source")
                 r_dst = received.context.get("destination")
                 if expected.msg_type in self.keep_original_src:
@@ -919,8 +1002,8 @@ class End2EndTest:
             assert sess.time_format == expected_sess.time_format, f"❌ final session time_format doesn't match"
             assert sess.site_id == expected_sess.site_id, f"❌ final session site_id doesn't match"
             assert sess.session_id == expected_sess.session_id, f"❌ final session session_id doesn't match"
-            assert set(sess.blacklisted_skills) == set(expected_sess.blacklisted_skills), f"❌ final session blacklisted_skills doesn't match"
-            assert set(sess.blacklisted_intents) == set(expected_sess.blacklisted_intents), f"❌ final session blacklisted_intents doesn't match"
+            assert set(sess.blacklisted_skills or []) == set(expected_sess.blacklisted_skills or []), f"❌ final session blacklisted_skills doesn't match"
+            assert set(sess.blacklisted_intents or []) == set(expected_sess.blacklisted_intents or []), f"❌ final session blacklisted_intents doesn't match"
             if self.verbose:
                 print(f"✅ final session matches: {expected_sess.serialize()}")
 
@@ -1020,7 +1103,7 @@ class End2EndTest:
                                  async_messages=async_messages)
 
         for idx, source_message in enumerate(message):
-            if "session" not in source_message.context:
+            if "session" not in source_message.context and len(capture.responses):
                 # propagate session updates as a client would do
                 source_message.context["session"] = capture.responses[-1].context["session"]
             capture.capture(source_message, timeout)
@@ -1091,6 +1174,47 @@ except ImportError as e:
         raise
 
 try:
+    from ovoscope.media import (  # noqa: F401
+        MockOCPBackend,
+        OCPPlayerHarness,
+        OCPCaptureSession,
+    )
+except ImportError as e:
+    # Optional [media] extra (ovos-media). Silence only when the missing module
+    # is ovos-media itself; a logic error in a present lib must re-raise.
+    if isinstance(e, ModuleNotFoundError) and e.name in ("ovos_media", "ovos_media.player"):
+        pass
+    else:
+        raise
+
+# MediaProvider (catalog/search) harness — duck-typed, stdlib-only at import time,
+# so it needs no optional dependency guard (the provider package + mediavocab are
+# only needed by the *test* that uses it, not by ovoscope itself).
+from ovoscope.media_provider import MediaProviderHarness  # noqa: F401,E402
+
+try:
+    from ovoscope.tts_intelligibility import (  # noqa: F401
+        TTSIntelligibilityHarness,
+        IntelligibilityReport,
+        UtteranceScore,
+        score_tts_intelligibility,
+    )
+except ImportError as e:
+    # Optional [tts] extra. Silence only when the missing module is one of the
+    # optional TTS-scoring deps; a logic error in a present lib must re-raise.
+    _TTS_OPTIONAL_MODULES = (
+        "jiwer",
+        "ovos_audio", "ovos_audio.audio",
+        "ovos_utterance_normalizer",
+        "ovos_stt_plugin_fasterwhisper",
+        "faster_whisper",
+    )
+    if isinstance(e, ModuleNotFoundError) and e.name in _TTS_OPTIONAL_MODULES:
+        pass
+    else:
+        raise
+
+try:
     from ovoscope.listener import (  # noqa: F401
         MiniListener,
         get_mini_listener,
@@ -1101,6 +1225,25 @@ except ImportError as e:
         pass
     else:
         raise
+
+from ovoscope.voice_loop import (  # noqa: F401
+    ListenerHarness,
+    MiniVoiceLoop,
+    MiniHotwordContainer,
+    MockFileMicrophone,
+    MockStreamingSTT,
+    get_mini_voice_loop,
+    VoiceLoopTest,
+)
+from ovoscope.simple_listener import (  # noqa: F401
+    MiniSimpleListener,
+    get_mini_simple_listener,
+)
+from ovoscope.classic_listener import (  # noqa: F401
+    MiniClassicListener,
+    bridge_recognizer_loop_to_bus,
+    classic_listener_available,
+)
 
 
 @dataclasses.dataclass
@@ -1203,6 +1346,33 @@ class GUICaptureSession:
             f"but no matching gui.page.show message was captured.\nGot: {captured}"
         )
 
+    def assert_template_shown(self, namespace: str, template: str,
+                              values: Optional[Dict[str, Any]] = None,
+                              timeout: float = 2.0) -> None:
+        """Assert that a built-in ``SYSTEM_*`` template was shown.
+
+        Ergonomic helper for the template-based GUI: a skill calling a typed
+        method such as ``self.gui.show_weather(...)`` emits a
+        ``gui.page.show`` for the ``SYSTEM_weather`` template plus
+        ``gui.value.set`` for its data keys. This asserts both in one call.
+
+        Args:
+            namespace: GUI namespace (typically the skill ID).
+            template: Template name, with or without the ``SYSTEM_`` prefix
+                (``"weather"`` and ``"SYSTEM_weather"`` are equivalent).
+            values: Optional mapping of session-data keys to expected values;
+                each is checked via :meth:`assert_namespace_value`.
+            timeout: Maximum seconds to wait for the page-show message.
+
+        Raises:
+            AssertionError: If the template was not shown, or a listed value
+                was not set.
+        """
+        name = template if template.startswith("SYSTEM_") else f"SYSTEM_{template}"
+        self.assert_page_shown(namespace, name, timeout=timeout)
+        for key, value in (values or {}).items():
+            self.assert_namespace_value(namespace, key, value)
+
     def assert_namespace_value(self, namespace: str, key: str, value: Any) -> None:
         """Assert that a namespace key was set to a specific value.
 
@@ -1276,3 +1446,29 @@ class GUICaptureSession:
             f"Expected namespace {namespace!r} to be cleared, "
             f"but no matching message was captured."
         )
+
+
+# ---------------------------------------------------------------------------
+# Public re-exports — see ovoscope/e2e.py for full docs
+# ---------------------------------------------------------------------------
+from ovoscope.intent_cases import (  # noqa: E402,F401
+    DEFAULT_IGNORE_MESSAGES,
+    DEFAULT_PIPELINE_FAMILIES,
+    IntentCase,
+    assert_intent_case,
+    load_intent_cases,
+    register_intent_case_tests,
+)
+from ovoscope.e2e import (  # noqa: E402,F401
+    E2EPipelineHarness,
+    detach_intent,
+    detach_skill,
+    make_session,
+    make_utterance_message,
+    register_adapt_intent,
+    register_adapt_vocab,
+    register_padatious_entity,
+    register_padatious_intent,
+    wait_for_failure,
+    wait_for_match,
+)

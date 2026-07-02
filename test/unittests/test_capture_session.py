@@ -161,6 +161,50 @@ class TestCaptureSession(unittest.TestCase):
         self.assertIn("test.x", types)
         self.assertNotIn("test.late", types)
 
+    def test_eof_count_waits_for_n_occurrences(self):
+        """With eof_count>1, capture continues until an eof topic is seen that
+        many times — for scenarios with N concurrent lifecycles each terminating
+        on the same eof topic."""
+        cs = CaptureSession(self.mc,
+                            eof_msgs=["test.eof"],
+                            eof_count=2,
+                            ignore_messages=[])
+        self._emit_after(0.05, Message("test.eof"))      # 1st eof — must NOT stop
+        self._emit_after(0.10, Message("test.between"))  # captured (after 1st eof)
+        self._emit_after(0.15, Message("test.eof"))      # 2nd eof — stops capture
+        self._emit_after(0.30, Message("test.after"))    # must NOT appear
+
+        cs.capture(Message("test.trigger"), timeout=3)
+        msgs = cs.finish()
+        types = [m.msg_type for m in msgs]
+
+        self.assertIn("test.between", types,
+                      "a message between the 1st and 2nd eof must be captured")
+        self.assertEqual(types.count("test.eof"), 2,
+                         "both eof occurrences are captured")
+        self.assertNotIn("test.after", types,
+                         "message after the Nth eof must not be captured")
+
+    def test_eof_count_resets_between_captures(self):
+        """The eof counter resets per capture() call so eof_count applies fresh."""
+        cs = CaptureSession(self.mc,
+                            eof_msgs=["test.eof"],
+                            eof_count=2,
+                            ignore_messages=[])
+        self._emit_after(0.05, Message("test.eof"))
+        self._emit_after(0.10, Message("test.eof"))
+        cs.capture(Message("test.trigger1"), timeout=3)
+        cs.finish()
+        # a second capture must again require 2 eofs, not be already-done
+        cs2 = CaptureSession(self.mc, eof_msgs=["test.eof"], eof_count=2,
+                             ignore_messages=[])
+        self._emit_after(0.05, Message("test.eof"))
+        self._emit_after(0.10, Message("test.mid"))
+        self._emit_after(0.15, Message("test.eof"))
+        cs2.capture(Message("test.trigger2"), timeout=3)
+        types = [m.msg_type for m in cs2.finish()]
+        self.assertIn("test.mid", types)
+
     def test_capture_timeout_returns_partial_results(self):
         """If the EOF never fires, capture() must return after the timeout
         and finish() must still return whatever was captured."""

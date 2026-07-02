@@ -34,10 +34,10 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ovos_utils.fakebus import FakeBus
-from ovos_utils.messagebus import Message
+from ovos_bus_client.message import Message
 
 
 class MiniPHAL:
@@ -50,7 +50,22 @@ class MiniPHAL:
         plugin_ids: OPM entry-point IDs of the PHAL plugins to load.
         plugin_instances: Pre-built or mocked plugin instances keyed by plugin_id.
             When provided the corresponding entry in *plugin_ids* is skipped.
+            Note: instances must have been constructed with the same ``FakeBus``
+            that ``MiniPHAL`` provides — use *plugin_factories* instead when
+            the plugin must be built inside the harness context.
+        plugin_factories: Callables ``(bus: FakeBus) -> plugin`` keyed by
+            plugin_id.  The factory is called during ``__enter__`` so the plugin
+            is always wired to the harness ``FakeBus``.  Takes precedence over
+            *plugin_instances* for the same plugin_id.
         config: Per-plugin configuration overrides keyed by plugin_id.
+        modernize: FakeBus also emits the ovos.* spec topic when a legacy topic
+            is emitted (legacy producer -> spec listener). PHAL plugins do not use
+            any of the migrated audio/listener topics, so this only matters for a
+            plugin that happens to consume/produce a migrated topic; it is threaded
+            for consistency with the audio/media harnesses.
+        emit_legacy: FakeBus also emits the legacy topic when an ovos.* spec topic
+            is emitted (spec producer -> legacy listener). Set both False to
+            exercise a single namespace with no bridging.
 
     Example::
 
@@ -60,18 +75,35 @@ class MiniPHAL:
         ) as phal:
             phal.emit(Message("system.reboot"))
             phal.assert_emitted("system.reboot.confirmed")
+
+    Factory example (plugin must be built with the harness bus)::
+
+        from ovos_phal_plugin_tools import OVOSToolsPHALPlugin
+
+        with MiniPHAL(
+            plugin_ids=["ovos-phal-plugin-tools"],
+            plugin_factories={"ovos-phal-plugin-tools": lambda bus: OVOSToolsPHALPlugin(bus=bus)},
+        ) as phal:
+            phal.emit(Message("ovos.tools.list", {}))
+            phal.assert_emitted("ovos.tools.list.response")
     """
 
     def __init__(
         self,
         plugin_ids: Optional[List[str]] = None,
         plugin_instances: Optional[Dict[str, Any]] = None,
+        plugin_factories: Optional[Dict[str, Callable[[FakeBus], Any]]] = None,
         config: Optional[Dict[str, Dict[str, Any]]] = None,
+        modernize: bool = True,
+        emit_legacy: bool = True,
     ) -> None:
         self.plugin_ids: List[str] = plugin_ids or []
         self.plugin_instances: Dict[str, Any] = plugin_instances or {}
+        self.plugin_factories: Dict[str, Callable[[FakeBus], Any]] = plugin_factories or {}
         self.config: Dict[str, Dict[str, Any]] = config or {}
-        self._bus: FakeBus = FakeBus()
+        self.modernize: bool = modernize
+        self.emit_legacy: bool = emit_legacy
+        self._bus: FakeBus = FakeBus(modernize=modernize, emit_legacy=emit_legacy)
         self._captured: List[Message] = []
         self._loaded: Dict[str, Any] = {}
 
@@ -108,9 +140,19 @@ class MiniPHAL:
         self._captured.append(message)
 
     def _load_plugins(self) -> None:
-        """Load PHAL plugins via OPM or use pre-built instances."""
+        """Load PHAL plugins via factories, pre-built instances, or OPM."""
         for plugin_id in self.plugin_ids:
-            if plugin_id in self.plugin_instances:
+            if plugin_id in self.plugin_factories:
+                try:
+                    instance = self.plugin_factories[plugin_id](self._bus)
+                except Exception as exc:
+                    import warnings
+                    warnings.warn(
+                        f"Factory for PHAL plugin {plugin_id!r} raised: {exc}",
+                        stacklevel=2,
+                    )
+                    instance = None
+            elif plugin_id in self.plugin_instances:
                 instance = self.plugin_instances[plugin_id]
             else:
                 instance = self._instantiate_plugin(plugin_id)
@@ -215,8 +257,13 @@ class PHALTest:
         expected_types: Message types that MUST appear in the capture.
         forbidden_types: Message types that MUST NOT appear.
         plugin_instances: Pre-built plugin instances (keyed by plugin_id).
+        plugin_factories: Callables ``(bus) -> plugin`` keyed by plugin_id.
+            Use this when the plugin must be constructed with the harness bus.
         config: Per-plugin config overrides.
         timeout: Maximum seconds to wait for expected messages (default 5.0).
+        modernize: Forwarded to :class:`MiniPHAL` — FakeBus bridges legacy->spec.
+        emit_legacy: Forwarded to :class:`MiniPHAL` — FakeBus bridges spec->legacy.
+            Set both False to exercise a single namespace with no bridging.
 
     Example::
 
@@ -236,8 +283,11 @@ class PHALTest:
     expected_types: List[str] = field(default_factory=list)
     forbidden_types: List[str] = field(default_factory=list)
     plugin_instances: Dict[str, Any] = field(default_factory=dict)
+    plugin_factories: Dict[str, Callable[[FakeBus], Any]] = field(default_factory=dict)
     config: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     timeout: float = 5.0
+    modernize: bool = True
+    emit_legacy: bool = True
 
     def execute(self) -> List[Message]:
         """Run the test: load plugins, emit trigger, assert expectations.
@@ -251,7 +301,10 @@ class PHALTest:
         with MiniPHAL(
             plugin_ids=self.plugin_ids,
             plugin_instances=self.plugin_instances,
+            plugin_factories=self.plugin_factories,
             config=self.config,
+            modernize=self.modernize,
+            emit_legacy=self.emit_legacy,
         ) as phal:
             phal.emit(self.trigger_message, wait=0.1)
 

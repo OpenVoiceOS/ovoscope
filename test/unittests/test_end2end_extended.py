@@ -21,7 +21,9 @@ from ovoscope import (
 
 SKILL_ID = "ovoscope-extended-test.test"
 HANDLER_LIFECYCLE = ["mycroft.skill.handler.start",
-                     "mycroft.skill.handler.complete"]
+                     "mycroft.skill.handler.complete",
+                     "recognizer_loop:audio_output_start",
+                     "recognizer_loop:audio_output_end"]
 ADAPT_ONLY = ["ovos-adapt-pipeline-plugin-high"]
 
 
@@ -45,6 +47,41 @@ class AsyncSkill(OVOSSkill):
         self.bus.emit(Message("test.async.event", context=message.context))
         self.speak("async done")
         self.bus.emit(Message("ovos.utterance.handled", context=message.context))
+
+
+class TwoLifecycleSkill(OVOSSkill):
+    """Emits two lifecycles tagged with distinct context skill_ids, to exercise
+    the End2EndTest ``skill_id`` filter. Each lifecycle ends on the shared
+    ``ovos.utterance.handled`` topic (so eof_count=2 spans both)."""
+
+    def initialize(self):
+        self.add_event("unittest.two_lifecycles", self.handle_two)
+
+    def handle_two(self, message: Message):
+        for sid in ("life.a", "life.b"):
+            ctx = dict(message.context)
+            ctx["skill_id"] = sid
+            self.bus.emit(Message(f"{sid}.step", context=ctx))
+            self.bus.emit(Message("ovos.utterance.handled", context=ctx))
+
+
+class SharedSkillIdSkill(OVOSSkill):
+    """Emits two lifecycles that share a context skill_id but differ in
+    pipeline_id — the shape produced when a targeted stop (OVOS-STOP-1 §3.1)
+    interrupts a running skill: both carry the target's skill_id, only the stop
+    dispatch carries the stop plugin's pipeline_id. Exercises the pipeline_id
+    filter. Each lifecycle ends on the shared ``ovos.utterance.handled``."""
+
+    def initialize(self):
+        self.add_event("unittest.shared_skill_id", self.handle_shared)
+
+    def handle_shared(self, message: Message):
+        for pid in ("pipe.a", "pipe.b"):
+            ctx = dict(message.context)
+            ctx["skill_id"] = "shared.skill"
+            ctx["pipeline_id"] = pid
+            self.bus.emit(Message(f"{pid}.step", context=ctx))
+            self.bus.emit(Message("ovos.utterance.handled", context=ctx))
 
 
 def _session(sid="ext-test", pipeline=None):
@@ -979,6 +1016,135 @@ class TestMessageCountVerbose(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             test.execute(timeout=10)
+
+
+class TestPipelineIdFilter(unittest.TestCase):
+    """The pipeline_id filter isolates a lifecycle when a shared skill_id can't."""
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+        self.mc = get_minicroft([SKILL_ID],
+                                extra_skills={SKILL_ID: SharedSkillIdSkill})
+
+    def tearDown(self):
+        self.mc.stop()
+        LOG.set_level("CRITICAL")
+
+    def _common_kwargs(self):
+        return dict(
+            minicroft=self.mc,
+            skill_ids=[SKILL_ID],
+            eof_msgs=["ovos.utterance.handled"],
+            eof_count=2,
+            test_routing=False,
+            test_active_skills=False,
+            test_final_session=False,
+            ignore_messages=DEFAULT_IGNORED + HANDLER_LIFECYCLE,
+            verbose=False,
+        )
+
+    def test_pipeline_id_isolates_when_skill_id_shared(self):
+        # both lifecycles share skill_id="shared.skill"; only pipeline_id differs
+        src = _make_custom("unittest.shared_skill_id")
+        test = End2EndTest(
+            source_message=src,
+            pipeline_id="pipe.a",
+            expected_messages=[
+                Message("pipe.a.step", {},
+                        {"skill_id": "shared.skill", "pipeline_id": "pipe.a"}),
+                Message("ovos.utterance.handled", {},
+                        {"skill_id": "shared.skill", "pipeline_id": "pipe.a"}),
+            ],
+            **self._common_kwargs(),
+        )
+        test.execute(timeout=10)
+
+    def test_pipeline_id_filters_the_other(self):
+        src = _make_custom("unittest.shared_skill_id")
+        test = End2EndTest(
+            source_message=src,
+            pipeline_id="pipe.b",
+            expected_messages=[
+                Message("pipe.b.step", {},
+                        {"skill_id": "shared.skill", "pipeline_id": "pipe.b"}),
+                Message("ovos.utterance.handled", {},
+                        {"skill_id": "shared.skill", "pipeline_id": "pipe.b"}),
+            ],
+            **self._common_kwargs(),
+        )
+        test.execute(timeout=10)
+
+
+class TestSkillIdFilter(unittest.TestCase):
+    """The skill_id filter isolates one dispatch lifecycle from concurrent ones."""
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+        self.mc = get_minicroft([SKILL_ID],
+                                extra_skills={SKILL_ID: TwoLifecycleSkill})
+
+    def tearDown(self):
+        self.mc.stop()
+        LOG.set_level("CRITICAL")
+
+    def _common_kwargs(self):
+        return dict(
+            minicroft=self.mc,
+            skill_ids=[SKILL_ID],
+            eof_msgs=["ovos.utterance.handled"],
+            eof_count=2,  # both lifecycles terminate on ovos.utterance.handled
+            test_routing=False,
+            test_active_skills=False,
+            test_final_session=False,
+            ignore_messages=DEFAULT_IGNORED + HANDLER_LIFECYCLE,
+            verbose=False,
+        )
+
+    def test_filter_isolates_one_lifecycle(self):
+        """Only messages whose context skill_id matches are asserted."""
+        src = _make_custom("unittest.two_lifecycles")
+        test = End2EndTest(
+            source_message=src,
+            skill_id="life.a",
+            expected_messages=[
+                Message("life.a.step", {}, {"skill_id": "life.a"}),
+                Message("ovos.utterance.handled", {}, {"skill_id": "life.a"}),
+            ],
+            **self._common_kwargs(),
+        )
+        # passes only if life.b.* and the source (no skill_id) are filtered out
+        test.execute(timeout=10)
+
+    def test_filter_the_other_lifecycle(self):
+        """The same scenario, filtered to the other skill_id."""
+        src = _make_custom("unittest.two_lifecycles")
+        test = End2EndTest(
+            source_message=src,
+            skill_id="life.b",
+            expected_messages=[
+                Message("life.b.step", {}, {"skill_id": "life.b"}),
+                Message("ovos.utterance.handled", {}, {"skill_id": "life.b"}),
+            ],
+            **self._common_kwargs(),
+        )
+        test.execute(timeout=10)
+
+    def test_unfiltered_sees_both_lifecycles(self):
+        """Without the filter, eof_count=2 captures both lifecycles' messages."""
+        src = _make_custom("unittest.two_lifecycles")
+        test = End2EndTest(
+            source_message=src,
+            expected_messages=[src],
+            test_message_number=False,
+            test_msg_type=False,
+            test_msg_data=False,
+            test_msg_context=False,
+            **self._common_kwargs(),
+        )
+        result = test.execute(timeout=10)
+        types = [m.msg_type for m in result]
+        self.assertIn("life.a.step", types)
+        self.assertIn("life.b.step", types)
 
 
 if __name__ == "__main__":

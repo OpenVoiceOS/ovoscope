@@ -16,6 +16,16 @@ dependencies = [
     # Alpha pin: 2.0.4 stable not yet released; 2.0.4a2 is the minimum that
     # includes the FakeBus-compatible SkillManager changes ovoscope depends on.
     "ovos-core>=2.0.4a2",
+    # The audio harness emits/observes the ovos.* spec topics while ovos-audio
+    # still produces the legacy topics. >=0.12.0a1 is the first FakeBus that
+    # mirrors MessageBusClient's legacy<->ovos.* namespace migration (ovos-utils
+    # #381), so a legacy producer reaches a spec listener (and vice-versa) on the
+    # test double. Prerelease floor pin: resolves without --pre.
+    "ovos-utils>=0.12.0a1",
+    # ovoscope ships a pytest plugin (pytest11 entry point) -> pytest is a runtime
+    # dependency. >=8 is required: the pytest_pycollect_makemodule hook dropped the
+    # 'path' argument in pytest 8.
+    "pytest>=8",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -27,11 +37,33 @@ classifiers = [
 
 [project.optional-dependencies]
 pydantic = ["ovos-pydantic-models>=0.1.0"]
-audio = ["ovos-audio>=1.2.0"]
+# The audio harness emits/asserts on the OVOS spec bus namespace via SpecMessage,
+# and the FakeBus bridging (ovos-utils) imports NamespaceTranslator — new in
+# ovos-spec-tools 0.10.0a1, so that is the real floor.
+audio = ["ovos-audio>=1.3.0a1", "ovos-spec-tools>=0.10.0a1"]
+# OCP / ovos-media player harnesses (ovoscope.media: OCPPlayerHarness, ...).
+media = ["ovos-media>=0.0.2a3"]
+# MiniListener plugin_instances path (feed_audio_stream) needs the dinkum
+# AudioTransformersService. >=0.7.2a1 is the first release that allows
+# ovos-bus-client 2.x (older pins cap it <2.0.0 and conflict with ovos-core).
+listener = ["ovos-dinkum-listener>=0.7.2a1"]
+# End-to-end TTS intelligibility scoring (WER/CER round-trip via reference STT).
+# faster-whisper itself is pulled by the plugin — don't list it here to avoid
+# version skew.
+tts = [
+    "ovos-audio>=1.3.0a1",
+    "jiwer",
+    "ovos-utterance-normalizer",
+    "ovos-stt-plugin-fasterwhisper",
+]
 dev = [
-    "ovos-audio>=1.2.0",
+    "ovos-audio>=1.3.0a1",
+    "ovos-media>=0.0.2a3",
+    "ovos-dinkum-listener>=0.7.2a1",
     "ovos-pydantic-models>=0.1.0",
-    "pytest",
+    "jiwer",
+    "ovos-utterance-normalizer",
+    "ovos-stt-plugin-fasterwhisper",
     "pytest-cov",
 ]
 

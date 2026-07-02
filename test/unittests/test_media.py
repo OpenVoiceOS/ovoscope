@@ -13,6 +13,8 @@
 # limitations under the License.
 """Unit tests for ovoscope.media (MockOCPBackend, OCPCaptureSession, OCPPlayerHarness)."""
 
+import time
+
 import pytest
 from unittest.mock import MagicMock
 
@@ -20,7 +22,17 @@ from ovos_bus_client.message import Message
 from ovos_utils.fakebus import FakeBus
 from ovos_utils.ocp import MediaState
 
-from ovoscope.media import MockOCPBackend, OCPCaptureSession
+from ovoscope.media import MockOCPBackend, OCPCaptureSession, OCPPlayerHarness
+
+
+def test_media_harness_reexported_from_package() -> None:
+    """The ovos-media harness is reachable from the top-level package, like the
+    ovos-audio harness. (media.py imports ovos-media lazily, so the export does
+    not require the [media] extra to be installed.)"""
+    import ovoscope
+    assert ovoscope.OCPPlayerHarness is OCPPlayerHarness
+    assert ovoscope.OCPCaptureSession is OCPCaptureSession
+    assert ovoscope.MockOCPBackend is MockOCPBackend
 
 
 # ---------------------------------------------------------------------------
@@ -202,3 +214,149 @@ class TestOCPCaptureSessionMessageAccumulation:
         self.bus.emit(Message("ovos.common_play.play"))  # should not be captured
         session.stop()
         assert session.message_types == ["custom.prefix.event"]
+
+
+try:
+    import ovos_media  # noqa: F401
+    _HAS_OVOS_MEDIA = True
+except ImportError:
+    _HAS_OVOS_MEDIA = False
+
+
+if _HAS_OVOS_MEDIA:
+    from ovos_plugin_manager.templates.media import AudioPlayerBackend
+
+    class _RecordingBackend(AudioPlayerBackend):
+        """A real OCP ``MediaBackend`` stand-in built by a factory.
+
+        Subclasses the genuine ``AudioPlayerBackend`` (not ``MockOCPBackend``) so
+        its ``load_track`` emits the real ``ovos.common_play.media.state``
+        ``LOADED_MEDIA`` event the live ``AudioService`` routes on. Records the uri
+        its ``play()`` is driven with — analogous to a Music Assistant backend
+        calling ``client.play_media(uri)`` — so a test can assert the player's play
+        path actually reached the injected backend.
+        """
+
+        def __init__(self, bus):
+            super().__init__(config={}, bus=bus)
+            self.play_calls = []
+            self.is_playing = False
+
+        def supported_uris(self):
+            return ["library", "http", "https"]
+
+        def play(self, repeat: bool = False):
+            self.is_playing = True
+            self.play_calls.append(self._now_playing)
+
+        def stop(self):
+            self.is_playing = False
+            return True
+
+        def pause(self):
+            pass
+
+        def resume(self):
+            pass
+
+        def lower_volume(self):
+            pass
+
+        def restore_volume(self):
+            pass
+
+        def get_track_length(self):
+            return 0
+
+        def get_track_position(self):
+            return 0
+
+        def set_track_position(self, milliseconds):
+            pass
+
+
+@pytest.mark.skipif(not _HAS_OVOS_MEDIA,
+                    reason="requires the [media] extra (ovos-media)")
+class TestOCPPlayerHarnessBackendInjection:
+    """OCPPlayerHarness(backend_factory=...) drives a real injected backend."""
+
+    def test_default_factory_is_mock_backend(self) -> None:
+        with OCPPlayerHarness() as h:
+            assert isinstance(h.backend, MockOCPBackend)
+            assert type(h.backend) is MockOCPBackend
+
+    def test_injected_backend_is_used(self) -> None:
+        with OCPPlayerHarness(backend_factory=_RecordingBackend) as h:
+            assert isinstance(h.backend, _RecordingBackend)
+            # name is supplied by the harness when the backend lacks one
+            assert getattr(h.backend, "name", None)
+
+    def test_player_drives_injected_backend_play(self) -> None:
+        from ovos_utils.ocp import MediaEntry, PlaybackType
+        with OCPPlayerHarness(backend_factory=_RecordingBackend) as h:
+            h.play(MediaEntry(uri="library://track/42",
+                              playback=PlaybackType.AUDIO))
+            assert h.backend.is_playing is True
+            assert h.backend.play_calls == ["library://track/42"]
+
+
+# ---------------------------------------------------------------------------
+# Namespace bridging
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _HAS_OVOS_MEDIA,
+                    reason="requires the [media] extra (ovos-media)")
+class TestOCPHarnessNamespaceBridging:
+    """OCPMediaPlayer subscribes to the LEGACY duck/cork topics
+    (``recognizer_loop:audio_output_start/end``, ``recognizer_loop:record_begin/end``)
+    which OVOS is migrating to the ``ovos.*`` spec namespace
+    (``ovos.audio.output.*`` / ``ovos.listener.record.*``). These tests pin that
+    the harness FakeBus namespace bridging connects a SPEC-namespace producer to
+    those legacy handlers, and that turning the bridge off isolates a single
+    namespace.
+
+    The observable behaviour is the *cork* path: while PLAYING, a record-start
+    event pauses the player (``handle_cork_request``).
+    """
+
+    @staticmethod
+    def _play_then(h):
+        """Drive the player into PLAYING with an AUDIO MediaEntry."""
+        from ovos_utils.ocp import MediaEntry, PlaybackType, PlayerState
+        h.play(MediaEntry(uri="http://example.com/song.mp3",
+                          playback=PlaybackType.AUDIO))
+        h.assert_player_state(PlayerState.PLAYING)
+
+    def test_cork_via_legacy_topic_natively(self) -> None:
+        """The legacy ``recognizer_loop:record_begin`` corks (pauses) the player —
+        the namespace the player subscribes on works natively."""
+        from ovos_utils.ocp import PlayerState
+        with OCPPlayerHarness() as h:  # bridging default on
+            self._play_then(h)
+            h.bus.emit(Message("recognizer_loop:record_begin"))
+            time.sleep(0.05)
+            h.assert_player_state(PlayerState.PAUSED)
+
+    def test_cork_via_spec_topic_through_bridging(self) -> None:
+        """A SPEC producer emitting ``ovos.listener.record.started`` reaches the
+        legacy-subscribed ``handle_cork_request`` via emit_legacy bridging and
+        corks (pauses) the player."""
+        from ovos_spec_tools import SpecMessage
+        from ovos_utils.ocp import PlayerState
+        with OCPPlayerHarness() as h:  # bridging default on
+            self._play_then(h)
+            h.bus.emit(Message(str(SpecMessage.LISTENER_RECORD_STARTED)))
+            time.sleep(0.05)
+            h.assert_player_state(PlayerState.PAUSED)
+
+    def test_no_bridging_isolates_spec_from_legacy(self) -> None:
+        """With bridging OFF, a SPEC ``ovos.listener.record.started`` emit does
+        NOT reach the legacy-subscribed cork handler — the player stays PLAYING,
+        proving the harness can exercise a single namespace."""
+        from ovos_spec_tools import SpecMessage
+        from ovos_utils.ocp import PlayerState
+        with OCPPlayerHarness(modernize=False, emit_legacy=False) as h:
+            self._play_then(h)
+            h.bus.emit(Message(str(SpecMessage.LISTENER_RECORD_STARTED)))
+            time.sleep(0.2)  # give any (incorrect) bridge a chance to fire
+            h.assert_player_state(PlayerState.PLAYING)

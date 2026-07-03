@@ -33,6 +33,29 @@ DEFAULT_KEEP_SRC = ["ovos.skills.fallback.ping"]
 DEFAULT_ACTIVATION = []
 DEFAULT_DEACTIVATION = ["intent.service.skills.deactivate"]
 
+
+def _namespace_mirror_pairs() -> Dict[str, str]:
+    """Bidirectional legacy<->ovos.* topic map from the spec MIGRATION_MAP.
+
+    Maps each migrated topic to its counterpart in the OTHER namespace so a
+    captured message can be recognised as the transparent mirror of the one
+    before it. Empty if ovos-spec-tools does not ship a MIGRATION_MAP.
+    """
+    pairs: Dict[str, str] = {}
+    try:
+        from ovos_spec_tools.messages import MIGRATION_MAP
+    except ImportError:
+        return pairs
+    for legacy, spec in MIGRATION_MAP.items():
+        spec = str(spec)
+        pairs[legacy] = spec
+        pairs[spec] = legacy
+    return pairs
+
+
+# Bidirectional legacy<->ovos.* topic map, computed once at import.
+NAMESPACE_MIRROR_PAIRS: Dict[str, str] = _namespace_mirror_pairs()
+
 # ---------------------------------------------------------------------------
 # Pipeline stage groups — combine as needed for test scenarios
 # ---------------------------------------------------------------------------
@@ -663,9 +686,28 @@ class CaptureSession:
     eof_count: int = 1
     ignore_messages: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_IGNORED)
     async_messages: List[str] = dataclasses.field(default_factory=list) # these come from an external thread and might come in any order
+    # Under the legacy<->ovos.* namespace migration a single logical event may
+    # reach the bus on BOTH namespaces (a dual-emitting spec-adopting producer,
+    # or a bridge that mirrors the firehose): e.g. "speak" and its counterpart
+    # "ovos.utterance.speak". Counting both would double a sequence assertion
+    # written against one namespace. When True, a captured message that is the
+    # namespace mirror of the immediately-preceding captured one (same payload)
+    # is dropped, so the stream carries each logical message once. Distinct
+    # events are untouched — only an adjacent, payload-equal mirror collapses.
+    collapse_namespace_mirrors: bool = True
     done: threading.Event = dataclasses.field(default_factory=lambda: threading.Event())
     _eof_lock: threading.Lock = dataclasses.field(default_factory=lambda: threading.Lock())
     _eof_seen: int = 0
+
+    def _is_mirror_of_last(self, msg: Message) -> bool:
+        """True if ``msg`` is the transparent namespace mirror of the last
+        captured response — its migration counterpart topic carrying the same
+        payload — and so should not be counted as a second logical message."""
+        if not self.responses:
+            return False
+        prev = self.responses[-1]
+        counterpart = NAMESPACE_MIRROR_PAIRS.get(msg.msg_type)
+        return counterpart == prev.msg_type and msg.data == prev.data
 
     def handle_message(self, msg: str):
         if self.done.is_set():
@@ -674,6 +716,8 @@ class CaptureSession:
         if msg.msg_type in self.async_messages:
             self.async_responses.append(msg)
         elif msg.msg_type not in self.ignore_messages:
+            if self.collapse_namespace_mirrors and self._is_mirror_of_last(msg):
+                return
             self.responses.append(msg)
 
     def handle_end_of_test(self, msg: Message):
@@ -723,6 +767,11 @@ class End2EndTest:
     eof_msgs: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_EOF) # if received, end message capture
     eof_count: int = 1 # end capture only after an eof message has been seen this many times (one per concurrent lifecycle terminating on the same topic)
     ignore_messages: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_IGNORED) # pretend any message in this list was not emitted for testing purposes
+    # Collapse a captured message that is the transparent legacy<->ovos.* namespace
+    # mirror of the one before it (same payload) so a sequence authored against a
+    # single namespace is not doubled by the migration dual-send. Set False to
+    # assert BOTH namespaces explicitly.
+    collapse_namespace_mirrors: bool = True
     # Assert only the messages belonging to a single dispatch lifecycle, identified
     # by message.context["skill_id"]. When set, captured messages whose skill_id does
     # not match are dropped before assertion. This isolates one lifecycle's §8 trio +
@@ -853,7 +902,8 @@ class End2EndTest:
         capture = CaptureSession(self.minicroft, eof_msgs=self.eof_msgs,
                                  eof_count=self.eof_count,
                                  ignore_messages=self.ignore_messages,
-                                 async_messages=self.async_messages)
+                                 async_messages=self.async_messages,
+                                 collapse_namespace_mirrors=self.collapse_namespace_mirrors)
         for idx, source_message in enumerate(self.source_message):
             if "session" not in source_message.context and len(capture.responses):
                 # propagate session updates as a client would do

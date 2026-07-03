@@ -217,5 +217,87 @@ class TestCaptureSession(unittest.TestCase):
         self.assertIn("test.partial", types)
 
 
+class TestCaptureSessionNamespaceMirror(unittest.TestCase):
+    """Collapsing the legacy<->ovos.* namespace mirror in the captured stream.
+
+    A bare FakeBus (no MiniCroft handlers) is used so the dual-namespace
+    emit is not perturbed by mock-TTS or other in-process components.
+    """
+
+    def setUp(self):
+        import types
+        from ovos_utils.fakebus import FakeBus
+        LOG.set_level("ERROR")
+        self.bus = FakeBus()
+        self.holder = types.SimpleNamespace(bus=self.bus)
+
+    def tearDown(self):
+        LOG.set_level("CRITICAL")
+
+    def _emit_after(self, delay_s, msg):
+        def _run():
+            import time
+            time.sleep(delay_s)
+            self.bus.emit(msg)
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        return t
+
+    def test_namespace_mirror_counted_once(self):
+        """A logical event reaching the bus on BOTH namespaces (a canonical
+        topic and its legacy migration mirror, same payload) is captured once.
+
+        This is the namespace-migration dual-send: without collapsing, a
+        sequence authored against a single namespace would double its counts
+        ("got 10, expected 5").
+        """
+        spec, legacy = "ovos.utterance.speak", "speak"
+        payload = {"utterance": "hello"}
+        cs = CaptureSession(self.holder, eof_msgs=["test.eof"], ignore_messages=[])
+        self._emit_after(0.05, Message(spec, data=dict(payload)))
+        self._emit_after(0.10, Message(legacy, data=dict(payload)))  # mirror
+        self._emit_after(0.15, Message("test.eof"))
+
+        cs.capture(Message("test.trigger"), timeout=3)
+        types_ = [m.msg_type for m in cs.finish()]
+
+        self.assertEqual(types_.count(spec), 1)
+        self.assertEqual(types_.count(legacy), 0,
+                         "the legacy mirror of the preceding canonical message "
+                         "must not be counted a second time")
+
+    def test_namespace_mirror_kept_when_collapse_disabled(self):
+        """collapse_namespace_mirrors=False keeps BOTH namespaces so a test may
+        assert the mirror explicitly."""
+        spec, legacy = "ovos.utterance.speak", "speak"
+        payload = {"utterance": "hello"}
+        cs = CaptureSession(self.holder, eof_msgs=["test.eof"], ignore_messages=[],
+                            collapse_namespace_mirrors=False)
+        self._emit_after(0.05, Message(spec, data=dict(payload)))
+        self._emit_after(0.10, Message(legacy, data=dict(payload)))
+        self._emit_after(0.15, Message("test.eof"))
+
+        cs.capture(Message("test.trigger"), timeout=3)
+        types_ = [m.msg_type for m in cs.finish()]
+
+        self.assertEqual(types_.count(spec), 1)
+        self.assertEqual(types_.count(legacy), 1)
+
+    def test_distinct_events_not_collapsed(self):
+        """Two genuine events on a migrating topic with DIFFERENT payloads are
+        both kept — collapse only drops an adjacent, payload-equal mirror."""
+        cs = CaptureSession(self.holder, eof_msgs=["test.eof"], ignore_messages=[])
+        self._emit_after(0.05, Message("speak", data={"utterance": "first"}))
+        self._emit_after(0.10, Message("speak", data={"utterance": "second"}))
+        self._emit_after(0.15, Message("test.eof"))
+
+        cs.capture(Message("test.trigger"), timeout=3)
+        utts = [m.data.get("utterance") for m in cs.finish()
+                if m.msg_type == "speak"]
+
+        self.assertEqual(utts, ["first", "second"],
+                         "distinct payloads on the same topic must not collapse")
+
+
 if __name__ == "__main__":
     unittest.main()

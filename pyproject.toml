@@ -47,6 +47,9 @@ media = ["ovos-media>=0.0.2a3"]
 # AudioTransformersService. >=0.7.2a1 is the first release that allows
 # ovos-bus-client 2.x (older pins cap it <2.0.0 and conflict with ovos-core).
 listener = ["ovos-dinkum-listener>=0.7.2a1"]
+# Per-clip WakeWordProbe (ovoscope.wakeword_probe): streams audio arrays through
+# a real HotWordEngine. Only needs numpy — the engine itself is environmental.
+bench = ["numpy"]
 # End-to-end TTS intelligibility scoring (WER/CER round-trip via reference STT).
 # faster-whisper itself is pulled by the plugin — don't list it here to avoid
 # version skew.
@@ -61,6 +64,7 @@ dev = [
     "ovos-media>=0.0.2a3",
     "ovos-dinkum-listener>=0.7.2a1",
     "ovos-pydantic-models>=0.1.0",
+    "numpy",
     "jiwer",
     "ovos-utterance-normalizer",
     "ovos-stt-plugin-fasterwhisper",

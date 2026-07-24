@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.1a1) (2026-07-24)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.0a1...1.6.1a1)
+
+**Merged pull requests:**
+
+- fix: restore SessionManager.bus when MiniCroft stops [\#116](https://github.com/OpenVoiceOS/ovoscope/pull/116) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.0a1) (2026-07-16)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.5.0...1.6.0a1)

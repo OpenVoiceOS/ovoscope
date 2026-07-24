@@ -318,6 +318,17 @@ class MiniCroft(SkillManager):
         self._isolated_config = isolate_config
         self._original_xdg_configs: Optional[List[LocalConf]] = None
 
+        # SessionManager.bus is a process-wide class attribute. IntentService
+        # (constructed below via super().__init__()) calls
+        # SessionManager.connect_to_bus(self.bus) in its own __init__,
+        # clobbering it with this instance's FakeBus. If left in place after
+        # stop(), SessionManager.wait_while_speaking()'s `if not cls.bus`
+        # guard sees a stale, truthy, dead bus and blocks/registers listeners
+        # on it instead of whatever bus a later test expects — polluting
+        # every subsequent test in the process. Snapshot it before booting so
+        # stop() can restore it.
+        self._original_sm_bus = SessionManager.bus
+
         if default_pipeline is DEFAULT_PIPELINE_UNSET:
             if is_pipeline_available(DEFAULT_TEST_PIPELINE):
                 self._default_pipeline = DEFAULT_TEST_PIPELINE
@@ -616,6 +627,8 @@ class MiniCroft(SkillManager):
             Configuration.xdg_configs = self._original_xdg_configs
             Configuration.reload()
             LOG.debug("ovoscope: user config restored")
+        SessionManager.bus = self._original_sm_bus
+        LOG.debug("ovoscope: SessionManager.bus restored")
 
 
 def get_minicroft(skill_ids: Union[List[str], str], *args,

@@ -84,6 +84,39 @@ class TestGetMiniCroft(unittest.TestCase):
             mc.stop()
 
 
+class TestMiniCroftSessionManagerBusRestore(unittest.TestCase):
+    """MiniCroft must not leak its FakeBus into the process-wide
+    SessionManager.bus class attribute after stop().
+
+    IntentService.__init__ calls SessionManager.connect_to_bus(self.bus),
+    clobbering SessionManager.bus with MiniCroft's FakeBus. If stop() doesn't
+    restore it, later tests in the same process — e.g. ones using a plain
+    FakeBus and calling SessionManager.wait_while_speaking() — hit the
+    `if not cls.bus` guard with a stale, truthy, dead bus and block/register
+    listeners on the wrong bus.
+    """
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+
+    def tearDown(self):
+        LOG.set_level("CRITICAL")
+
+    def test_sessionmanager_bus_restored_after_stop(self):
+        sentinel = object()
+        SessionManager.bus = sentinel
+        try:
+            mc = get_minicroft([])
+            # while running, MiniCroft's own FakeBus has taken over
+            self.assertIs(SessionManager.bus, mc.bus)
+            mc.stop()
+            self.assertIs(SessionManager.bus, sentinel,
+                          "SessionManager.bus must be restored to its "
+                          "pre-boot value after MiniCroft.stop()")
+        finally:
+            SessionManager.bus = None
+
+
 class TestMiniCroftPipelineIsolation(unittest.TestCase):
     """Tests for MiniCroft default_pipeline override."""
 

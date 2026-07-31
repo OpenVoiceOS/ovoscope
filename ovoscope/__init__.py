@@ -338,9 +338,15 @@ class MiniCroft(SkillManager):
         # otherwise every later test in the process inherits the mutation.
         self._default_session_obj = SessionManager.default_session
         try:
-            self._default_session_state = deepcopy(
-                self._default_session_obj.to_dict())
+            # ovos-bus-client 2.x names these to_dict/from_dict; 1.x uses
+            # serialize/deserialize. Support both — a silent None here would
+            # quietly disable the whole restore.
+            sess_obj = self._default_session_obj
+            dump = getattr(sess_obj, "to_dict", None) or sess_obj.serialize
+            self._default_session_state = deepcopy(dump())
         except Exception:  # pragma: no cover - defensive, session_cls may vary
+            LOG.warning("ovoscope: could not snapshot the default session; "
+                        "state mutated by tests will NOT be restored")
             self._default_session_state = None
 
         # Orphaned TTS timers (see _mock_tts below) would fire on a closed bus
@@ -709,12 +715,18 @@ class MiniCroft(SkillManager):
         # to_dict() OMITS empty fields, so a skill activated during the test
         # would have no key to restore and would survive teardown.
         try:
-            fresh = type(sess).from_dict(deepcopy(state))
+            load = (getattr(type(sess), "from_dict", None) or
+                    type(sess).deserialize)
+            fresh = load(deepcopy(state))
         except Exception:
+            LOG.warning("ovoscope: could not rebuild the default session from "
+                        "its snapshot; leaked state will NOT be restored")
             return
+        # Copy every instance attribute, including underscore-prefixed ones:
+        # some ovos-bus-client versions back public fields (active_skills,
+        # utterance_states, ...) with private storage, and skipping those
+        # would leave the mutation in place.
         for key, value in vars(fresh).items():
-            if key.startswith("_"):
-                continue
             try:
                 setattr(sess, key, value)
             except Exception:

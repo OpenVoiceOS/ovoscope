@@ -329,6 +329,27 @@ class MiniCroft(SkillManager):
         # stop() can restore it.
         self._original_sm_bus = SessionManager.bus
 
+        # SessionManager.default_session is a process-wide singleton. Booting a
+        # MiniCroft (and running a test through it) mutates it in several ways:
+        # run() overrides pipeline/lang, End2EndTest.execute() calls
+        # activate_skill() for `inject_active`, and any message that carries a
+        # session with id "default" folds its wire values onto the live object.
+        # Snapshot the whole thing so stop() can put it back exactly as found —
+        # otherwise every later test in the process inherits the mutation.
+        self._default_session_obj = SessionManager.default_session
+        try:
+            self._default_session_state = deepcopy(
+                self._default_session_obj.to_dict())
+        except Exception:  # pragma: no cover - defensive, session_cls may vary
+            self._default_session_state = None
+
+        # Orphaned TTS timers (see _mock_tts below) would fire on a closed bus
+        # after stop() and corrupt the global SessionManager during a LATER
+        # test. Track them so stop() can cancel them.
+        self._tts_timers: List[threading.Timer] = []
+        self._tts_timers_lock = threading.Lock()
+        self._stopped = False
+
         if default_pipeline is DEFAULT_PIPELINE_UNSET:
             if is_pipeline_available(DEFAULT_TEST_PIPELINE):
                 self._default_pipeline = DEFAULT_TEST_PIPELINE
@@ -410,14 +431,30 @@ class MiniCroft(SkillManager):
         # emit audio_output_start synchronously (duck) and schedule a short-delay
         # audio_output_end (unduck) to simulate the full TTS playback lifecycle.
         def _mock_tts(message):
+            if self._stopped:
+                return
             # TTS playback begins — duck immediately.
             # message.forward copies source/destination/session from the speak,
             # matching what the real audio service would do.
             bus.emit(message.forward("recognizer_loop:audio_output_start"))
-            # TTS playback ends after a short delay — unduck
-            threading.Timer(0.1, lambda: bus.emit(
-                message.forward("recognizer_loop:audio_output_end")
-            )).start()
+
+            def _unduck():
+                # stop() may have run while the timer was pending — emitting on
+                # a closed bus here would fold a stale session onto the global
+                # SessionManager and poison the next test.
+                if self._stopped:
+                    return
+                bus.emit(message.forward("recognizer_loop:audio_output_end"))
+
+            # TTS playback ends after a short delay — unduck.
+            # Daemon + tracked so stop() can cancel it and the interpreter can
+            # exit even if one is still pending.
+            timer = threading.Timer(0.1, _unduck)
+            timer.daemon = True
+            with self._tts_timers_lock:
+                self._tts_timers = [t for t in self._tts_timers if t.is_alive()]
+                self._tts_timers.append(timer)
+            timer.start()
 
         bus.on(SpecMessage.SPEAK, _mock_tts)
 
@@ -568,6 +605,22 @@ class MiniCroft(SkillManager):
         self.bus.emit(msg)
 
     def stop(self):
+        self._stopped = True
+        # Cancel any pending mock-TTS unduck timers BEFORE closing the bus, so
+        # none of them can emit onto a dead bus (and fold a stale "default"
+        # session onto the process-wide SessionManager) after teardown.
+        with self._tts_timers_lock:
+            timers, self._tts_timers = self._tts_timers, []
+        for t in timers:
+            try:
+                t.cancel()
+            except Exception:
+                pass
+        for t in timers:
+            try:
+                t.join(timeout=1.0)
+            except Exception:
+                pass
         try:
             super().stop()
         except Exception:
@@ -629,6 +682,43 @@ class MiniCroft(SkillManager):
             LOG.debug("ovoscope: user config restored")
         SessionManager.bus = self._original_sm_bus
         LOG.debug("ovoscope: SessionManager.bus restored")
+        self._restore_default_session()
+
+    def _restore_default_session(self):
+        """Put the process-wide default Session back as it was before boot.
+
+        The explicit pipeline / lang restores above only cover what run()
+        changed. Tests also mutate the default session through
+        ``activate_skill`` (``End2EndTest.inject_active``) and through any
+        message carrying a ``"default"`` session, which folds its wire values
+        onto the singleton. Restoring the full snapshot keeps that mutation
+        inside the test that caused it.
+        """
+        state = getattr(self, "_default_session_state", None)
+        if state is None:
+            return
+        sess = SessionManager.default_session
+        if sess is not getattr(self, "_default_session_obj", None):
+            # The default session object itself was replaced
+            # (SessionManager.reset_default_session) — nothing to restore onto.
+            return
+        # Rebuild a pristine Session from the snapshot and copy every field
+        # onto the live object. Copying only the snapshot keys is not enough:
+        # to_dict() OMITS empty fields, so a skill activated during the test
+        # would have no key to restore and would survive teardown.
+        try:
+            fresh = type(sess).from_dict(deepcopy(state))
+        except Exception:
+            return
+        for key, value in vars(fresh).items():
+            if key.startswith("_"):
+                continue
+            try:
+                setattr(sess, key, value)
+            except Exception:
+                # read-only / computed field — skip it
+                continue
+        LOG.debug("ovoscope: default session state restored")
 
 
 def get_minicroft(skill_ids: Union[List[str], str], *args,
@@ -679,6 +769,9 @@ class CaptureSession:
     done: threading.Event = dataclasses.field(default_factory=lambda: threading.Event())
     _eof_lock: threading.Lock = dataclasses.field(default_factory=lambda: threading.Lock())
     _eof_seen: int = 0
+    # set by capture() when the eof condition was never reached
+    timed_out: bool = False
+    timeout_seconds: Optional[float] = None
 
     def handle_message(self, msg: str):
         if self.done.is_set():
@@ -700,20 +793,38 @@ class CaptureSession:
         for m in self.eof_msgs:
             self.minicroft.bus.on(m, self.handle_end_of_test)
 
-    def capture(self, source_message: Message, timeout=20):
+    def capture(self, source_message: Message, timeout=20) -> bool:
+        """Emit *source_message* and block until an eof message or *timeout*.
+
+        Returns:
+            True if the eof condition was reached, False on timeout. The same
+            value is recorded on :attr:`timed_out` (inverted) so callers that
+            ignore the return value can still tell a timeout from a genuine
+            message-count mismatch.
+        """
         test_message = deepcopy(source_message)  # ensure object not mutated by ovos-core
-        self.done.clear()
+        # Reset the done flag and the eof counter ATOMICALLY: a handler running
+        # between the two would otherwise have its increment thrown away (or set
+        # done for the previous capture's counter).
         with self._eof_lock:
+            self.done.clear()
             self._eof_seen = 0
         self.minicroft.bus.emit(test_message)
-        self.done.wait(timeout)
+        completed = self.done.wait(timeout)
+        if not completed:
+            self.timed_out = True
+            self.timeout_seconds = timeout
+        return completed
 
     def finish(self) -> List[Message]:
         self.done.set()
         self.minicroft.bus.remove("message", self.handle_message)
         for m in self.eof_msgs:
             self.minicroft.bus.remove(m, self.handle_end_of_test)
-        return self.responses
+        # Return a snapshot: the live list is still owned by this session (and
+        # __del__ calls finish() again), so handing it out invites surprise
+        # mutation from a late handler.
+        return list(self.responses)
 
     def __del__(self):
         self.finish()
@@ -824,7 +935,18 @@ class End2EndTest:
         if self.minicroft is None:
             self.minicroft = get_minicroft(self.skill_ids)
             self.managed = True
+        # Teardown MUST run even when an assertion below fails: MiniCroft
+        # patches process-wide globals (SessionManager.bus / default_session,
+        # Configuration) that only stop() restores. Skipping it poisons every
+        # later test in the process.
+        try:
+            return self._execute(timeout)
+        finally:
+            if self.managed and self.minicroft is not None:
+                self.minicroft.stop()
+                self.minicroft = None
 
+    def _execute(self, timeout: int = 30) -> List[Message]:
         if self.test_boot_sequence and self.expected_boot_sequence:
             for expected, received in zip(self.expected_boot_sequence, self.minicroft.boot_messages):
                 assert expected.msg_type == received.msg_type, f"❌ expected boot message_type '{expected.msg_type}' | got '{received.msg_type}'"
@@ -894,6 +1016,15 @@ class End2EndTest:
             all_responses = messages + list(getattr(capture, "async_responses", []))
             _bus_tracker.record_session(all_responses, self.expected_messages)
             self.bus_coverage_report = _bus_tracker.build_report()
+
+        # A capture timeout means the scenario never terminated. Say so plainly
+        # — otherwise it surfaces as a baffling message-count mismatch.
+        assert not capture.timed_out, (
+            f"❌ capture timed out after {capture.timeout_seconds}s waiting for "
+            f"eof_msgs {self.eof_msgs} (needed {self.eof_count}, "
+            f"got {capture._eof_seen}) — captured {len(messages)} messages: "
+            f"{[m.msg_type for m in messages]}"
+        )
 
         if self.test_message_number:
             n1 = len(self.expected_messages)
@@ -1023,11 +1154,6 @@ class End2EndTest:
         if self.print_bus_coverage and self.bus_coverage_report is not None:
             print(self.bus_coverage_report.summary_line())
 
-        if self.managed:
-            self.minicroft.stop()
-            del self.minicroft
-            self.minicroft = None
-
         return messages
 
     @staticmethod
@@ -1115,13 +1241,16 @@ class End2EndTest:
                                  ignore_messages=ignore_messages,
                                  async_messages=async_messages)
 
-        for idx, source_message in enumerate(message):
-            if "session" not in source_message.context and len(capture.responses):
-                # propagate session updates as a client would do
-                source_message.context["session"] = capture.responses[-1].context["session"]
-            capture.capture(source_message, timeout)
-
-        minicroft.stop()
+        # stop() restores process-wide globals — it must run even if a capture
+        # raises.
+        try:
+            for idx, source_message in enumerate(message):
+                if "session" not in source_message.context and len(capture.responses):
+                    # propagate session updates as a client would do
+                    source_message.context["session"] = capture.responses[-1].context["session"]
+                capture.capture(source_message, timeout)
+        finally:
+            minicroft.stop()
         expected_messages = capture.finish()
         return End2EndTest(
             skill_ids=skill_ids,

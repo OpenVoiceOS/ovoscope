@@ -171,6 +171,47 @@ class TestCmdValidate:
         finally:
             os.unlink(path)
 
+    def test_uses_validate_fixture_when_pydantic_available(self):
+        """cmd_validate must call pydantic_helpers.validate_fixture, not the
+        basic checks, when the pydantic extra is importable."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({
+                "source_message": {"type": "x", "data": {}, "context": {}},
+                "expected_messages": [],
+            }, f)
+            path = f.name
+        try:
+            parser = _build_parser()
+            args = parser.parse_args(["validate", path])
+            mock_validate_fixture = MagicMock(return_value={})
+            with patch("ovoscope.pydantic_helpers._PYDANTIC_AVAILABLE", True), \
+                 patch("ovoscope.pydantic_helpers.validate_fixture", mock_validate_fixture), \
+                 patch("ovoscope.cli._basic_validate") as mock_basic:
+                code = cmd_validate(args)
+            assert code == 0
+            mock_validate_fixture.assert_called_once_with(path)
+            mock_basic.assert_not_called()
+        finally:
+            os.unlink(path)
+
+    def test_falls_back_to_basic_validate_without_pydantic(self):
+        """cmd_validate must use _basic_validate when ovoscope.pydantic_helpers
+        (or ovos-pydantic-models underneath it) is not importable."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({
+                "source_message": {"type": "x", "data": {}, "context": {}},
+                "expected_messages": [],
+            }, f)
+            path = f.name
+        try:
+            parser = _build_parser()
+            args = parser.parse_args(["validate", path])
+            with patch.dict(sys.modules, {"ovoscope.pydantic_helpers": None}):
+                code = cmd_validate(args)
+            assert code == 0
+        finally:
+            os.unlink(path)
+
 
 # ---------------------------------------------------------------------------
 # cmd_diff

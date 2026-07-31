@@ -217,11 +217,14 @@ def cmd_diff(args: argparse.Namespace) -> int:
     except ImportError as exc:
         _die(f"ovoscope.diff import failed: {exc}")
 
-    result = diff_fixtures(
-        expected_path=args.expected,
-        actual_path=args.actual,
-        ignore_context=not args.include_context,
-    )
+    try:
+        result = diff_fixtures(
+            expected_path=args.expected,
+            actual_path=args.actual,
+            ignore_context=not args.include_context,
+        )
+    except (OSError, ValueError) as exc:
+        _die(f"Could not diff fixtures: {exc}")
     result.print_report(color=not args.no_color)
     return 0 if result.is_identical else 1
 

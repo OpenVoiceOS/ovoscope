@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.3a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.3a2) (2026-07-31)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.3a1...1.6.3a2)
+
+**Merged pull requests:**
+
+- docs: gui-testing.md matches the exact-match assertion semantics [\#125](https://github.com/OpenVoiceOS/ovoscope/pull/125) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.3a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.3a1) (2026-07-31)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.2a2...1.6.3a1)

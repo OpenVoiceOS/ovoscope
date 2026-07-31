@@ -1668,6 +1668,7 @@ class GUICaptureSession:
 
         Args:
             namespace: GUI namespace (typically the skill ID).
+            exact: Compare namespace and page name by equality (default).
             template: Template name, with or without the ``SYSTEM_`` prefix
                 (``"weather"`` and ``"SYSTEM_weather"`` are equivalent).
             values: Optional mapping of session-data keys to expected values;
@@ -1691,6 +1692,7 @@ class GUICaptureSession:
             namespace: GUI namespace to check.
             key: Data key within the namespace.
             value: Expected value.
+            exact: Compare the namespace by equality (default).
 
         Raises:
             AssertionError: If no matching ``gui.value.set`` message is found.
@@ -1719,6 +1721,7 @@ class GUICaptureSession:
         Args:
             namespace: GUI namespace to check.
             key: Data key that should exist within the namespace.
+            exact: Compare the namespace by equality (default).
 
         Raises:
             AssertionError: If no matching message with the key is found.

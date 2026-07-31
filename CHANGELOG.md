@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+**Docs:**
+
+- docs: document the `bus-coverage` CLI subcommand and the `ovoscope-setup` console script
+- docs: add `docs/e2e-pipeline-harness.md` (`E2EPipelineHarness`, bus helpers, registration shims)
+- docs: add `docs/intent-cases.md` (`IntentCase`, `register_intent_case_tests`)
+- docs: document `MiniCroft`'s `modernize`/`emit_legacy` constructor params
+- docs: add `FAQ.md` and `CONTRIBUTING.md`; repair the truncated AI Disclosure section in README
+- docs: scope the "does not load PHAL/audio" claim in `docs/index.md` to `MiniCroft`/`End2EndTest` and link the dedicated PHAL/audio harnesses
+- docs: replace stale `file.py:line` citations across `docs/*.md` with symbol references
+- fix: `ovoscope validate` now uses `pydantic_helpers.validate_fixture` when the `pydantic` extra is importable, falling back to basic structural validation otherwise — matching the documented behaviour
+
 ## [1.6.2a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a1) (2026-07-31)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.1a1...1.6.2a1)

@@ -65,7 +65,7 @@ mc.stop()
 
 ## Class: `GUICaptureSession`
 
-`GUICaptureSession` — `ovoscope/__init__.py:951`
+`GUICaptureSession` — `ovoscope/__init__.py`
 
 ```python
 from ovoscope import GUICaptureSession
@@ -89,7 +89,7 @@ recording GUI-prefixed messages.
 
 ### Lifecycle Methods
 
-`GUICaptureSession.start` — `ovoscope/__init__.py:1000`
+`GUICaptureSession.start` — `ovoscope/__init__.py`
 
 ```python
 gui = GUICaptureSession(mc.bus)
@@ -103,7 +103,7 @@ gui.stop()
 | `start()` | Subscribe to the bus and begin capturing. |
 | `stop()` | Unsubscribe from the bus and stop capturing. |
 
-`GUICaptureSession.__enter__` / `__exit__` — `ovoscope/__init__.py:1008`
+`GUICaptureSession.__enter__` / `__exit__` — `ovoscope/__init__.py`
 
 The preferred usage is as a context manager. `__enter__` calls `start()`;
 `__exit__` calls `stop()`.
@@ -112,7 +112,7 @@ The preferred usage is as a context manager. `__enter__` calls `start()`;
 
 #### `assert_page_shown(namespace, page, timeout=2.0)`
 
-`GUICaptureSession.assert_page_shown` — `ovoscope/__init__.py:1017`
+`GUICaptureSession.assert_page_shown` — `ovoscope/__init__.py`
 
 Assert that a `gui.page.show` (or equivalent) message was emitted for the
 given namespace and page filename.
@@ -135,7 +135,7 @@ page name. Substring matching is used for both.
 
 #### `assert_namespace_value(namespace, key, value)`
 
-`GUICaptureSession.assert_namespace_value` — `ovoscope/__init__.py:1046`
+`GUICaptureSession.assert_namespace_value` — `ovoscope/__init__.py`
 
 Assert that a `gui.value.set` or `gui.namespace.update` message set a
 specific key to a specific value in the given namespace.
@@ -154,7 +154,7 @@ Raises `AssertionError` if no matching message is found.
 
 #### `assert_namespace_has_key(namespace, key)`
 
-`GUICaptureSession.assert_namespace_has_key` — `ovoscope/__init__.py:1093`
+`GUICaptureSession.assert_namespace_has_key` — `ovoscope/__init__.py`
 
 Assert that a `gui.value.set` or `gui.namespace.update` message set a
 specific key in the given namespace, regardless of value. Useful for
@@ -174,7 +174,7 @@ Raises `AssertionError` if no matching message is found.
 
 #### `assert_namespace_cleared(namespace)`
 
-`GUICaptureSession.assert_namespace_cleared` — `ovoscope/__init__.py:1069`
+`GUICaptureSession.assert_namespace_cleared` — `ovoscope/__init__.py`
 
 Assert that a `gui.namespace.remove` or `gui.namespace.clear` message was
 emitted for the given namespace.
@@ -188,7 +188,7 @@ Raises `AssertionError` if no matching message is found.
 ## Message Filtering
 
 Only messages whose `msg_type` starts with one of the configured `prefixes`
-are captured — `GUICaptureSession._on_message` — `ovoscope/__init__.py:984`.
+are captured — `GUICaptureSession._on_message` — `ovoscope/__init__.py`.
 All other bus messages are ignored.
 
 Default captured message types (partial list):
@@ -262,4 +262,4 @@ requested the right `SYSTEM_*` template with the right session data.
 - `CaptureSession` — `ovoscope/docs/capture-session.md` (ordered dialogue capture)
 - `End2EndTest` — `ovoscope/docs/end2end-test.md` (full test runner)
 - `MiniCroft` / `get_minicroft()` — `ovoscope/docs/minicroft.md`
-- `GUI_IGNORED` message list — `ovoscope/__init__.py:24`
+- `GUI_IGNORED` message list — `ovoscope/__init__.py`

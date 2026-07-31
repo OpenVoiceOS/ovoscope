@@ -36,7 +36,7 @@ WAV file / bytes
 
 Rather than injecting a `recognizer_loop:utterance` (as `MiniCroft` does),
 `MiniListener` feeds **raw audio bytes** into `AudioTransformersService` —
-`ovos_dinkum_listener/transformers.py:34` — which dispatches them to each
+`ovos_dinkum_listener/transformers.py` — which dispatches them to each
 loaded plugin's `feed_audio_chunk()` / `feed_speech_chunk()` / `transform()`
 methods.  All `Message` objects emitted on the internal `FakeBus` during that
 call are captured and returned.
@@ -113,7 +113,7 @@ listener.shutdown()
 
 ## API Reference
 
-### `MiniListener` — `ovoscope/listener.py:261`
+### `MiniListener` — `ovoscope/listener.py`
 
 **Constructor parameters:**
 
@@ -122,40 +122,40 @@ listener.shutdown()
 | `config` | `dict` | Full OVOS config with `listener.audio_transformers` key |
 | `plugin_instances` | `dict[str, Any]` | Pre-instantiated transformer plugins; bypasses OPM discovery |
 | `stt_instance` | `Any` | Optional STT plugin to use in `listen()` |
-| `vad_instance` | `Any` | Optional VAD engine (e.g. `MockVADEngine`) — `ovoscope/listener.py:314` |
-| `ww_instances` | `dict[str, Any]` | Optional wake-word engines keyed by name — `ovoscope/listener.py:316` |
+| `vad_instance` | `Any` | Optional VAD engine (e.g. `MockVADEngine`) — `ovoscope/listener.py` |
+| `ww_instances` | `dict[str, Any]` | Optional wake-word engines keyed by name — `ovoscope/listener.py` |
 
 **Audio transformer methods:**
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `feed_audio(chunk)` — `ovoscope/listener.py:351` | `(bytes) → List[Message]` | Calls `AudioTransformersService.feed_audio()`. Requires `ovos-dinkum-listener`. |
-| `feed_speech(chunk)` — `ovoscope/listener.py:371` | `(bytes) → List[Message]` | Calls `AudioTransformersService.feed_speech()`. Requires `ovos-dinkum-listener`. |
+| `feed_audio(chunk)` — `ovoscope/listener.py` | `(bytes) → List[Message]` | Calls `AudioTransformersService.feed_audio()`. Requires `ovos-dinkum-listener`. |
+| `feed_speech(chunk)` — `ovoscope/listener.py` | `(bytes) → List[Message]` | Calls `AudioTransformersService.feed_speech()`. Requires `ovos-dinkum-listener`. |
 | `feed_audio_stream(chunks, feed, chunk_size)` | `(bytes\|list[bytes], str, int) → List[Message]` | Streams frames in order **without** clearing between them; aggregates all emitted messages. Use for decoders that fire after many frames (ggwave). |
-| `transform(chunk)` — `ovoscope/listener.py:390` | `(bytes) → tuple[bytes, dict, List[Message]]` | Full transform pipeline; returns `(audio, ctx, messages)`. Requires `ovos-dinkum-listener`. |
-| `listen(audio, ...)` — `ovoscope/listener.py:410` | `(audio, language, stt_instance, ...) → List[Message]` | Full pipeline: audio → transformers → STT → utterance message. Requires `ovos-dinkum-listener`. |
+| `transform(chunk)` — `ovoscope/listener.py` | `(bytes) → tuple[bytes, dict, List[Message]]` | Full transform pipeline; returns `(audio, ctx, messages)`. Requires `ovos-dinkum-listener`. |
+| `listen(audio, ...)` — `ovoscope/listener.py` | `(audio, language, stt_instance, ...) → List[Message]` | Full pipeline: audio → transformers → STT → utterance message. Requires `ovos-dinkum-listener`. |
 
 **VAD methods:**
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `is_silence(chunk)` — `ovoscope/listener.py:461` | `(bytes) → bool` | Delegates to the injected VAD engine. Raises `RuntimeError` if no VAD engine set. |
-| `extract_speech(audio)` — `ovoscope/listener.py:483` | `(bytes) → bytes` | Returns only speech frames from `audio`. Raises `RuntimeError` if no VAD engine set. |
+| `is_silence(chunk)` — `ovoscope/listener.py` | `(bytes) → bool` | Delegates to the injected VAD engine. Raises `RuntimeError` if no VAD engine set. |
+| `extract_speech(audio)` — `ovoscope/listener.py` | `(bytes) → bytes` | Returns only speech frames from `audio`. Raises `RuntimeError` if no VAD engine set. |
 
 **Wake-word methods:**
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `detect_wakeword(chunk, ww_name=None)` — `ovoscope/listener.py:509` | `(bytes, str?) → bool` | Feed `chunk` to the named engine (or first engine if `ww_name=None`). Returns `True` if the engine fires. |
-| `scan_for_wakeword(audio, frame_size=2048, ww_name=None)` — `ovoscope/listener.py:551` | `(bytes\|List[bytes], int, str?) → (bool, int?)` | Feed each frame sequentially; return `(True, frame_index)` on first detection, or `(False, None)` if threshold never reached. |
+| `detect_wakeword(chunk, ww_name=None)` — `ovoscope/listener.py` | `(bytes, str?) → bool` | Feed `chunk` to the named engine (or first engine if `ww_name=None`). Returns `True` if the engine fires. |
+| `scan_for_wakeword(audio, frame_size=2048, ww_name=None)` — `ovoscope/listener.py` | `(bytes\|List[bytes], int, str?) → (bool, int?)` | Feed each frame sequentially; return `(True, frame_index)` on first detection, or `(False, None)` if threshold never reached. |
 
 **Lifecycle:**
 
 | Method | Description |
 |--------|-------------|
-| `shutdown()` — `ovoscope/listener.py:606` | Gracefully shuts down transformer plugins and all wake-word engines. |
+| `shutdown()` — `ovoscope/listener.py` | Gracefully shuts down transformer plugins and all wake-word engines. |
 
-#### `listen()` — `ovoscope/listener.py:410`
+#### `listen()` — `ovoscope/listener.py`
 
 ```
 listen(
@@ -171,12 +171,12 @@ Runs the complete listener pipeline:
 
 1. Reads WAV file (or accepts raw bytes)
 2. Passes bytes through `AudioTransformersService.transform()` — all loaded transformer plugins run
-3. Converts the (possibly modified) bytes to `AudioData` via `_wav_to_audio_data()` — `listener.py:59`
+3. Converts the (possibly modified) bytes to `AudioData` via `_wav_to_audio_data()` — `listener.py`
 4. Calls `stt_instance.execute(audio_data, language)` if provided
 5. Emits `recognizer_loop:utterance` on the FakeBus if the transcript is non-empty
 6. Returns all captured messages (from transformers **and** the utterance step)
 
-`_wav_to_audio_data(audio, sample_rate, sample_width)` — `listener.py:59`:
+`_wav_to_audio_data(audio, sample_rate, sample_width)` — `listener.py`:
 
 - File path → `AudioData.from_file(path)` (handles WAV/AIFF/FLAC headers)
 - Raw bytes → parses WAV header via `wave` stdlib; falls back to raw PCM if not a valid WAV
@@ -188,7 +188,7 @@ Runs the complete listener pipeline:
 | `config` | `dict` | Full OVOS config with `listener.audio_transformers` key |
 | `plugin_instances` | `dict[str, Any]` | Pre-instantiated plugins; bypasses OPM discovery |
 
-### `get_mini_listener()` — `ovoscope/listener.py:629`
+### `get_mini_listener()` — `ovoscope/listener.py`
 
 Factory function. Two usage modes:
 
@@ -226,7 +226,7 @@ listener = get_mini_listener(
 | `ww_plugin` | `str` | OPM WakeWord plugin name to load via `OVOSWakeWordFactory` |
 | `ww_instances` | `dict[str, Any]` | Pre-built WakeWord engines keyed by phrase name |
 
-### `ListenerTest` — `ovoscope/listener.py:181`
+### `ListenerTest` — `ovoscope/listener.py`
 
 Declarative test runner, analogous to `End2EndTest`.
 
@@ -245,7 +245,7 @@ captured message list on success.
 
 ## Plugin Injection vs OPM Discovery
 
-`AudioTransformersService.load_plugins()` — `transformers.py:46` — uses
+`AudioTransformersService.load_plugins()` — `transformers.py` — uses
 `find_audio_transformer_plugins()` from `ovos-plugin-manager` to discover
 plugins by entry point.  If a plugin is registered under a legacy group (e.g.
 `neon.plugin.audio` instead of `opm.plugin.audio_transformer`), or is not
@@ -260,7 +260,7 @@ of how the plugin was loaded.
 `MiniListener` supports **in-process VAD and WakeWord testing** without loading
 real models or hardware.
 
-### `MockVADEngine` — `ovoscope/listener.py:117`
+### `MockVADEngine` — `ovoscope/listener.py`
 
 A zero-dependency VAD stub:
 
@@ -280,7 +280,7 @@ print(listener.extract_speech(b"\x00" * 512 + b"\x01" * 512))  # → b"\x01" * 5
 listener.shutdown()
 ```
 
-### `MockHotWordEngine` — `ovoscope/listener.py:188`
+### `MockHotWordEngine` — `ovoscope/listener.py`
 
 A controllable WakeWord stub:
 
@@ -303,7 +303,7 @@ assert found and frame == 2
 listener.shutdown()
 ```
 
-### `VADTest` — `ovoscope/listener.py:817`
+### `VADTest` — `ovoscope/listener.py`
 
 Declarative VAD test helper:
 
@@ -326,7 +326,7 @@ VADTest(
 ).execute()
 ```
 
-### `WakeWordTest` — `ovoscope/listener.py:901`
+### `WakeWordTest` — `ovoscope/listener.py`
 
 Declarative WakeWord test helper:
 
@@ -357,8 +357,8 @@ WakeWordTest(
 
 ## Cross-References
 
-- `AudioTransformersService` — `ovos-dinkum-listener/ovos_dinkum_listener/transformers.py:34`
-- `AudioData` — `ovos-plugin-manager/ovos_plugin_manager/utils/audio.py:34`
+- `AudioTransformersService` — `ovos-dinkum-listener/ovos_dinkum_listener/transformers.py`
+- `AudioData` — `ovos-plugin-manager/ovos_plugin_manager/utils/audio.py`
 - `MiniCroft` / `get_minicroft()` — `ovoscope/docs/minicroft.md` (skill pipeline equivalent)
 - Audio transformer E2E test: `Transformer plugins/ovos-audio-transformer-plugin-ggwave/test/end2end/test_ggwave_transformer.py`
 - STT pipeline E2E test: `STT plugins/ovos-stt-plugin-rover/test/end2end/test_rover_listener_e2e.py`

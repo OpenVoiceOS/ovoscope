@@ -1,6 +1,6 @@
 # ovoscope CLI
 
-The `ovoscope` command-line tool provides five subcommands for recording,
+The `ovoscope` command-line tool provides six subcommands for recording,
 replaying, diffing, validating, and scanning E2E test fixtures.
 
 ## Installation
@@ -123,6 +123,60 @@ ovoscope coverage "OpenVoiceOS Workspace/" --format json
 |------|---------|-------------|
 | `workspace` | **required** | Workspace root directory. |
 | `--format` | `table` | Output format: `table` or `json`. |
+
+---
+
+### `ovoscope bus-coverage` — Bus handler/emitter coverage
+
+Runs every fixture found under a directory (or a single fixture file), and
+reports which bus message types each skill actually listens for and emits,
+merged across all fixtures — `cli.py:cmd_bus_coverage`.
+
+```bash
+ovoscope bus-coverage test/fixtures/
+ovoscope bus-coverage test/fixtures/hello.json --format json
+ovoscope bus-coverage test/fixtures/ --skill-id ovos-skill-hello-world.openvoiceos --verbose
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `test_dir` | **required** | Directory of fixture JSON files, or a single fixture file. |
+| `--skill-id` | None | Only report on fixtures that include this skill_id. |
+| `--format` | `table` | Output format: `table` or `json`. |
+| `--verbose` / `-v` | False | Print per-message-type detail rows. |
+
+Fixtures that fail to load or time out booting `MiniCroft` are skipped and
+counted; the run still reports coverage for the fixtures that succeeded.
+
+---
+
+## `ovoscope-setup` — Install the skill into AI coding assistants
+
+`ovoscope-setup` is a separate console script (`setup_skill.py`) that installs
+the ovoscope Claude Code / Gemini CLI skill — `SKILL.md`, docs, and `FAQ.md` —
+downloaded from GitHub at install time.
+
+```bash
+ovoscope-setup                     # auto-detect and install all
+ovoscope-setup --claude            # Claude Code only
+ovoscope-setup --gemini            # Gemini CLI only (project-level)
+ovoscope-setup --gemini --path /my/workspace
+ovoscope-setup --list              # show detected tools without installing
+ovoscope-setup --no-docs           # skip docs download (offline / CI)
+ovoscope-setup --uninstall --claude
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--claude` | False | Install for Claude Code (`~/.claude/skills/ovoscope/`). |
+| `--gemini` | False | Install for Gemini CLI (`<path>/.gemini/skills/ovoscope/`). Project-level. |
+| `--path` | current directory | Project root for the Gemini install. |
+| `--list` | False | Show which tools are detected on `PATH` without installing anything. |
+| `--no-docs` | False | Skip downloading documentation from GitHub (offline / CI). |
+| `--uninstall` | False | Remove the skill instead of installing it. |
+
+With no explicit `--claude`/`--gemini` flag, the tool auto-detects which of
+`claude`/`gemini` are on `PATH` and installs for those.
 
 ---
 

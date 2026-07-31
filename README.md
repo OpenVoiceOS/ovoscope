@@ -120,7 +120,10 @@ stages and deliberately excludes persona, Ollama, OCP, and m2v plugins.
 | [docs/minicroft.md](docs/minicroft.md) | `MiniCroft` and `get_minicroft()` reference |
 | [docs/capture-session.md](docs/capture-session.md) | `CaptureSession` internals |
 | [docs/end2end-test.md](docs/end2end-test.md) | `End2EndTest` full parameter reference |
+| [docs/e2e-pipeline-harness.md](docs/e2e-pipeline-harness.md) | `E2EPipelineHarness` — testing a single pipeline plugin against raw bus messages |
+| [docs/intent-cases.md](docs/intent-cases.md) | File-based intent test cases (`.intent.test`) via `register_intent_case_tests` |
 | [docs/pydantic-integration.md](docs/pydantic-integration.md) | Typed message models with `ovos-pydantic-models` |
+| [docs/cli.md](docs/cli.md) | `ovoscope` CLI — record/run/diff/validate/coverage/bus-coverage, plus `ovoscope-setup` |
 | [FAQ.md](FAQ.md) | Common questions and gotchas |
 ---
 
@@ -155,9 +158,8 @@ PRs are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## AI Disclosure
 
-Parts of this project are developed with the assistance of AI tools.
-
-  actions it took, and what human oversight was applied. This log is updated after every
-  significant AI-assisted session.
-These files are intentionally published so that contributors and users can understand how the
-project evolves and where AI assistance has been applied.
+Parts of this project — including code, tests, and documentation — are developed with the
+assistance of AI coding agents, under human review before merge. Commit messages and pull
+request descriptions in the [git history](https://github.com/TigreGotico/ovoscope/commits/dev)
+and [CHANGELOG.md](CHANGELOG.md) note when a change originated from an AI-assisted session, so
+contributors and users can see where AI assistance has been applied.

@@ -50,6 +50,7 @@ you only want a subset, or to test against custom pipeline stages.
 """
 from __future__ import annotations
 
+import atexit
 import dataclasses
 import time
 from copy import deepcopy
@@ -282,9 +283,11 @@ def _wait_for_m2v_sync(mc, max_wait: float = 15.0,
         seen["count"] += 1
         seen["last_t"] = time.monotonic()
 
-    mc.bus.ee.on("padatious:register_intent",
-                 lambda _: on_register(None))
-    mc.bus.ee.on("register_intent", lambda _: on_register(None))
+    def on_padatious(_):
+        on_register(None)
+
+    def on_adapt(_):
+        on_register(None)
 
     # Wildcard "message" listener catches the serialized form on FakeBus.
     def on_any(serialized):
@@ -297,20 +300,56 @@ def _wait_for_m2v_sync(mc, max_wait: float = 15.0,
         if t == "padatious:register_intent" or t == "register_intent":
             on_register(None)
 
+    mc.bus.ee.on("padatious:register_intent", on_padatious)
+    mc.bus.ee.on("register_intent", on_adapt)
     mc.bus.ee.on("message", on_any)
 
     t0 = time.monotonic()
-    mc.bus.emit(Message("mycroft.ready", {}, {}))
+    try:
+        mc.bus.emit(Message("mycroft.ready", {}, {}))
 
-    # Wait for the burst of register events to settle.
-    while time.monotonic() - t0 < max_wait:
-        time.sleep(0.1)
-        if seen["count"] > 0 and (time.monotonic() - seen["last_t"]) > quiet_window:
-            break
-    # m2v's handle_sync_intents does an internal time.sleep(3) before the
-    # actual intent set update. Pad for that ceiling.
-    time.sleep(3.5)
-    return time.monotonic() - t0
+        # Wait for the burst of register events to settle.
+        while time.monotonic() - t0 < max_wait:
+            time.sleep(0.1)
+            if seen["count"] > 0 and (time.monotonic() - seen["last_t"]) > quiet_window:
+                break
+        if seen["count"] > 0:
+            # Register events arrived AND went quiet — the sync is observably
+            # finished, so there is nothing left to wait for.
+            return time.monotonic() - t0
+        # Nothing was observed. We cannot tell whether m2v is mid-sync, so pad
+        # for the ceiling of its internal time.sleep(3) in handle_sync_intents.
+        time.sleep(3.5)
+        return time.monotonic() - t0
+    finally:
+        # Always detach: these listeners live on the shared MiniCroft bus and
+        # would keep counting for the rest of the process.
+        for topic, handler in (("padatious:register_intent", on_padatious),
+                               ("register_intent", on_adapt),
+                               ("message", on_any)):
+            try:
+                mc.bus.ee.remove_listener(topic, handler)
+            except Exception:
+                pass
+
+
+def stop_shared_minicrofts() -> None:
+    """Stop every cached shared MiniCroft and empty the cache.
+
+    Registered with :mod:`atexit`; also safe to call from a session-scoped
+    fixture. A MiniCroft that is never stopped keeps its patches on the
+    process-wide ``SessionManager`` and ``Configuration``.
+    """
+    cache = globals().get(_SHARED_MINICROFT_KEY) or {}
+    for mc in list(cache.values()):
+        try:
+            mc.stop()
+        except Exception:
+            pass
+    cache.clear()
+
+
+atexit.register(stop_shared_minicrofts)
 
 
 def _shared_minicroft(skill_id: str, langs: List[str], m2v_warmup: float):
@@ -319,10 +358,22 @@ def _shared_minicroft(skill_id: str, langs: List[str], m2v_warmup: float):
     Caches the instance on a process-global so every generated class
     shares the same boot. ``m2v_warmup`` is now an *upper bound*: if the
     deterministic event-based wait finishes faster, we return early.
+
+    At most ONE instance stays alive: MiniCroft patches process-wide globals,
+    so a second live instance would clobber the first. Requesting a different
+    key stops the cached instance before booting the new one.
     """
     cache = globals().setdefault(_SHARED_MINICROFT_KEY, {})
     key = (skill_id, tuple(langs))
     if key not in cache:
+        # Keep at most one live MiniCroft — two of them fight over the same
+        # SessionManager / Configuration globals.
+        for stale_key in [k for k in cache if k != key]:
+            stale = cache.pop(stale_key)
+            try:
+                stale.stop()
+            except Exception:
+                pass
         LOG.set_level("CRITICAL")
         secondary = [l for l in langs if l != "en-US"]
         mc = get_minicroft([skill_id], secondary_langs=secondary or None)

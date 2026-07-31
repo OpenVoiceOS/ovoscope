@@ -315,10 +315,9 @@ class TestMatchResult:
 
         bus.on("recognizer_loop:utterance", _answer)
 
-        harness = PipelineHarness.__new__(PipelineHarness)
+        harness = PipelineHarness()
         harness._mc = MagicMock()
         harness._mc.bus = bus
-        harness.lang = "en-US"
 
         result = harness.match_result("turn on the lights", timeout=3.0)
         assert result.outcome == "matched", result.outcome

@@ -174,4 +174,4 @@ If you are building custom tooling, you can access these values via `SkillBusCov
 *   `observed_emitter_pct`: `(observed_emitters / total_emitters) * 100`
 *   `asserted_emitter_pct`: `(asserted_emitters / total_emitters) * 100`
 
-Source: `SkillBusCoverage` — `ovoscope/bus_coverage.py:118`
+Source: `SkillBusCoverage` — `ovoscope/bus_coverage.py`

@@ -30,7 +30,7 @@ testing and should use hardware-in-the-loop integration tests instead:
 
 ## `MiniPHAL` — Context Manager
 
-`MiniPHAL` — `ovoscope/phal.py:43`
+`MiniPHAL` — `ovoscope/phal.py`
 
 ```python
 from ovos_utils.messagebus import Message
@@ -54,14 +54,14 @@ with MiniPHAL(
 
 ### Methods
 
-`MiniPHAL.emit` — `ovoscope/phal.py:146`
+`MiniPHAL.emit` — `ovoscope/phal.py`
 
 | Method | Description |
 |--------|-------------|
 | `emit(msg, wait=0.05)` | Emit `msg` on the internal bus then sleep `wait` seconds so async handlers have time to fire before the next assertion. Set `wait=0` to disable the sleep. |
-| `assert_emitted(msg_type, timeout=2.0)` | Poll captured messages up to `timeout` seconds; return the first matching `Message`. Raises `AssertionError` on timeout. — `ovoscope/phal.py:157` |
-| `assert_not_emitted(msg_type, wait=0.2)` | Sleep `wait` seconds then assert no captured message has `msg_type`. Raises `AssertionError` if one was captured. — `ovoscope/phal.py:184` |
-| `clear_captured()` | Clear the captured message list. Useful between sequential assertions in the same `with` block. — `ovoscope/phal.py:203` |
+| `assert_emitted(msg_type, timeout=2.0)` | Poll captured messages up to `timeout` seconds; return the first matching `Message`. Raises `AssertionError` on timeout. — `ovoscope/phal.py` |
+| `assert_not_emitted(msg_type, wait=0.2)` | Sleep `wait` seconds then assert no captured message has `msg_type`. Raises `AssertionError` if one was captured. — `ovoscope/phal.py` |
+| `clear_captured()` | Clear the captured message list. Useful between sequential assertions in the same `with` block. — `ovoscope/phal.py` |
 
 #### `emit(wait=...)` — settling delay
 

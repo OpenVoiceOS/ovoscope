@@ -45,12 +45,12 @@ result = OCPTest(
 | `timeout` | `float` | `20.0` | Max wait in seconds. |
 | `patch_targets` | `List[str]` | `[]` | Additional `requests`-like module paths to patch (dotted Python path to the callable to replace). |
 
-### `execute()` — `ovoscope/ocp.py:90`
+### `execute()` — `ovoscope/ocp.py`
 
 Returns `List[Message]` — all bus messages captured during the interaction
 (same format as `CaptureSession.responses`).
 
-## HTTP Mocking — `ovoscope/ocp.py:139`
+## HTTP Mocking — `ovoscope/ocp.py`
 
 HTTP calls are intercepted via `unittest.mock.patch` on `requests.Session.get`
 and `requests.get` by default.

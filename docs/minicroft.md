@@ -1,11 +1,11 @@
 # MiniCroft
 `MiniCroft` is a minimal, in-process OVOS Core that loads real skill plugins and runs the full intent pipeline on a `FakeBus`. It is the execution engine behind every OvoScope test.
-## Class: `MiniCroft` — `ovoscope/__init__.py:158`
+## Class: `MiniCroft` (`ovoscope/__init__.py`)
 ```python
 from ovoscope import MiniCroft
 ```
 Subclass of `ovos_core.skill_manager.SkillManager`.
-`get_minicroft` factory — `ovoscope/__init__.py:456` Replaces the real WebSocket bus with `FakeBus`, disables components not needed for testing, and only loads the skills you specify.
+`get_minicroft()` factory (`ovoscope/__init__.py`) replaces the real WebSocket bus with `FakeBus`, disables components not needed for testing, and only loads the skills you specify.
 ### Constructor
 ```python
 MiniCroft(
@@ -21,6 +21,8 @@ MiniCroft(
     lang: str | None = None,
     secondary_langs: list[str] | None = None,
     pipeline_config: dict[str, dict] | None = None,
+    modernize: bool = True,
+    emit_legacy: bool = True,
     *args, **kwargs,
 )
 ```
@@ -38,6 +40,8 @@ MiniCroft(
 | `lang` | `None` | Override the system default language (`Configuration()["lang"]`). Patched before Adapt/Padatious init so vocab is registered for this language. |
 | `secondary_langs` | `None` | Set `Configuration()["secondary_langs"]`. Adapt and Padatious create per-language engines for each language in this list, enabling multilingual intent matching. |
 | `pipeline_config` | `None` | Per-pipeline plugin config overrides. A `dict` keyed by the plugin's config key under `Configuration()["intents"]` (e.g. `"ovos_m2v_pipeline"`). Patched before `super().__init__()` so pipeline plugins read overridden values during their `__init__`. Restored in `stop()`. |
+| `modernize` | `True` | Forwarded to the harness `FakeBus`. When `True`, emitting a legacy bus topic also emits its `ovos.*` spec counterpart (legacy producer → spec listener). |
+| `emit_legacy` | `True` | Forwarded to the harness `FakeBus`. When `True`, emitting an `ovos.*` spec topic also emits the matching legacy topic (spec producer → legacy listener). Set both `modernize` and `emit_legacy` to `False` to isolate a single namespace and assert no cross-namespace bridging occurs. |
 ### Key attributes
 | Attribute | Type | Description |
 |---|---|---|

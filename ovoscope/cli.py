@@ -20,6 +20,7 @@ Provides the ``ovoscope`` command with the following subcommands:
 * ``diff``       — Compare two fixture files with colored output.
 * ``validate``   — Schema-validate one or more fixture files.
 * ``coverage``   — Scan a workspace root and report E2E test coverage.
+* ``bus-coverage`` — Run fixtures and report bus handler/emitter coverage.
 
 Usage::
 
@@ -29,6 +30,7 @@ Usage::
     ovoscope diff expected.json actual.json
     ovoscope validate fixture.json
     ovoscope coverage path/to/OpenVoiceOS/
+    ovoscope bus-coverage test/fixtures/
 """
 from __future__ import annotations
 
@@ -232,7 +234,10 @@ def cmd_diff(args: argparse.Namespace) -> int:
 def cmd_validate(args: argparse.Namespace) -> int:
     """Schema-validate one or more fixture JSON files.
 
-    Runs basic structural validation on every fixture file.
+    Uses :func:`ovoscope.pydantic_helpers.validate_fixture` (per-message
+    schema validation against ``OpenVoiceOSMessage``) when the ``pydantic``
+    extra is installed, falling back to basic JSON structure validation
+    (required top-level keys, ``expected_messages`` is a list) otherwise.
 
     Args:
         args: Parsed CLI arguments with fixtures (list of paths).
@@ -240,10 +245,21 @@ def cmd_validate(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 = all valid, 1 = validation failure).
     """
+    try:
+        from ovoscope.pydantic_helpers import _PYDANTIC_AVAILABLE, validate_fixture
+    except ImportError:
+        _PYDANTIC_AVAILABLE = False
+        validate_fixture = None
+
     all_ok = True
     for path in args.fixtures:
         try:
+            # Structural checks always run — pydantic validation is a
+            # per-message layer on top, not a replacement (validate_fixture
+            # skips sections that are absent entirely).
             _basic_validate(path)
+            if _PYDANTIC_AVAILABLE:
+                validate_fixture(path)
             print(f"[validate] OK  {path}")
         except Exception as exc:
             print(f"[validate] FAIL  {path}: {exc}")

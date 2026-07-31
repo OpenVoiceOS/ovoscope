@@ -1,11 +1,11 @@
 # CaptureSession
 `CaptureSession` subscribes to all messages on the `FakeBus` and records them during a single test interaction. It handles synchronous responses (ordered, from the intent pipeline) and asynchronous responses (from external threads, unordered).
-## Class: `CaptureSession` — `ovoscope/__init__.py:488`
+## Class: `CaptureSession` — `ovoscope/__init__.py`
 ```python
 from ovoscope import CaptureSession
 ```
 A `dataclass` that wraps a `MiniCroft` and manages message collection for one test interaction.
-`CaptureSession.finish` — `ovoscope/__init__.py:521`
+`CaptureSession.finish` — `ovoscope/__init__.py`
 
 > **Idempotency:** `finish()` may be called multiple times safely — subsequent calls
 > return the same message list without re-subscribing or clearing state.

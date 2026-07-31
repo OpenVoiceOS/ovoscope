@@ -1,11 +1,11 @@
 # End2EndTest
 `End2EndTest` is the primary API. It wires together `MiniCroft`, `CaptureSession`, and all assertion logic into a single declarative test object.
-## Class: `End2EndTest` — `ovoscope/__init__.py:533`
+## Class: `End2EndTest` — `ovoscope/__init__.py`
 ```python
 from ovoscope import End2EndTest
 ```
 A `dataclass`. Configure once, call `.execute()` to run.
-`End2EndTest.execute` — `ovoscope/__init__.py:602`
+`End2EndTest.execute` — `ovoscope/__init__.py`
 ---
 ## Fields
 ### Core

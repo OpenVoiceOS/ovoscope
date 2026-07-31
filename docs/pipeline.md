@@ -11,7 +11,7 @@ has no skills, so only the pipeline matching logic is exercised.
 
 ## `_SinkSkill` — Internal Catch-all
 
-`_SinkSkill` — `ovoscope/pipeline.py:37`
+`_SinkSkill` — `ovoscope/pipeline.py`
 
 When `PipelineHarness` creates a `MiniCroft`, it injects an internal
 `__ovoscope_sink__` skill as a routing target for matched intents.  This is
@@ -23,7 +23,7 @@ Users never interact with `_SinkSkill` directly.
 
 ## `PipelineHarness` — Context Manager
 
-`PipelineHarness` — `ovoscope/pipeline.py:71`
+`PipelineHarness` — `ovoscope/pipeline.py`
 
 ```python
 from ovoscope.pipeline import PipelineHarness
@@ -48,9 +48,9 @@ with PipelineHarness(
 
 | Method | Source | Returns | Description |
 |--------|--------|---------|-------------|
-| `match(utterance, timeout=5.0)` | `ovoscope/pipeline.py:135` | `Optional[Message]` | Send utterance; return matched `Message` or `None` on timeout/failure. |
-| `assert_matches(utterance, intent_type=None, timeout=5.0)` | `ovoscope/pipeline.py:183` | `Message` | Assert at least one stage matches. Raises `AssertionError` if no match. `intent_type` is a substring check on `msg_type`. |
-| `assert_no_match(utterance, timeout=2.0)` | `ovoscope/pipeline.py:213` | `None` | Assert no stage matches. Raises `AssertionError` if a match is found. |
+| `match(utterance, timeout=5.0)` | `ovoscope/pipeline.py` | `Optional[Message]` | Send utterance; return matched `Message` or `None` on timeout/failure. |
+| `assert_matches(utterance, intent_type=None, timeout=5.0)` | `ovoscope/pipeline.py` | `Message` | Assert at least one stage matches. Raises `AssertionError` if no match. `intent_type` is a substring check on `msg_type`. |
+| `assert_no_match(utterance, timeout=2.0)` | `ovoscope/pipeline.py` | `None` | Assert no stage matches. Raises `AssertionError` if a match is found. |
 
 ### Pipeline Stage Ordering and Success vs Failure
 
@@ -63,7 +63,7 @@ when a stage commits to handling the utterance.
 **Failure signal**: `intent_failure` or `mycroft.skill.handler.start` bus
 messages — emitted when no stage matched after all stages have been consulted.
 
-`match()` — `ovoscope/pipeline.py:135` — uses separate `threading.Event`
+`match()` — `ovoscope/pipeline.py` — uses separate `threading.Event`
 objects for success and failure so that an `intent_failure` arriving first
 does not mask a subsequent late success match.  On timeout or failure the
 method returns `None`; on success it returns the captured `Message`.
@@ -111,7 +111,7 @@ with PipelineHarness(
 ### `assert_matches(intent_type=...)` semantics
 
 `intent_type` is a **substring** check on the matched message's `msg_type`
-— `ovoscope/pipeline.py:208`:
+— `ovoscope/pipeline.py`:
 
 ```python
 # Pass: msg_type "padatious:0.95:LightsOnIntent" contains "LightsOnIntent"
@@ -127,10 +127,10 @@ msg = harness.assert_matches("turn on the lights", intent_type="LightsOffIntent"
 
 ## Implementation Notes
 
-`PipelineHarness.__enter__` — `ovoscope/pipeline.py:104` — creates a
+`PipelineHarness.__enter__` — `ovoscope/pipeline.py` — creates a
 `MiniCroft` with `skill_ids=[]` and the specified pipeline.
 
-`PipelineHarness.match()` — `ovoscope/pipeline.py:135` — subscribes to
+`PipelineHarness.match()` — `ovoscope/pipeline.py` — subscribes to
 `intent.service.skills.activated` (success) and `intent_failure` /
 `mycroft.skill.handler.start` (failure) before emitting the utterance,
 then waits on a `threading.Event` with the given timeout.  Bus handlers are

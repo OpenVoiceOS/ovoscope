@@ -172,11 +172,11 @@ class TestCmdValidate:
             os.unlink(path)
 
     def test_uses_validate_fixture_when_pydantic_available(self):
-        """cmd_validate must call pydantic_helpers.validate_fixture, not the
-        basic checks, when the pydantic extra is importable."""
+        """cmd_validate layers pydantic_helpers.validate_fixture on top of the
+        structural checks when the pydantic extra is importable."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump({
-                "source_message": {"type": "x", "data": {}, "context": {}},
+                "source_message": [{"type": "x", "data": {}, "context": {}}],
                 "expected_messages": [],
             }, f)
             path = f.name
@@ -190,7 +190,7 @@ class TestCmdValidate:
                 code = cmd_validate(args)
             assert code == 0
             mock_validate_fixture.assert_called_once_with(path)
-            mock_basic.assert_not_called()
+            mock_basic.assert_called_once_with(path)
         finally:
             os.unlink(path)
 

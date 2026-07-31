@@ -110,7 +110,7 @@ The preferred usage is as a context manager. `__enter__` calls `start()`;
 
 ### Assertion Methods
 
-#### `assert_page_shown(namespace, page, timeout=2.0)`
+#### `assert_page_shown(namespace, page, timeout=2.0, exact=True)`
 
 `GUICaptureSession.assert_page_shown` — `ovoscope/__init__.py`
 
@@ -126,14 +126,17 @@ gui.assert_page_shown("helloworldskill", "hello.qml", timeout=3.0)
 | `namespace` | `str` | **required** | GUI namespace (typically the skill ID slug, e.g. `"helloworldskill"`). |
 | `page` | `str` | **required** | QML page filename (e.g. `"hello.qml"`). |
 | `timeout` | `float` | `2.0` | Max seconds to poll captured messages before failing. |
+| `exact` | `bool` | `True` | Exact matching: the namespace must be equal, and the page must equal the shown page's basename. Pass `exact=False` for the legacy substring behavior. |
 
 Raises `AssertionError` if no matching message is found within `timeout`.
 
 The method checks both `msg.data["namespace"]` / `msg.context["skill_id"]`
 for the namespace, and `msg.data["pages"]` / `msg.data["page"]` for the
-page name. Substring matching is used for both.
+page name. By default both use exact matching (`namespace ==`, page
+basename `==`), so a near-miss like `hello.qml.bak` or a longer namespace
+that merely contains yours cannot satisfy the assertion.
 
-#### `assert_namespace_value(namespace, key, value)`
+#### `assert_namespace_value(namespace, key, value, exact=True)`
 
 `GUICaptureSession.assert_namespace_value` — `ovoscope/__init__.py`
 
@@ -152,7 +155,7 @@ gui.assert_namespace_value("helloworldskill", "greeting", "Hello!")
 
 Raises `AssertionError` if no matching message is found.
 
-#### `assert_namespace_has_key(namespace, key)`
+#### `assert_namespace_has_key(namespace, key, exact=True)`
 
 `GUICaptureSession.assert_namespace_has_key` — `ovoscope/__init__.py`
 
@@ -172,12 +175,14 @@ gui.assert_namespace_has_key("weatherskill", "current_temp")
 
 Raises `AssertionError` if no matching message is found.
 
-#### `assert_namespace_cleared(namespace)`
+#### `assert_namespace_cleared(namespace, exact=True)`
 
 `GUICaptureSession.assert_namespace_cleared` — `ovoscope/__init__.py`
 
-Assert that a `gui.namespace.remove` or `gui.namespace.clear` message was
-emitted for the given namespace.
+Assert that a `gui.namespace.remove`, `gui.namespace.clear`, or
+`gui.clear.namespace` message was emitted for the given namespace —
+`gui.clear.namespace` is the topic the GUI service actually emits at
+runtime. The namespace comparison is exact unless `exact=False`.
 
 ```python
 gui.assert_namespace_cleared("helloworldskill")

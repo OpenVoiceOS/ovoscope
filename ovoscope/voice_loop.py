@@ -677,7 +677,26 @@ class ListenerHarness:
         return self
 
     def __exit__(self, *_: Any) -> None:
-        self.shutdown()
+        try:
+            self.shutdown()
+        finally:
+            self.detach_capture()
+
+    def detach_capture(self) -> None:
+        """Unsubscribe the wildcard ``"message"`` capture handler.
+
+        The bus may be shared with another harness or with the caller. A
+        capture handler left behind keeps appending to a dead harness's
+        message list — and every later message shows up in ``_messages``.
+        """
+        bus = getattr(self, "bus", None)
+        capture = getattr(self, "_capture", None)
+        if bus is None or capture is None:
+            return
+        try:
+            bus.remove("message", capture)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

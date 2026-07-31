@@ -16,10 +16,10 @@ ovoscope --help
 
 ## Subcommands
 
-### `ovoscope record` — Record a fixture
+### `ovoscope record`: Record a fixture
 
 **In-process recording** (default): loads the skill(s) inside the current
-process using `MiniCroft` — `cli.py:cmd_record`.
+process using `MiniCroft` (`cli.py:cmd_record`).
 
 ```bash
 ovoscope record \
@@ -30,7 +30,7 @@ ovoscope record \
     --timeout 20
 ```
 
-**Live recording** from a running OVOS instance (`RemoteRecorder` —
+**Live recording** from a running OVOS instance (`RemoteRecorder`, in
 `remote_recorder.py:RemoteRecorder.record`):
 
 ```bash
@@ -43,7 +43,7 @@ ovoscope record --live \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--skill-id` | — | OPM skill IDs to load (repeatable). |
+| `--skill-id` | none | OPM skill IDs to load (repeatable). |
 | `--utterance` | **required** | User utterance text. |
 | `--output` | **required** | Output fixture JSON path. |
 | `--lang` | `en-US` | Language tag. |
@@ -54,9 +54,9 @@ ovoscope record --live \
 
 ---
 
-### `ovoscope run` — Replay a fixture
+### `ovoscope run`: Replay a fixture
 
-Replays a saved fixture file and exits with code 1 on failure —
+Replays a saved fixture file and exits with code 1 on failure, in
 `cli.py:cmd_run`.
 
 ```bash
@@ -72,10 +72,10 @@ ovoscope run test/fixtures/hello.json --verbose --timeout 30
 
 ---
 
-### `ovoscope diff` — Compare two fixtures
+### `ovoscope diff`: Compare two fixtures
 
-Compares two fixture files and prints a colored report —
-`diff.py:diff_fixtures`, `cli.py:cmd_diff`.
+Compares two fixture files and prints a colored report, in
+`diff.py:diff_fixtures` and `cli.py:cmd_diff`.
 
 ```bash
 ovoscope diff expected.json actual.json
@@ -93,9 +93,9 @@ Exits 0 if identical, 1 if differences are found.
 
 ---
 
-### `ovoscope validate` — Schema-validate fixtures
+### `ovoscope validate`: Schema-validate fixtures
 
-Validates one or more fixture files against the expected schema —
+Validates one or more fixture files against the expected schema, in
 `cli.py:cmd_validate`.
 
 ```bash
@@ -109,10 +109,10 @@ is a list) when the `pydantic` extra is not installed.
 
 ---
 
-### `ovoscope coverage` — Ecosystem coverage scan
+### `ovoscope coverage`: Ecosystem coverage scan
 
-Scans a workspace root for OVOS plugin repos and reports E2E test coverage —
-`coverage.py:scan_workspace`, `cli.py:cmd_coverage`.
+Scans a workspace root for OVOS plugin repos and reports E2E test coverage, in
+`coverage.py:scan_workspace` and `cli.py:cmd_coverage`.
 
 ```bash
 ovoscope coverage "OpenVoiceOS Workspace/" --format table
@@ -186,3 +186,6 @@ With no explicit `--claude`/`--gemini` flag, the tool auto-detects which of
 |------|---------|
 | 0 | Success / no differences / all valid |
 | 1 | Failure / differences found / validation error |
+
+---
+[← Usage Guide](usage-guide.md) · [Home](../README.md) · [CI Integration →](ci-integration.md)

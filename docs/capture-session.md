@@ -1,13 +1,13 @@
 # CaptureSession
 `CaptureSession` subscribes to all messages on the `FakeBus` and records them during a single test interaction. It handles synchronous responses (ordered, from the intent pipeline) and asynchronous responses (from external threads, unordered).
-## Class: `CaptureSession` — `ovoscope/__init__.py`
+## Class: `CaptureSession` (`ovoscope/__init__.py`)
 ```python
 from ovoscope import CaptureSession
 ```
 A `dataclass` that wraps a `MiniCroft` and manages message collection for one test interaction.
-`CaptureSession.finish` — `ovoscope/__init__.py`
+`CaptureSession.finish` (`ovoscope/__init__.py`)
 
-> **Idempotency:** `finish()` may be called multiple times safely — subsequent calls
+> **Idempotency:** `finish()` may be called multiple times safely: subsequent calls
 > return the same message list without re-subscribing or clearing state.
 ### Fields
 | Field | Type | Default | Description |
@@ -18,7 +18,7 @@ A `dataclass` that wraps a `MiniCroft` and manages message collection for one te
 | `eof_msgs` | `list[str]` | `["ovos.utterance.handled"]` | Message types that signal end of interaction |
 | `ignore_messages` | `list[str]` | `["ovos.skills.settings_changed"]` | Message types to discard |
 | `async_messages` | `list[str]` | `[]` | Message types to route to `async_responses` instead |
-| `done` | `threading.Event` | — | Set when an EOF message is received |
+| `done` | `threading.Event` |: | Set when an EOF message is received |
 ### Methods
 #### `capture(source_message, timeout=20)`
 Emits `source_message` on the bus and waits for an EOF message (or timeout). Subsequent calls on the same session accumulate into `responses`.
@@ -86,3 +86,6 @@ capture.capture(follow_up, timeout=10)
 all_messages = capture.finish()
 ```
 `End2EndTest` does this automatically when `source_message` is a list.
+
+---
+[← MiniCroft](minicroft.md) · [Home](../README.md) · [End2EndTest →](end2end-test.md)

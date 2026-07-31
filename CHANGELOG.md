@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+**Fixed — audit round 1 (test isolation, harness lifecycle, verdict accuracy):**
+
+- `End2EndTest.execute()`, `End2EndTest.from_message()` and `OCPTest.execute()`
+  now stop their `MiniCroft` in a `finally` block. A failing assertion no
+  longer leaves the process-wide `SessionManager` and `Configuration` patched.
+- `MiniCroft` snapshots the whole default `Session` at boot and restores it in
+  `stop()`, so `inject_active` and wire-folded session values stay inside the
+  test that caused them.
+- Mock-TTS unduck timers are tracked, made daemon, and cancelled in `stop()`.
+  An orphaned timer can no longer emit onto a closed bus.
+- `BusCoverageTracker` reports the invocation DELTA over its own lifetime.
+  Earlier tests no longer inflate a later test's coverage.
+- `CaptureSession` resets its eof state atomically, records a `timed_out`
+  flag, and returns a copy from `finish()`. A capture timeout now fails with a
+  clear message instead of a message-count mismatch.
+- `ovoscope run` reuses the `MiniCroft` it booted instead of booting a second.
+- `PipelineHarness.match()` no longer treats `mycroft.skill.handler.start`
+  (a SUCCESS signal) as a failure, drops the spinning watcher thread, and gains
+  `match_result()`. `assert_no_match()` now fails on a timeout instead of
+  passing vacuously.
+- `wait_for_match()` accepts `emit=` so the stimulus is sent after
+  subscription, and no longer drops a match that races an intent failure.
+- The OCP HTTP mock attaches its side effect to the patched GET, so configured
+  URLs match. `OCPTest` waits for `ovos.common_play.query.response` instead of
+  sleeping half the timeout.
+- Harness `__exit__` methods close their bus and detach `"message"` capture
+  handlers even when shutdown raises (`AudioServiceHarness`, `MiniPHAL`,
+  `ListenerHarness`, `MiniListener`).
+- `PlaybackServiceHarness` restores the previous `TTS.queue` and refuses a
+  second concurrent harness.
+- Shared `MiniCroft` instances in `intent_cases` are stopped at exit, and at
+  most one stays live. The m2v sync wait removes its listeners and only pays
+  the 3.5s pad when nothing was observed.
+- `MiniSimpleListener.feed_file()` builds a fresh listener when the previous
+  thread refuses to die.
+- PHAL plugin load failures raise by default (`tolerate_load_errors=True` to
+  opt out); tolerated errors are quoted in `assert_emitted` failures.
+- `coverage.py` records manifest parse failures in the report instead of
+  silently understating coverage.
+- `RemoteRecorder.connect()` closes the client on a connect timeout so no
+  reconnect thread is left running.
+
 ## [1.6.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.1a1) (2026-07-24)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.0a1...1.6.1a1)

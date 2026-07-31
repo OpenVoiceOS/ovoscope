@@ -314,7 +314,10 @@ def _parse_entry_points(pyproject_path: str,
     try:
         import tomllib  # Python 3.11+
     except ImportError:
-        tomllib = None  # type: ignore[assignment]
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            tomllib = None  # type: ignore[assignment]
 
     if tomllib is not None:
         try:

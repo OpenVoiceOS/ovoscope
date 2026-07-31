@@ -697,10 +697,12 @@ class MiniCroft(SkillManager):
         state = getattr(self, "_default_session_state", None)
         if state is None:
             return
+        # Restore onto whatever object is the default session NOW: boot can
+        # replace the singleton (SessionManager.reset_default_session), and
+        # mutations after the swap land on the new object — bailing out on an
+        # identity mismatch would leak exactly the state this exists to scrub.
         sess = SessionManager.default_session
-        if sess is not getattr(self, "_default_session_obj", None):
-            # The default session object itself was replaced
-            # (SessionManager.reset_default_session) — nothing to restore onto.
+        if sess is None:
             return
         # Rebuild a pristine Session from the snapshot and copy every field
         # onto the live object. Copying only the snapshot keys is not enough:

@@ -377,15 +377,46 @@ class TestDefaultSessionRestoreFallbacks(unittest.TestCase):
     """The snapshot/restore must use ONE bus-client API family, and must not
     degrade to a total no-op when the snapshot failed."""
 
-    def test_snapshot_records_the_api_family(self):
+    def test_restore_uses_the_api_family_that_snapshotted(self):
+        """The snapshot API and the load API must be the same family."""
+        from ovos_bus_client.session import Session, SessionManager
         from ovoscope import MiniCroft
 
         croft = MiniCroft.__new__(MiniCroft)
-        # exercise __init__'s snapshot block through a real Session
-        from ovos_bus_client.session import SessionManager
-
         sess = SessionManager.default_session
-        self.assertTrue(hasattr(sess, "to_dict") or hasattr(sess, "serialize"))
+        if hasattr(sess, "to_dict"):
+            croft._session_api = "dict"
+            croft._default_session_state = sess.to_dict()
+            used, forbidden = "from_dict", "deserialize"
+        else:
+            croft._session_api = "legacy"
+            croft._default_session_state = sess.serialize()
+            used, forbidden = "deserialize", "from_dict"
+        croft._default_active_skills = list(sess.active_skills)
+
+        calls = []
+        real = getattr(Session, used)
+
+        def _spy(data):
+            calls.append(used)
+            return real(data)
+
+        def _forbidden(*_a, **_kw):
+            self.fail(f"a {croft._session_api} snapshot was loaded with "
+                      f"{forbidden}()")
+
+        patches = [patch.object(Session, used, staticmethod(_spy))]
+        if hasattr(Session, forbidden):
+            patches.append(
+                patch.object(Session, forbidden, staticmethod(_forbidden)))
+        for p in patches:
+            p.start()
+        try:
+            croft._restore_default_session()
+        finally:
+            for p in reversed(patches):
+                p.stop()
+        self.assertEqual(calls, [used])
 
     def test_active_skills_restored_without_a_snapshot(self):
         from ovos_bus_client.session import SessionManager

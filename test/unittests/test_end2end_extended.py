@@ -580,13 +580,17 @@ class TestMiniCroftLangConfig(unittest.TestCase):
 # CaptureSession __del__
 # ---------------------------------------------------------------------------
 class TestCaptureSessionDel(unittest.TestCase):
+    """__del__ touches only ``minicroft.bus`` — a stub is enough (and a real
+    MiniCroft boot here retained hundreds of MB per run)."""
 
     def setUp(self):
+        from types import SimpleNamespace
+        from ovos_utils.fakebus import FakeBus
         LOG.set_level("ERROR")
-        self.mc = get_minicroft([])
+        self.mc = SimpleNamespace(bus=FakeBus())
 
     def tearDown(self):
-        self.mc.stop()
+        self.mc.bus.close()
         LOG.set_level("CRITICAL")
 
     def test_del_calls_finish(self):

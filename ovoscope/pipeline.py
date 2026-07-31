@@ -112,7 +112,11 @@ class _SinkSkill:
                 message = Message.deserialize(message)
             except Exception:
                 return
-        # Failures are tracked by absence of _last_match.
+        # An explicit failure CLEARS the previous match. Without this, a
+        # match -> failure -> ... sequence leaves the first match visible on
+        # `_last_match`, so anything reading it sees a verdict from an earlier
+        # utterance.
+        self._last_match = None
 
 
 class PipelineHarness:
@@ -156,6 +160,7 @@ class PipelineHarness:
         self.modernize: bool = modernize
         self.emit_legacy: bool = emit_legacy
         self._mc: Any = None
+        self._sink: Any = None
 
     # ------------------------------------------------------------------
     # Context manager interface
@@ -179,9 +184,16 @@ class PipelineHarness:
             emit_legacy=self.emit_legacy,
         )
 
-        # Update sink skill's bus reference now that MiniCroft is created
-        if self._mc is not None:
-            sink_skill.bus = self._mc.bus
+        # MiniCroft patches process-wide globals that only stop() restores, so
+        # anything that raises after a successful boot must still shut it down.
+        try:
+            # Update sink skill's bus reference now that MiniCroft is created
+            if self._mc is not None:
+                sink_skill.bus = self._mc.bus
+            self._sink = sink_skill
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
 
         return self
 
@@ -190,6 +202,7 @@ class PipelineHarness:
         if self._mc is not None:
             self._mc.stop()
             self._mc = None
+        self._sink = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -212,6 +225,11 @@ class PipelineHarness:
         """
         if self._mc is None:
             raise RuntimeError("PipelineHarness must be used as a context manager.")
+
+        # Clear the previous utterance's verdict so a stale match can never be
+        # read as this utterance's result.
+        if self._sink is not None:
+            self._sink._last_match = None
 
         import threading
 

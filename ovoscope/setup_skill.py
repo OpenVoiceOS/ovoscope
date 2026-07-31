@@ -164,7 +164,9 @@ def _install_skill(
         verbose: Print progress messages.
 
     Returns:
-        True on success.
+        True on success, False when SKILL.md could not be downloaded — the
+        skill is useless without it, so the caller must report the failure
+        instead of leaving a half-installed directory behind.
     """
     scripts_dir = skill_dir / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -173,8 +175,12 @@ def _install_skill(
     skill_md = skill_dir / "SKILL.md"
     if verbose:
         print(f"[{tool_name}]  downloading SKILL.md …")
-    _fetch(_SKILL_MD_URL, skill_md, verbose=False)
-    if verbose and skill_md.exists():
+    if not _fetch(_SKILL_MD_URL, skill_md, verbose=False):
+        print(f"[{tool_name}]  ERROR: could not download SKILL.md from "
+              f"{_SKILL_MD_URL} — the skill was NOT installed.",
+              file=sys.stderr)
+        return False
+    if verbose:
         print(f"[{tool_name}]  SKILL.md → {skill_md}")
 
     # Wrapper script — generated inline
@@ -421,10 +427,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             uninstall_gemini(project_path)
         return 0
 
+    ok = True
     if args.claude:
-        install_claude(fetch_docs=fetch_docs)
+        ok = install_claude(fetch_docs=fetch_docs) and ok
     if args.gemini:
-        install_gemini(project_path, fetch_docs=fetch_docs)
+        ok = install_gemini(project_path, fetch_docs=fetch_docs) and ok
+
+    if not ok:
+        print("\nInstallation FAILED. See the errors above.", file=sys.stderr)
+        return 1
 
     print(
         "\nInstallation complete. Restart your AI assistant or open a new\n"

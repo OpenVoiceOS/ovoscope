@@ -316,6 +316,10 @@ class OCPPlayerHarness:
         """
         from ovos_media.player import OCPMediaPlayer
 
+        # Re-entering a harness instance must not inherit the previous run's
+        # patch list; __exit__ clears it, but a caller that reuses the object
+        # after a failed enter would otherwise stop the same patches twice.
+        self._patches = []
         self.bus = FakeBus(modernize=self.modernize,
                            emit_legacy=self.emit_legacy)
         if self.backend_factory is not None:
@@ -350,81 +354,90 @@ class OCPPlayerHarness:
                 valid = [a for a in args if not isinstance(a, str)]
                 super().__init__(*valid, **kwargs)
 
-        p_playlist = patch("ovos_media.player.Playlist", _TolerantPlaylist)
-        p_playlist.start()
-        self._patches.append(p_playlist)
+        # Every mock.patch below is process-wide until stopped. If anything
+        # after the first start() raises (a missing ovos_media attribute, a
+        # backend constructor error), an unguarded exit would leave those
+        # patches active for the rest of the process and silently corrupt
+        # every later test. Unwind through __exit__ before propagating.
+        try:
+            p_playlist = patch("ovos_media.player.Playlist", _TolerantPlaylist)
+            p_playlist.start()
+            self._patches.append(p_playlist)
 
-        simple_targets = [
-            "ovos_media.player.AudioService",
-            "ovos_media.player.VideoService",
-            "ovos_media.player.WebService",
-            "ovos_media.player.OcpMprisExporter",
-            "ovos_media.player.OCPMediaCatalog",
-        ]
-        for target in simple_targets:
-            p = patch(target)
-            p.start()
-            self._patches.append(p)
+            simple_targets = [
+                "ovos_media.player.AudioService",
+                "ovos_media.player.VideoService",
+                "ovos_media.player.WebService",
+                "ovos_media.player.OcpMprisExporter",
+                "ovos_media.player.OCPMediaCatalog",
+            ]
+            for target in simple_targets:
+                p = patch(target)
+                p.start()
+                self._patches.append(p)
 
-        p_cfg = patch("ovos_media.player.Configuration",
-                      return_value={"media": {}})
-        p_cfg.start()
-        self._patches.append(p_cfg)
+            p_cfg = patch("ovos_media.player.Configuration",
+                          return_value={"media": {}})
+            p_cfg.start()
+            self._patches.append(p_cfg)
 
-        p_gui = patch("ovos_media.player.GUIInterface",
-                      return_value=gui_mock)
-        p_gui.start()
-        self._patches.append(p_gui)
+            p_gui = patch("ovos_media.player.GUIInterface",
+                          return_value=gui_mock)
+            p_gui.start()
+            self._patches.append(p_gui)
 
-        # Instantiate the real player (all heavy deps are now mocked)
-        self.player = OCPMediaPlayer(self.bus, config={})
+            # Instantiate the real player (all heavy deps are now mocked)
+            self.player = OCPMediaPlayer(self.bus, config={})
 
-        ns = self.backend_namespace
-        if self.backend_factory is not None:
-            # Real-backend mode: the mocked AudioService (a MagicMock) never routes
-            # play()->load_track()->backend.play(), so swap in a *real* AudioService
-            # with autoload off and the injected backend as its sole service. Now the
-            # player's playback path actually drives the real backend (e.g. asserting
-            # a Music Assistant client's play_media() call).
-            from ovos_media.media_backends.audio import AudioService as _RealAudioService
-            audio_svc = _RealAudioService(self.bus, config={"audio_players": {}},
-                                          autoload=False, validate_source=False)
-            self.player.audio_service = audio_svc
-            # Deferred uris (e.g. library://, {sei}//) are resolved by the OCP
-            # pipeline's stream extractors *before* the player sees them; this
-            # harness drives the backend directly, so bypass the player's
-            # stream-extraction validation (no extractor plugins are loaded).
-            self.player.validate_stream = lambda: True
-            audio_svc.services = [self.backend]
-            audio_svc.default = self.backend
-            self.backend.set_track_start_callback(audio_svc.track_start)
-            # load_services() (skipped with autoload=False) would register these.
-            self.bus.on(f"ovos.{ns}.service.play", audio_svc.handle_play)
-            self.bus.on(f"ovos.{ns}.service.pause", audio_svc.pause)
-            self.bus.on(f"ovos.{ns}.service.resume", audio_svc.resume)
-            self.bus.on(f"ovos.{ns}.service.stop", audio_svc.stop)
-            # NB: BaseMediaService.__init__ already wired ovos.common_play.media.state
-            # -> handle_media_state_change; re-registering it would fire backend.play()
-            # twice, so it is deliberately omitted here.
-            audio_svc._loaded.set()
-        else:
-            # Mock-backend mode: drive the player state-machine against the MagicMock
-            # AudioService; the backend is exposed for manual simulate_*/state asserts.
-            audio_svc = self.player.audio_service
-            audio_svc.services = [self.backend]
-            audio_svc.default = self.backend
-            self.backend.set_track_start_callback(audio_svc.track_start)
-            # Register the audio service bus handlers manually
-            # (normally done inside BaseMediaService.load_services)
-            self.bus.on(f"ovos.{ns}.service.play", audio_svc.handle_play)
-            self.bus.on(f"ovos.{ns}.service.pause", audio_svc.pause)
-            self.bus.on(f"ovos.{ns}.service.resume", audio_svc.resume)
-            self.bus.on(f"ovos.{ns}.service.stop", audio_svc.stop)
-            self.bus.on("ovos.common_play.media.state",
-                        audio_svc.handle_media_state_change)
-            audio_svc._loaded.set()
+            ns = self.backend_namespace
+            if self.backend_factory is not None:
+                # Real-backend mode: the mocked AudioService (a MagicMock) never routes
+                # play()->load_track()->backend.play(), so swap in a *real* AudioService
+                # with autoload off and the injected backend as its sole service. Now the
+                # player's playback path actually drives the real backend (e.g. asserting
+                # a Music Assistant client's play_media() call).
+                from ovos_media.media_backends.audio import AudioService as _RealAudioService
+                audio_svc = _RealAudioService(self.bus, config={"audio_players": {}},
+                                              autoload=False, validate_source=False)
+                self.player.audio_service = audio_svc
+                # Deferred uris (e.g. library://, {sei}//) are resolved by the OCP
+                # pipeline's stream extractors *before* the player sees them; this
+                # harness drives the backend directly, so bypass the player's
+                # stream-extraction validation (no extractor plugins are loaded).
+                self.player.validate_stream = lambda: True
+                audio_svc.services = [self.backend]
+                audio_svc.default = self.backend
+                self.backend.set_track_start_callback(audio_svc.track_start)
+                # load_services() (skipped with autoload=False) would register these.
+                self.bus.on(f"ovos.{ns}.service.play", audio_svc.handle_play)
+                self.bus.on(f"ovos.{ns}.service.pause", audio_svc.pause)
+                self.bus.on(f"ovos.{ns}.service.resume", audio_svc.resume)
+                self.bus.on(f"ovos.{ns}.service.stop", audio_svc.stop)
+                # NB: BaseMediaService.__init__ already wired ovos.common_play.media.state
+                # -> handle_media_state_change; re-registering it would fire backend.play()
+                # twice, so it is deliberately omitted here.
+                audio_svc._loaded.set()
+            else:
+                # Mock-backend mode: drive the player state-machine against the MagicMock
+                # AudioService; the backend is exposed for manual simulate_*/state asserts.
+                audio_svc = self.player.audio_service
+                audio_svc.services = [self.backend]
+                audio_svc.default = self.backend
+                self.backend.set_track_start_callback(audio_svc.track_start)
+                # Register the audio service bus handlers manually
+                # (normally done inside BaseMediaService.load_services)
+                self.bus.on(f"ovos.{ns}.service.play", audio_svc.handle_play)
+                self.bus.on(f"ovos.{ns}.service.pause", audio_svc.pause)
+                self.bus.on(f"ovos.{ns}.service.resume", audio_svc.resume)
+                self.bus.on(f"ovos.{ns}.service.stop", audio_svc.stop)
+                self.bus.on("ovos.common_play.media.state",
+                            audio_svc.handle_media_state_change)
+                audio_svc._loaded.set()
 
-        return self
+            return self
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
 
     def __exit__(self, *args) -> None:
         """Shut down the player, close the bus, and stop all patches."""
@@ -443,6 +456,7 @@ class OCPPlayerHarness:
                 p.stop()
             except RuntimeError:
                 pass
+        self._patches = []
 
     # ------------------------------------------------------------------
     # Control methods — emit the correct bus message and yield briefly

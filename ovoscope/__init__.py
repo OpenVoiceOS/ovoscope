@@ -16,6 +16,7 @@ from ovos_utils.fakebus import FakeBus
 from ovos_utils.log import LOG
 from ovos_utils.process_utils import ProcessState
 from ovos_spec_tools import SpecMessage
+from ovos_workshop.skills.api import SkillApi
 from ovos_workshop.skills.ovos import OVOSSkill
 
 SerializedMessage = Dict[str, Union[str, Dict[str, Any]]]
@@ -329,6 +330,14 @@ class MiniCroft(SkillManager):
         # stop() can restore it.
         self._original_sm_bus = SessionManager.bus
 
+        # SkillApi.bus is another process-wide class attribute. SkillManager
+        # calls SkillApi.connect_bus(self.bus) during boot, which pins this
+        # instance's FakeBus — and, through the bus handlers, the whole
+        # MiniCroft object graph (~633MB per stopped instance measured on the
+        # ovoscope suite). Snapshot it so stop() can put it back and let the
+        # instance be collected.
+        self._original_skill_api_bus = SkillApi.bus
+
         # SessionManager.default_session is a process-wide singleton. Booting a
         # MiniCroft (and running a test through it) mutates it in several ways:
         # run() overrides pipeline/lang, End2EndTest.execute() calls
@@ -342,18 +351,41 @@ class MiniCroft(SkillManager):
             # serialize/deserialize. Support both — a silent None here would
             # quietly disable the whole restore.
             sess_obj = self._default_session_obj
-            dump = getattr(sess_obj, "to_dict", None) or sess_obj.serialize
+            dump = getattr(sess_obj, "to_dict", None)
+            if dump is not None:
+                # ovos-bus-client 2.x
+                self._session_api = "dict"
+            else:
+                # ovos-bus-client 1.x
+                dump = sess_obj.serialize
+                self._session_api = "legacy"
             self._default_session_state = deepcopy(dump())
         except Exception:  # pragma: no cover - defensive, session_cls may vary
             LOG.warning("ovoscope: could not snapshot the default session; "
                         "state mutated by tests will NOT be restored")
             self._default_session_state = None
+            self._session_api = None
+        # active_skills as found at boot. Restored even when the full snapshot
+        # failed, so a skill activated during the test never survives teardown.
+        try:
+            self._default_active_skills = deepcopy(
+                self._default_session_obj.active_skills)
+        except Exception:  # pragma: no cover - defensive
+            self._default_active_skills = None
 
         # Orphaned TTS timers (see _mock_tts below) would fire on a closed bus
         # after stop() and corrupt the global SessionManager during a LATER
         # test. Track them so stop() can cancel them.
         self._tts_timers: List[threading.Timer] = []
         self._tts_timers_lock = threading.Lock()
+        # Guards the `_stopped` flag against the mock-TTS emits. A plain
+        # `if not self._stopped: bus.emit(...)` is a TOCTOU: stop() can flip the
+        # flag and close the bus between the check and the emit, so the emit
+        # lands on a dead bus and folds a stale session onto the global
+        # SessionManager. Holding this lock across BOTH the check+emit and the
+        # flag flip makes the two mutually exclusive. Re-entrant because an emit
+        # can re-enter the mock-TTS handler on the same thread.
+        self._stop_lock = threading.RLock()
         self._stopped = False
 
         if default_pipeline is DEFAULT_PIPELINE_UNSET:
@@ -437,20 +469,23 @@ class MiniCroft(SkillManager):
         # emit audio_output_start synchronously (duck) and schedule a short-delay
         # audio_output_end (unduck) to simulate the full TTS playback lifecycle.
         def _mock_tts(message):
-            if self._stopped:
-                return
-            # TTS playback begins — duck immediately.
-            # message.forward copies source/destination/session from the speak,
-            # matching what the real audio service would do.
-            bus.emit(message.forward("recognizer_loop:audio_output_start"))
+            with self._stop_lock:
+                if self._stopped:
+                    return
+                # TTS playback begins — duck immediately.
+                # message.forward copies source/destination/session from the
+                # speak, matching what the real audio service would do.
+                bus.emit(message.forward("recognizer_loop:audio_output_start"))
 
             def _unduck():
                 # stop() may have run while the timer was pending — emitting on
                 # a closed bus here would fold a stale session onto the global
-                # SessionManager and poison the next test.
-                if self._stopped:
-                    return
-                bus.emit(message.forward("recognizer_loop:audio_output_end"))
+                # SessionManager and poison the next test. The lock makes the
+                # check and the emit atomic against stop().
+                with self._stop_lock:
+                    if self._stopped:
+                        return
+                    bus.emit(message.forward("recognizer_loop:audio_output_end"))
 
             # TTS playback ends after a short delay — unduck.
             # Daemon + tracked so stop() can cancel it and the interpreter can
@@ -611,12 +646,16 @@ class MiniCroft(SkillManager):
         self.bus.emit(msg)
 
     def stop(self):
-        self._stopped = True
-        # Cancel any pending mock-TTS unduck timers BEFORE closing the bus, so
-        # none of them can emit onto a dead bus (and fold a stale "default"
-        # session onto the process-wide SessionManager) after teardown.
-        with self._tts_timers_lock:
-            timers, self._tts_timers = self._tts_timers, []
+        # Flip the flag and take the pending timers under `_stop_lock`, so a
+        # mock-TTS emit that is already past its `_stopped` check finishes on a
+        # live bus before teardown starts, and none can start afterwards.
+        with self._stop_lock:
+            self._stopped = True
+            # Cancel any pending mock-TTS unduck timers BEFORE closing the bus,
+            # so none of them can emit onto a dead bus (and fold a stale
+            # "default" session onto the process-wide SessionManager).
+            with self._tts_timers_lock:
+                timers, self._tts_timers = self._tts_timers, []
         for t in timers:
             try:
                 t.cancel()
@@ -688,6 +727,27 @@ class MiniCroft(SkillManager):
             LOG.debug("ovoscope: user config restored")
         SessionManager.bus = self._original_sm_bus
         LOG.debug("ovoscope: SessionManager.bus restored")
+        SkillApi.bus = self._original_skill_api_bus
+        LOG.debug("ovoscope: SkillApi.bus restored")
+        # Defence in depth: drop every handler still registered on this
+        # instance's bus. Handlers are bound methods of the skills and of this
+        # MiniCroft, so anything that still holds the bus would otherwise keep
+        # the whole object graph alive.
+        bus = getattr(self, "bus", None)
+        if bus is not None:
+            ee = getattr(bus, "ee", None)
+            if ee is not None:
+                try:
+                    ee.remove_all_listeners()
+                except Exception:
+                    pass
+            for attr in ("_handler_guards", "_dedup_registrations"):
+                container = getattr(bus, attr, None)
+                if container is not None:
+                    try:
+                        container.clear()
+                    except Exception:
+                        pass
         self._restore_default_session()
 
     def _restore_default_session(self):
@@ -702,6 +762,18 @@ class MiniCroft(SkillManager):
         """
         state = getattr(self, "_default_session_state", None)
         if state is None:
+            # The snapshot failed. Do not degrade to a total no-op: skills
+            # activated during the run are the mutation that leaks hardest,
+            # so put active_skills back explicitly.
+            sess = SessionManager.default_session
+            active = getattr(self, "_default_active_skills", None)
+            if sess is not None and active is not None:
+                try:
+                    sess.active_skills = deepcopy(active)
+                    LOG.debug("ovoscope: default session active_skills restored "
+                              "(snapshot unavailable)")
+                except Exception:
+                    LOG.warning("ovoscope: could not restore active_skills")
             return
         # Restore onto whatever object is the default session NOW: boot can
         # replace the singleton (SessionManager.reset_default_session), and
@@ -714,9 +786,15 @@ class MiniCroft(SkillManager):
         # onto the live object. Copying only the snapshot keys is not enough:
         # to_dict() OMITS empty fields, so a skill activated during the test
         # would have no key to restore and would survive teardown.
+        # Load with the SAME API family that produced the snapshot. to_dict()
+        # and serialize() do not share a wire format on every version, so
+        # pairing to_dict() output with deserialize() (or the reverse) silently
+        # rebuilds a wrong session.
         try:
-            load = (getattr(type(sess), "from_dict", None) or
-                    type(sess).deserialize)
+            if self._session_api == "dict":
+                load = type(sess).from_dict
+            else:
+                load = type(sess).deserialize
             fresh = load(deepcopy(state))
         except Exception:
             LOG.warning("ovoscope: could not rebuild the default session from "
@@ -783,6 +861,16 @@ class CaptureSession:
     done: threading.Event = dataclasses.field(default_factory=lambda: threading.Event())
     _eof_lock: threading.Lock = dataclasses.field(default_factory=lambda: threading.Lock())
     _eof_seen: int = 0
+    # Handlers are registered in __post_init__, long before the first capture()
+    # and again between captures. An eof arriving outside a capture window (a
+    # late message from a previous scenario, or a skill emitting the eof topic
+    # on its own) must not count towards the next capture, or the next capture
+    # returns immediately with an empty message list and the test passes
+    # vacuously. Only an ARMED session counts eofs, and only for the generation
+    # that armed it.
+    _armed: bool = False
+    _generation: int = 0
+    _done_generation: int = -1
     # set by capture() when the eof condition was never reached
     timed_out: bool = False
     timeout_seconds: Optional[float] = None
@@ -798,8 +886,12 @@ class CaptureSession:
 
     def handle_end_of_test(self, msg: Message):
         with self._eof_lock:
+            if not self._armed:
+                return
             self._eof_seen += 1
             if self._eof_seen >= self.eof_count:
+                self._armed = False
+                self._done_generation = self._generation
                 self.done.set()
 
     def __post_init__(self):
@@ -823,14 +915,24 @@ class CaptureSession:
         with self._eof_lock:
             self.done.clear()
             self._eof_seen = 0
+            self._generation += 1
+            generation = self._generation
+            self._armed = True
         self.minicroft.bus.emit(test_message)
         completed = self.done.wait(timeout)
+        if completed and self._done_generation != generation:
+            # `done` was set by something other than this capture's eof run
+            # (finish(), or a previous generation). Treat it as a timeout
+            # rather than reporting a completion this capture never saw.
+            completed = False
         if not completed:
             self.timed_out = True
             self.timeout_seconds = timeout
         return completed
 
     def finish(self) -> List[Message]:
+        with self._eof_lock:
+            self._armed = False
         self.done.set()
         self.minicroft.bus.remove("message", self.handle_message)
         for m in self.eof_msgs:
@@ -841,7 +943,15 @@ class CaptureSession:
         return list(self.responses)
 
     def __del__(self):
-        self.finish()
+        # At interpreter shutdown, or when construction failed part-way, the
+        # MiniCroft may have no bus (or be gone entirely). finish() would then
+        # raise inside __del__, which Python can only print and swallow.
+        if getattr(getattr(self, "minicroft", None), "bus", None) is None:
+            return
+        try:
+            self.finish()
+        except Exception:
+            pass
 
 
 @dataclasses.dataclass()
@@ -1003,30 +1113,47 @@ class End2EndTest:
                                  eof_count=self.eof_count,
                                  ignore_messages=self.ignore_messages,
                                  async_messages=self.async_messages)
-        for idx, source_message in enumerate(self.source_message):
-            if "session" not in source_message.context and len(capture.responses):
-                # propagate session updates as a client would do
-                source_message.context["session"] = capture.responses[-1].context["session"]
-            capture.capture(source_message, timeout)
+        # start_tracking() wraps bus.emit. Anything that raises between here and
+        # stop_tracking() would leave the wrapper installed for the rest of the
+        # process, and every later test would stack one more wrapper on top.
+        try:
+            for idx, source_message in enumerate(self.source_message):
+                if "session" not in source_message.context and len(capture.responses):
+                    # propagate session updates as a client would do
+                    prev_ctx = capture.responses[-1].context or {}
+                    if "session" not in prev_ctx:
+                        raise AssertionError(
+                            f"❌ cannot chain source_message #{idx}: the last "
+                            f"captured response "
+                            f"('{capture.responses[-1].msg_type}') carries no "
+                            f"session in its context, so there is nothing to "
+                            f"propagate. Give this source_message an explicit "
+                            f"session."
+                        )
+                    source_message.context["session"] = prev_ctx["session"]
+                capture.capture(source_message, timeout)
 
-        # final message list
-        messages = capture.finish()
+            # final message list
+            messages = capture.finish()
 
-        # isolate a single dispatch lifecycle by skill_id — drop messages from a
-        # concurrent (interleaving) lifecycle so the assertion is deterministic.
-        if self.skill_id is not None:
-            messages = [m for m in messages
-                        if (m.context or {}).get("skill_id") == self.skill_id]
-            if self.verbose:
-                print(f"💡 filtered to skill_id='{self.skill_id}': {len(messages)} messages")
-        if self.pipeline_id is not None:
-            messages = [m for m in messages
-                        if (m.context or {}).get("pipeline_id") == self.pipeline_id]
-            if self.verbose:
-                print(f"💡 filtered to pipeline_id='{self.pipeline_id}': {len(messages)} messages")
+            # isolate a single dispatch lifecycle by skill_id — drop messages
+            # from a concurrent (interleaving) lifecycle so the assertion is
+            # deterministic.
+            if self.skill_id is not None:
+                messages = [m for m in messages
+                            if (m.context or {}).get("skill_id") == self.skill_id]
+                if self.verbose:
+                    print(f"💡 filtered to skill_id='{self.skill_id}': {len(messages)} messages")
+            if self.pipeline_id is not None:
+                messages = [m for m in messages
+                            if (m.context or {}).get("pipeline_id") == self.pipeline_id]
+                if self.verbose:
+                    print(f"💡 filtered to pipeline_id='{self.pipeline_id}': {len(messages)} messages")
+        finally:
+            if _bus_tracker is not None:
+                _bus_tracker.stop_tracking()
 
         if _bus_tracker is not None:
-            _bus_tracker.stop_tracking()
             all_responses = messages + list(getattr(capture, "async_responses", []))
             _bus_tracker.record_session(all_responses, self.expected_messages)
             self.bus_coverage_report = _bus_tracker.build_report()
@@ -1469,19 +1596,39 @@ class GUICaptureSession:
         """Stop capturing on context-manager exit."""
         self.stop()
 
-    def assert_page_shown(self, namespace: str, page: str, timeout: float = 2.0) -> None:
+    @staticmethod
+    def _ns_matches(expected: str, actual: str, exact: bool) -> bool:
+        """Compare a GUI namespace, exactly by default.
+
+        Substring matching cannot fail on a near-match: asserting namespace
+        ``"skill-weather"`` would pass on ``"skill-weather-extended"``, and
+        asserting ``"weather"`` would pass on any namespace containing it. Use
+        ``exact=False`` only when you deliberately want prefix behaviour.
+        """
+        if exact:
+            return expected == actual
+        return actual.startswith(expected)
+
+    def assert_page_shown(self, namespace: str, page: str, timeout: float = 2.0,
+                          exact: bool = True) -> None:
         """Assert that a GUI page was shown in the given namespace.
 
         Polls the captured messages for up to *timeout* seconds.
 
         Args:
             namespace: GUI namespace (typically the skill ID slug).
-            page: QML page filename (e.g. ``"hello.qml"``).
+            page: QML page filename (e.g. ``"hello.qml"``). Compared against
+                the basename of each shown page, so a directory prefix in the
+                message does not affect the result.
             timeout: Maximum seconds to wait.
+            exact: Compare namespace and page basename by equality (default).
+                Set ``False`` for prefix matching on the namespace and
+                substring matching on the page.
 
         Raises:
             AssertionError: If no matching ``gui.page.show`` message is found.
         """
+        import os
         import time
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -1493,7 +1640,13 @@ class GUICaptureSession:
                     pages = (msg.data.get("pages", [])
                              or msg.data.get("page_names", [])
                              or [msg.data.get("page", "")])
-                    if namespace in data_ns and any(page in str(p) for p in pages):
+                    if not self._ns_matches(namespace, data_ns, exact):
+                        continue
+                    if exact:
+                        hit = any(os.path.basename(str(p)) == page for p in pages)
+                    else:
+                        hit = any(page in str(p) for p in pages)
+                    if hit:
                         return
             time.sleep(0.05)
         captured = [(m.msg_type, m.data) for m in self.messages]
@@ -1504,7 +1657,8 @@ class GUICaptureSession:
 
     def assert_template_shown(self, namespace: str, template: str,
                               values: Optional[Dict[str, Any]] = None,
-                              timeout: float = 2.0) -> None:
+                              timeout: float = 2.0,
+                              exact: bool = True) -> None:
         """Assert that a built-in ``SYSTEM_*`` template was shown.
 
         Ergonomic helper for the template-based GUI: a skill calling a typed
@@ -1514,6 +1668,7 @@ class GUICaptureSession:
 
         Args:
             namespace: GUI namespace (typically the skill ID).
+            exact: Compare namespace and page name by equality (default).
             template: Template name, with or without the ``SYSTEM_`` prefix
                 (``"weather"`` and ``"SYSTEM_weather"`` are equivalent).
             values: Optional mapping of session-data keys to expected values;
@@ -1525,17 +1680,19 @@ class GUICaptureSession:
                 was not set.
         """
         name = template if template.startswith("SYSTEM_") else f"SYSTEM_{template}"
-        self.assert_page_shown(namespace, name, timeout=timeout)
+        self.assert_page_shown(namespace, name, timeout=timeout, exact=exact)
         for key, value in (values or {}).items():
-            self.assert_namespace_value(namespace, key, value)
+            self.assert_namespace_value(namespace, key, value, exact=exact)
 
-    def assert_namespace_value(self, namespace: str, key: str, value: Any) -> None:
+    def assert_namespace_value(self, namespace: str, key: str, value: Any,
+                               exact: bool = True) -> None:
         """Assert that a namespace key was set to a specific value.
 
         Args:
             namespace: GUI namespace to check.
             key: Data key within the namespace.
             value: Expected value.
+            exact: Compare the namespace by equality (default).
 
         Raises:
             AssertionError: If no matching ``gui.value.set`` message is found.
@@ -1545,7 +1702,7 @@ class GUICaptureSession:
                 data_ns = (msg.data.get("namespace", "")
                               or msg.data.get("__from", "")
                               or msg.context.get("skill_id", ""))
-                if namespace in data_ns:
+                if self._ns_matches(namespace, data_ns, exact):
                     data = msg.data.get("data", msg.data)
                     if data.get(key) == value:
                         return
@@ -1554,7 +1711,8 @@ class GUICaptureSession:
             f"Captured GUI messages: {[m.msg_type for m in self.messages]}"
         )
 
-    def assert_namespace_has_key(self, namespace: str, key: str) -> None:
+    def assert_namespace_has_key(self, namespace: str, key: str,
+                                 exact: bool = True) -> None:
         """Assert that a key was set in a namespace, regardless of value.
 
         Useful for dynamic data (e.g. weather API responses, timestamps)
@@ -1563,6 +1721,7 @@ class GUICaptureSession:
         Args:
             namespace: GUI namespace to check.
             key: Data key that should exist within the namespace.
+            exact: Compare the namespace by equality (default).
 
         Raises:
             AssertionError: If no matching message with the key is found.
@@ -1572,7 +1731,7 @@ class GUICaptureSession:
                 data_ns = (msg.data.get("namespace", "")
                               or msg.data.get("__from", "")
                               or msg.context.get("skill_id", ""))
-                if namespace in data_ns:
+                if self._ns_matches(namespace, data_ns, exact):
                     data = msg.data.get("data", msg.data)
                     if key in data:
                         return
@@ -1582,21 +1741,27 @@ class GUICaptureSession:
             f"Captured GUI messages: {[m.msg_type for m in self.messages]}"
         )
 
-    def assert_namespace_cleared(self, namespace: str) -> None:
+    def assert_namespace_cleared(self, namespace: str,
+                                 exact: bool = True) -> None:
         """Assert that a namespace was cleared/removed.
 
         Args:
             namespace: GUI namespace that should have been cleared.
+            exact: Compare the namespace by equality (default).
 
         Raises:
             AssertionError: If no matching namespace-clear message is found.
         """
+        # `gui.clear.namespace` is the topic the GUI service actually emits.
+        # Matching only "namespace.clear" / "namespace.remove" made this
+        # assertion impossible to satisfy on the real wire format.
+        clear_types = ("namespace.remove", "namespace.clear", "clear.namespace")
         for msg in self.messages:
-            if "namespace.remove" in msg.msg_type or "namespace.clear" in msg.msg_type:
+            if any(t in msg.msg_type for t in clear_types):
                 data_ns = (msg.data.get("namespace", "")
                               or msg.data.get("__from", "")
                               or msg.context.get("skill_id", ""))
-                if namespace in data_ns:
+                if self._ns_matches(namespace, data_ns, exact):
                     return
         raise AssertionError(
             f"Expected namespace {namespace!r} to be cleared, "

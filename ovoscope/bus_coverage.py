@@ -52,6 +52,7 @@ from typing import Any, Dict, List, Optional
 
 import ovoscope
 from ovos_bus_client.message import Message
+from ovos_utils.log import LOG
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +406,7 @@ class BusCoverageTracker:
         # skill_id -> {msg_type -> asserted_count}
         self._asserted: Dict[str, Dict[str, int]] = {}
         self._original_emit: Optional[Any] = None
+        self._patched_emit: Optional[Any] = None
         self._tracking: bool = False
 
     def _collector_delta(self) -> Dict[str, int]:
@@ -595,16 +597,30 @@ class BusCoverageTracker:
             original_emit(message)
 
         self._original_emit = original_emit
+        self._patched_emit = _patched_emit
         self._bus.emit = _patched_emit
         self._tracking = True
 
     def stop_tracking(self) -> None:
-        """Restore the original ``bus.emit`` and stop counting invocations."""
+        """Restore the original ``bus.emit`` and stop counting invocations.
+
+        Restores only when ``bus.emit`` is still THIS tracker's wrapper. If
+        another tracker wrapped the bus on top of ours, assigning our saved
+        original would silently discard that tracker's wrapper and leave it
+        counting nothing; leaving the chain alone is the lesser damage.
+        """
         if not self._tracking:
+            return
+        self._tracking = False
+        if self._bus.emit is not getattr(self, "_patched_emit", None):
+            LOG.warning("ovoscope: bus.emit was re-wrapped by another tracker; "
+                        "leaving it in place instead of clobbering it")
+            self._original_emit = None
+            self._patched_emit = None
             return
         self._bus.emit = self._original_emit
         self._original_emit = None
-        self._tracking = False
+        self._patched_emit = None
 
     def record_session(
         self,

@@ -1,24 +1,34 @@
-"""Unit tests for CaptureSession."""
+"""Unit tests for CaptureSession.
+
+CaptureSession only ever touches ``minicroft.bus``, so these tests drive a
+``SimpleNamespace(bus=FakeBus())`` stub instead of booting a real MiniCroft.
+A boot costs seconds and hundreds of MB of retained memory per test class,
+and buys nothing here.
+
+Race-condition coverage for the same class lives in
+``test_audit_round1.py::TestCaptureSessionRaces`` and
+``test_audit_round2.py::TestCaptureSessionArming``.
+"""
 import threading
 import unittest
+from types import SimpleNamespace
 
 from ovos_bus_client.message import Message
-from ovos_bus_client.session import Session
+from ovos_utils.fakebus import FakeBus
 from ovos_utils.log import LOG
 
-from ovoscope import CaptureSession, get_minicroft
+from ovoscope import CaptureSession
 
 
 class TestCaptureSession(unittest.TestCase):
-    """CaptureSession is tested by emitting directly on MiniCroft's FakeBus."""
+    """CaptureSession is tested by emitting directly on a stub FakeBus."""
 
     def setUp(self):
         LOG.set_level("ERROR")
-        # empty MiniCroft — we drive the bus manually
-        self.mc = get_minicroft([])
+        self.mc = SimpleNamespace(bus=FakeBus())
 
     def tearDown(self):
-        self.mc.stop()
+        self.mc.bus.close()
         LOG.set_level("CRITICAL")
 
     # ------------------------------------------------------------------

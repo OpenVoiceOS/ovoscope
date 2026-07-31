@@ -147,7 +147,7 @@ class TestCmdValidate:
     def test_valid_fixture_returns_0(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump({
-                "source_message": {"type": "x", "data": {}, "context": {}},
+                "source_message": [{"type": "x", "data": {}, "context": {}}],
                 "expected_messages": [],
             }, f)
             path = f.name

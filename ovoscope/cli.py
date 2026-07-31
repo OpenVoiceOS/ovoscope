@@ -251,10 +251,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
     all_ok = True
     for path in args.fixtures:
         try:
+            # Structural checks always run — pydantic validation is a
+            # per-message layer on top, not a replacement (validate_fixture
+            # skips sections that are absent entirely).
+            _basic_validate(path)
             if _PYDANTIC_AVAILABLE:
                 validate_fixture(path)
-            else:
-                _basic_validate(path)
             print(f"[validate] OK  {path}")
         except Exception as exc:
             print(f"[validate] FAIL  {path}: {exc}")

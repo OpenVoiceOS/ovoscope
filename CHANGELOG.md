@@ -1,38 +1,12 @@
 # Changelog
 
-## Unreleased
+## [1.6.3a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.3a1) (2026-07-31)
 
-**Han audit round 2 — fixes**
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.2a2...1.6.3a1)
 
-- `MiniCroft.stop()` restores `SkillApi.bus` and drops the listeners on its own
-  bus. The class attribute pinned every stopped harness (~633MB each), so a
-  suite that boots several MiniCrofts kept all of them in memory.
-- The `--ovoscope-accuracy-min` gate is computed in `pytest_sessionfinish`,
-  which runs BEFORE `pytest_terminal_summary`. The gate now changes the exit
-  status; before, it could never fail a CI run.
-- The bus-coverage tracker is unwrapped in a `finally`, so a failing test no
-  longer leaves `bus.emit` wrapped for the rest of the process.
-- `OCPPlayerHarness`, `PlaybackServiceHarness` and `PipelineHarness` unwind
-  their process-wide patches when `__enter__` fails part-way.
-- `ovoscope diff` rejects a file with no `expected_messages` instead of
-  reporting two unrelated files as identical. An expected `None` now differs
-  from an absent key.
-- The GUI assertions (`assert_page_shown`, `assert_namespace_value`,
-  `assert_namespace_has_key`, `assert_namespace_cleared`) compare namespaces
-  and page names by equality. Pass `exact=False` for the old prefix behaviour.
-  `assert_namespace_cleared` also matches the `gui.clear.namespace` topic the
-  GUI service really emits.
-- The mock-TTS emit and `stop()` are mutually exclusive, so an unduck can no
-  longer land on a closed bus.
-- `CaptureSession` counts an end-of-test message only inside a capture window.
-- The default-session snapshot and restore use one bus-client API family, and
-  `active_skills` is restored even when the snapshot failed.
-- Resilience sweep: the hotword-compat patch is scoped to a context manager;
-  wake-word latches are all read before reducing; a reference-STT failure is
-  logged and marked (`transcribe_failed`) instead of scoring 1.0 silently; a
-  failed `SKILL.md` download exits 1; the dinkum-listener import guard covers
-  only the import; `MiniVoiceLoop.shutdown()` detaches the capture handler;
-  media-provider calls run under a timeout (default 30s).
+**Merged pull requests:**
+
+- fix: Han audit round 2 — SkillApi retention, accuracy gate, false-green assertions, race windows [\#123](https://github.com/OpenVoiceOS/ovoscope/pull/123) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.6.2a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a2) (2026-07-31)
 

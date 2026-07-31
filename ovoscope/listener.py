@@ -333,6 +333,9 @@ class MiniListener:
                     return
             self._messages.append(msg)
 
+        # Kept on the instance so shutdown() can unsubscribe it — a capture
+        # handler left on a shared bus keeps feeding a dead harness.
+        self._capture = _capture
         self.bus.on("message", _capture)
 
         try:
@@ -675,14 +678,27 @@ class MiniListener:
     # ------------------------------------------------------------------
 
     def shutdown(self) -> None:
-        """Shut down all loaded transformer and wake-word plugins gracefully."""
-        if self.transformers is not None:
-            self.transformers.shutdown()
-        for engine in self._ww.values():
-            try:
-                engine.shutdown()
-            except Exception:
-                pass
+        """Shut down all loaded transformer and wake-word plugins gracefully.
+
+        Also detaches the wildcard ``"message"`` capture handler so a shared
+        bus stops feeding this harness after it is gone.
+        """
+        try:
+            if self.transformers is not None:
+                self.transformers.shutdown()
+            for engine in self._ww.values():
+                try:
+                    engine.shutdown()
+                except Exception:
+                    pass
+        finally:
+            capture = getattr(self, "_capture", None)
+            if capture is not None:
+                try:
+                    self.bus.remove("message", capture)
+                except Exception:
+                    pass
+                self._capture = None
 
 
 # ---------------------------------------------------------------------------

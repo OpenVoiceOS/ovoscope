@@ -184,6 +184,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         _die("MiniCroft did not reach READY state in time.")
 
     try:
+        # Hand the already-booted MiniCroft to the test. Without this,
+        # execute() boots a SECOND managed MiniCroft and both patch the same
+        # process-wide globals. `managed = False` keeps ownership here — the
+        # finally block below stops it.
+        test.minicroft = mc
+        test.managed = False
         test.execute(timeout=timeout)
         print("[run] PASS")
         return 0

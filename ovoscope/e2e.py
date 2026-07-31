@@ -73,20 +73,33 @@ def wait_for_match(
     expected_types: List[str],
     *,
     timeout: float = 5.0,
+    emit: Optional[Message] = None,
 ) -> Optional[Message]:
     """Subscribe to ``expected_types`` and ``complete_intent_failure``; return
     the first match Message, or ``None`` on failure / timeout.
 
-    The caller is responsible for emitting the utterance *after* calling this
-    helper if used in a pytest style — for the ``unittest`` style use
-    :meth:`E2EPipelineHarness.send_and_capture` which emits internally.
+    This helper BLOCKS, so a single-threaded caller cannot emit the utterance
+    after calling it. Pass the message as *emit* instead: it is emitted after
+    the handlers are subscribed, so no reply can be missed. Emit it yourself
+    beforehand only when the reply is guaranteed to be asynchronous.
+
+    Args:
+        bus: The bus to subscribe on.
+        expected_types: Message types that count as a match.
+        timeout: Seconds to wait for a verdict.
+        emit: Message emitted once the handlers are in place.
+
+    Returns:
+        The first matching :class:`Message`, or ``None``.
     """
     got: List[Message] = []
+    lock = threading.Lock()
     done = threading.Event()
     failed = threading.Event()
 
     def _on_match(msg: Message) -> None:
-        got.append(msg)
+        with lock:
+            got.append(msg)
         done.set()
 
     def _on_fail(_msg: Message) -> None:
@@ -97,14 +110,31 @@ def wait_for_match(
         bus.on(t, _on_match)
     bus.on("complete_intent_failure", _on_fail)
     try:
+        if emit is not None:
+            bus.emit(emit)
         done.wait(timeout=timeout)
     finally:
         for t in expected_types:
             bus.remove(t, _on_match)
         bus.remove("complete_intent_failure", _on_fail)
-    if failed.is_set() and not got:
+    return _first_match(got, failed, lock)
+
+
+def _first_match(got: List[Message], failed: threading.Event,
+                 lock: threading.Lock) -> Optional[Message]:
+    """Return the first captured match, tolerating a match/fail race.
+
+    ``failed`` can be observed set while a concurrent ``got.append`` is still
+    in flight, which used to drop a real match. Take the lock (the appender
+    holds it) and re-read once before giving up.
+    """
+    with lock:
+        if got:
+            return got[0]
+    if failed.is_set():
         return None
-    return got[0] if got else None
+    with lock:
+        return got[0] if got else None
 
 
 def wait_for_failure(bus, *, timeout: float = 2.0) -> bool:
@@ -301,31 +331,12 @@ class E2EPipelineHarness(unittest.TestCase):
         session: Optional[Session] = None,
     ) -> Optional[Message]:
         """Emit ``utterance`` and return the first match Message (or None)."""
-        got: List[Message] = []
-        done = threading.Event()
-        failed = threading.Event()
-
-        def _on_match(msg: Message) -> None:
-            got.append(msg)
-            done.set()
-
-        def _on_fail(_msg: Message) -> None:
-            failed.set()
-            done.set()
-
-        for t in expected_types:
-            self.bus.on(t, _on_match)
-        self.bus.on("complete_intent_failure", _on_fail)
-        try:
-            self.bus.emit(self.make_utterance(utterance, session=session))
-            done.wait(timeout=timeout)
-        finally:
-            for t in expected_types:
-                self.bus.remove(t, _on_match)
-            self.bus.remove("complete_intent_failure", _on_fail)
-        if failed.is_set() and not got:
-            return None
-        return got[0] if got else None
+        return wait_for_match(
+            self.bus,
+            expected_types,
+            timeout=timeout,
+            emit=self.make_utterance(utterance, session=session),
+        )
 
     def expect_no_match(
         self,

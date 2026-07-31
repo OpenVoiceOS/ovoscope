@@ -26,6 +26,9 @@ dependencies = [
     # dependency. >=8 is required: the pytest_pycollect_makemodule hook dropped the
     # 'path' argument in pytest 8.
     "pytest>=8",
+    # coverage.py validates pyproject.toml manifests; stdlib tomllib only
+    # exists on 3.11+, so 3.10 needs the backport for the same honesty.
+    "tomli>=2; python_version<'3.11'",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

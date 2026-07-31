@@ -310,11 +310,20 @@ class AudioServiceHarness:
         return self
 
     def __exit__(self, *args) -> None:
-        """Shut down AudioService and close the bus."""
-        if self.service:
-            self.service.shutdown()
-        if self.bus:
-            self.bus.close()
+        """Shut down AudioService and close the bus.
+
+        The bus is closed even when ``shutdown()`` raises — leaking an open
+        FakeBus keeps handlers alive and feeds a dead harness.
+        """
+        try:
+            if self.service:
+                self.service.shutdown()
+        finally:
+            if self.bus:
+                try:
+                    self.bus.close()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Control methods
@@ -557,6 +566,9 @@ class PlaybackServiceHarness:
             utterance is captured in :attr:`captured_wavs`.
     """
 
+    # Only one harness may hold the process-wide ``TTS.queue`` at a time.
+    _active: ClassVar[Optional["PlaybackServiceHarness"]] = None
+
     def __init__(self, validate_source: bool = False,
                  disable_ocp: bool = True,
                  tts: Optional[TTS] = None,
@@ -588,6 +600,9 @@ class PlaybackServiceHarness:
         self.mock_tts: Optional[TTS] = None
         # Paths captured from the ``play_audio`` side_effect, in playback order.
         self.captured_wavs: List[str] = []
+        # process-wide TTS.queue bookkeeping (see __enter__)
+        self._previous_tts_queue = None
+        self._replaced_tts_queue: bool = False
         self._play_audio_patcher = None
         self._audio_enabled_patcher = None
         self._audio_output_start = threading.Event()
@@ -603,6 +618,17 @@ class PlaybackServiceHarness:
         from ovos_audio.service import PlaybackService
         from queue import Queue
 
+        # ``TTS.queue`` is process-wide CLASS state, so only ONE
+        # PlaybackServiceHarness may be active at a time — two live harnesses
+        # would fight over the same queue and steal each other's utterances.
+        # Refuse to start rather than corrupt both.
+        if PlaybackServiceHarness._active is not None:
+            raise RuntimeError(
+                "Another PlaybackServiceHarness is already active. "
+                "TTS.queue is process-wide class state, so only one harness "
+                "may run at a time — exit the current one first."
+            )
+
         # Drain any leftover TTS queue from previous tests (class-level state)
         if TTS.queue is not None:
             while not TTS.queue.empty():
@@ -610,7 +636,11 @@ class PlaybackServiceHarness:
                     TTS.queue.get_nowait()
                 except Exception:
                     break
+        # Remember the previous queue object so __exit__ can put it back.
+        self._previous_tts_queue = TTS.queue
+        self._replaced_tts_queue = True
         TTS.queue = Queue()
+        PlaybackServiceHarness._active = self
 
         self.bus = FakeBus(modernize=self.modernize,
                            emit_legacy=self.emit_legacy)
@@ -663,27 +693,39 @@ class PlaybackServiceHarness:
                     pass
             self._play_audio_patcher.stop()
             self.bus.close()
+            self._release_tts_queue()
             raise
 
         return self
 
+    def _release_tts_queue(self) -> None:
+        """Restore the ``TTS.queue`` object this harness replaced."""
+        if getattr(self, "_replaced_tts_queue", False):
+            TTS.queue = self._previous_tts_queue
+            self._replaced_tts_queue = False
+        if PlaybackServiceHarness._active is self:
+            PlaybackServiceHarness._active = None
+
     def __exit__(self, *args) -> None:
-        """Shut down PlaybackService and stop patches."""
-        if self.svc:
-            try:
-                self.svc.shutdown()
-            except Exception:
-                pass
-        if self._play_audio_patcher:
-            try:
-                self._play_audio_patcher.stop()
-            except Exception:
-                pass
-        if self.bus:
-            try:
-                self.bus.close()
-            except Exception:
-                pass
+        """Shut down PlaybackService, stop patches, release the TTS queue."""
+        try:
+            if self.svc:
+                try:
+                    self.svc.shutdown()
+                except Exception:
+                    pass
+            if self._play_audio_patcher:
+                try:
+                    self._play_audio_patcher.stop()
+                except Exception:
+                    pass
+            if self.bus:
+                try:
+                    self.bus.close()
+                except Exception:
+                    pass
+        finally:
+            self._release_tts_queue()
     # ------------------------------------------------------------------
     # Control methods
     # ------------------------------------------------------------------

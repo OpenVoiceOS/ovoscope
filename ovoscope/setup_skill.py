@@ -58,19 +58,25 @@ _SKILL_MD_URL = f"{GITHUB_RAW_BASE}/SKILL.md"
 #: Docs files to download into ``assets/docs/``.
 _DOCS_FILES = [
     "docs/audio-testing.md",
+    "docs/bus-coverage.md",
     "docs/capture-session.md",
     "docs/ci-integration.md",
     "docs/cli.md",
+    "docs/e2e-pipeline-harness.md",
     "docs/end2end-test.md",
     "docs/gui-testing.md",
     "docs/index.md",
+    "docs/intent-cases.md",
     "docs/listener.md",
+    "docs/media-provider-testing.md",
+    "docs/media-testing.md",
     "docs/minicroft.md",
     "docs/ocp.md",
     "docs/phal.md",
     "docs/pipeline.md",
     "docs/pydantic-integration.md",
     "docs/usage-guide.md",
+    "docs/voice-loop.md",
 ]
 
 #: Root-level files to download into ``assets/``.

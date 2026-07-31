@@ -179,6 +179,10 @@ def validate_fixture(path: Union[str, Path]) -> "SerializedTest":
 
     for section in ("source_message", "expected_messages"):
         msgs = data.get(section, [])  # type: ignore[union-attr]
+        if isinstance(msgs, dict):
+            # legacy fixtures stored a single message object here; the
+            # current schema (End2EndTest.serialize) always writes a list
+            msgs = [msgs]
         for i, raw in enumerate(msgs):
             # Fixtures use the Message.serialize() "type" key; pydantic models
             # expect "message_type".  Accept either form.  Use None (not "")

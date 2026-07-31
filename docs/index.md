@@ -8,6 +8,8 @@
 | [minicroft.md](minicroft.md) | `MiniCroft` — in-process skill runtime |
 | [capture-session.md](capture-session.md) | `CaptureSession` — message capture during a test |
 | [end2end-test.md](end2end-test.md) | `End2EndTest` — full test runner reference |
+| [e2e-pipeline-harness.md](e2e-pipeline-harness.md) | `E2EPipelineHarness`, `wait_for_match`, `make_utterance_message` — testing a single pipeline plugin (Adapt/Padatious/…) against raw bus messages |
+| [intent-cases.md](intent-cases.md) | `IntentCase`, `register_intent_case_tests` — file-based intent test cases (`.intent.test`) with per-pipeline-family generated tests |
 | [pydantic-integration.md](pydantic-integration.md) | Using `ovos-pydantic-models` with OvoScope |
 | [audio-testing.md](audio-testing.md) | `AudioServiceHarness`, `PlaybackServiceHarness` — testing audio services |
 | [media-testing.md](media-testing.md) | `OCPPlayerHarness`, `OCPCaptureSession`, `MockOCPBackend` — testing the `ovos-media` OCP player (and driving a real OCP backend) |
@@ -157,7 +159,7 @@ with MiniVoiceLoop(ww_instances={"hey_mycroft": ww},
 
 ## What OvoScope Does NOT Do
 - Does not start a real WebSocket MessageBus server — uses `FakeBus` (in-process pub/sub).
-- Does not load PHAL plugins or the audio service — only skills and the intent pipeline.
+- `MiniCroft` / `End2EndTest` — the harness this page documents — does not load PHAL plugins or the audio service; it only loads skills and the intent pipeline. PHAL plugins and audio services have their own dedicated harnesses: [phal.md](phal.md) (`MiniPHAL`, `PHALTest`) and [audio-testing.md](audio-testing.md) (`AudioServiceHarness`, `PlaybackServiceHarness`).
 - Does not test GUI rendering — GUI namespace messages are ignored by default (`ignore_gui=True`).
 - Does not test TTS — operates at the `recognizer_loop:utterance` level (see [audio-testing.md](audio-testing.md) for TTS lifecycle testing).
 - `MiniListener` covers `AudioTransformersService`, the STT pipeline, and mock VAD/WakeWord engines. `MiniVoiceLoop` / `MiniSimpleListener` / `MiniClassicListener` drive the dinkum, simple, and classic listener **services** from an audio file and capture the `recognizer_loop:*` bus sequence; the classic file drive is best-effort (energy-based pipeline).

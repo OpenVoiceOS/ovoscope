@@ -71,6 +71,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ovos_bus_client.message import Message
 from ovos_utils.fakebus import FakeBus
+from ovos_utils.log import LOG
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +105,13 @@ def _wav_to_audio_data(audio: Union[bytes, str, Path],
             sample_rate = wf.getframerate()
             sample_width = wf.getsampwidth()
             frame_data = wf.readframes(wf.getnframes())
-    except Exception:
+    except Exception as exc:
+        # Not a WAV container — treat the bytes as raw PCM at the caller's
+        # sample rate. Say so: a truncated or corrupt WAV lands here too, and
+        # silently reinterpreting its header bytes as audio produces garbage
+        # that is very hard to trace back to this line.
+        LOG.debug(f"ovoscope: could not parse audio as WAV ({exc}); "
+                  f"treating the bytes as raw PCM")
         frame_data = audio
 
     return AudioData(frame_data, sample_rate, sample_width)
@@ -338,14 +345,17 @@ class MiniListener:
         self._capture = _capture
         self.bus.on("message", _capture)
 
+        # Narrow the guard to the IMPORT: a constructor failure is a real bug
+        # in AudioTransformersService (or in the config passed to it) and must
+        # propagate, not masquerade as "ovos-dinkum-listener is not installed".
         try:
             from ovos_dinkum_listener.transformers import AudioTransformersService
-
-            self.transformers: Optional[Any] = AudioTransformersService(
-                self.bus, config
-            )
         except ImportError:
-            self.transformers = None
+            AudioTransformersService = None
+        if AudioTransformersService is None:
+            self.transformers: Optional[Any] = None
+        else:
+            self.transformers = AudioTransformersService(self.bus, config)
 
         if plugin_instances:
             if self.transformers is None:
@@ -612,7 +622,12 @@ class MiniListener:
         for engine in engines.values():
             engine.update(chunk)
 
-        return any(e.found_wake_word() for e in engines.values())
+        # Materialise every result BEFORE reducing: found_wake_word() is a
+        # destructive read on most engines (it consumes the latch), so the
+        # short-circuit in any() would leave later engines still latched and
+        # make the NEXT call report a stale detection.
+        results = [e.found_wake_word() for e in engines.values()]
+        return any(results)
 
     def scan_for_wakeword(
         self,
@@ -668,7 +683,10 @@ class MiniListener:
         for idx, frame in enumerate(frames):
             for engine in engines.values():
                 engine.update(frame)
-            if any(e.found_wake_word() for e in engines.values()):
+            # Read every engine's latch (destructive) before reducing — see
+            # feed_chunk above.
+            results = [e.found_wake_word() for e in engines.values()]
+            if any(results):
                 return True, idx
 
         return False, None

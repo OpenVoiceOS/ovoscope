@@ -947,9 +947,17 @@ class MiniVoiceLoop(ListenerHarness):
     # ------------------------------------------------------------------
 
     def shutdown(self) -> None:
-        """Shut down the hotword container and wrapped engines."""
-        if self.hotwords is not None:
-            self.hotwords.shutdown()
+        """Shut down the hotword container and detach the bus capture handler.
+
+        Callers that use the harness without the context manager only ever
+        call shutdown(); if that does not detach the capture handler, the dead
+        harness keeps collecting every message on a shared bus.
+        """
+        try:
+            if self.hotwords is not None:
+                self.hotwords.shutdown()
+        finally:
+            self.detach_capture()
 
 
 # ---------------------------------------------------------------------------

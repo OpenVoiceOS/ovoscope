@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import inspect
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -47,18 +48,26 @@ class WakeWordDetection:
     frames_to_detection: Optional[int]  # frames streamed before the latch fired
 
 
-def apply_hotword_compat() -> None:
-    """Let hotword plugins written for a newer plugin-manager load here.
+@contextmanager
+def hotword_compat():
+    """Widen ``HotWordEngine.__init__`` for the duration of the block.
 
     Recent wake-word plugins call ``super().__init__(key_phrase, config, lang)``;
     older ``HotWordEngine`` bases accept only ``(key_phrase, config)``. Widen the
-    base signature to ignore the extra argument. A no-op when the installed base
-    already accepts ``lang``.
+    base signature to ignore the extra argument, then put the original back.
+
+    The patch is on a process-wide base class, so it MUST NOT outlive the
+    engine construction it exists for: leaving it installed changes how every
+    later hotword plugin in the process is constructed — including code under
+    test that is supposed to see the real signature.
+
+    A no-op when the installed base already accepts ``lang``.
     """
     from ovos_plugin_manager.templates import hotwords as hw
 
     base = hw.HotWordEngine
     if "lang" in inspect.signature(base.__init__).parameters:
+        yield
         return
     _orig = base.__init__
 
@@ -67,6 +76,10 @@ def apply_hotword_compat() -> None:
         _orig(self, key_phrase, config)
 
     base.__init__ = _compat
+    try:
+        yield
+    finally:
+        base.__init__ = _orig
 
 
 def load_hotword_engine(plugin_id: str, key_phrase: str = "hey_mycroft",
@@ -79,13 +92,13 @@ def load_hotword_engine(plugin_id: str, key_phrase: str = "hey_mycroft",
     """
     from ovos_plugin_manager.wakewords import load_wake_word_plugin
 
-    apply_hotword_compat()
-    clazz = load_wake_word_plugin(plugin_id)
-    if clazz is None and "-" in plugin_id:
-        clazz = load_wake_word_plugin(plugin_id.replace("-", "_"))
-    if clazz is None:
-        raise ValueError(f"no wake-word plugin {plugin_id!r}")
-    return clazz(key_phrase, dict(config or {}), lang)
+    with hotword_compat():
+        clazz = load_wake_word_plugin(plugin_id)
+        if clazz is None and "-" in plugin_id:
+            clazz = load_wake_word_plugin(plugin_id.replace("-", "_"))
+        if clazz is None:
+            raise ValueError(f"no wake-word plugin {plugin_id!r}")
+        return clazz(key_phrase, dict(config or {}), lang)
 
 
 class WakeWordProbe:

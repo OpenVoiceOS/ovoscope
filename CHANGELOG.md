@@ -1,13 +1,5 @@
 # Changelog
 
-## [1.6.2a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a2) (2026-07-31)
-
-[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.2a1...1.6.2a2)
-
-**Merged pull requests:**
-
-- docs: close the documentation audit gaps \(Han audit round 1\) [\#121](https://github.com/OpenVoiceOS/ovoscope/pull/121) ([JarbasAl](https://github.com/JarbasAl))
-
 ## Unreleased
 
 **Han audit round 2 — fixes**
@@ -41,6 +33,14 @@
   failed `SKILL.md` download exits 1; the dinkum-listener import guard covers
   only the import; `MiniVoiceLoop.shutdown()` detaches the capture handler;
   media-provider calls run under a timeout (default 30s).
+
+## [1.6.2a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a2) (2026-07-31)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.2a1...1.6.2a2)
+
+**Merged pull requests:**
+
+- docs: close the documentation audit gaps \(Han audit round 1\) [\#121](https://github.com/OpenVoiceOS/ovoscope/pull/121) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.6.2a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a1) (2026-07-31)
 

@@ -431,5 +431,45 @@ class TestMiniCroftNamespaceBridging(unittest.TestCase):
             mc.stop()
 
 
+class TestSkillManagerKwargCompat(unittest.TestCase):
+    """The latest ovoscope must boot against older ovos-core SkillManager
+    releases that predate newer ``enable_*`` keyword arguments (the stable
+    release channel ships ovos-core 1.3.x, whose SkillManager has no
+    ``enable_installer``). MiniCroft must forward only the flags the installed
+    SkillManager actually accepts instead of raising TypeError and failing to
+    boot."""
+
+    def test_unsupported_enable_kwargs_are_dropped(self):
+        import ovoscope
+        from unittest.mock import patch
+
+        captured = {}
+
+        class _Reached(Exception):
+            """Raised from the fake old __init__ once kwarg filtering passed."""
+
+        # Simulate an OLD SkillManager whose signature lacks enable_installer,
+        # enable_file_watcher, enable_intent_service and enable_event_scheduler.
+        def old_init(self, bus=None, enable_skill_api=True):
+            captured["bus"] = bus
+            captured["enable_skill_api"] = enable_skill_api
+            raise _Reached
+
+        with patch.object(ovoscope.SkillManager, "__init__", old_init):
+            # If filtering failed, old_init would get enable_installer=... and
+            # raise TypeError *before its body* -> captured stays empty.
+            try:
+                MiniCroft([SKILL_ID])
+            except Exception:
+                pass
+
+        self.assertTrue(
+            captured,
+            "SkillManager.__init__ was never reached: an unsupported kwarg "
+            "was forwarded, so the latest ovoscope cannot boot on older core")
+        self.assertTrue(captured["enable_skill_api"],
+                        "a supported enable_* flag must still be forwarded")
+
+
 if __name__ == "__main__":
     unittest.main()

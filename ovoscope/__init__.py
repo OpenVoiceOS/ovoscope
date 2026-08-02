@@ -1,3 +1,4 @@
+import inspect
 import dataclasses
 import json
 import threading
@@ -502,13 +503,35 @@ class MiniCroft(SkillManager):
         self.skill_ids = skill_ids
         self.extra_skills = extra_skills or {}
 
+        # Older ovos-core SkillManager releases (e.g. the stable release
+        # channel's 1.3.x) predate some of these keyword arguments. Passing an
+        # unknown kwarg to them raises TypeError and MiniCroft cannot boot,
+        # which makes the latest ovoscope unusable against an older core (the
+        # conformance harness exercises exactly this against pinned stable /
+        # testing stacks). Forward only the enable_* flags the *installed*
+        # SkillManager actually accepts, so one ovoscope boots on every core.
+        _enable_flags = {
+            "enable_installer": enable_installer,
+            "enable_skill_api": enable_skill_api,
+            "enable_file_watcher": enable_file_watcher,
+            "enable_intent_service": enable_intent_service,
+            "enable_event_scheduler": enable_event_scheduler,
+        }
         try:
-            super().__init__(bus, enable_installer=enable_installer,
-                             enable_skill_api=enable_skill_api,
-                             enable_file_watcher=enable_file_watcher,
-                             enable_intent_service=enable_intent_service,
-                             enable_event_scheduler=enable_event_scheduler,
-                             *args, **kwargs)
+            _accepted = inspect.signature(SkillManager.__init__).parameters
+        except (ValueError, TypeError):
+            _accepted = {}
+        _has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD
+                          for p in _accepted.values())
+        _supported = {k: v for k, v in _enable_flags.items()
+                      if _has_var_kw or k in _accepted}
+        _dropped = [k for k in _enable_flags if k not in _supported]
+        if _dropped:
+            LOG.debug(f"installed SkillManager does not accept {_dropped}; "
+                      f"omitting for backwards compatibility")
+
+        try:
+            super().__init__(bus, *args, **_supported, **kwargs)
         except Exception:
             # If super().__init__ fails (e.g. plugin construction error),
             # ensure global Configuration() is restored.

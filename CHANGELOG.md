@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.6a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.6a1) (2026-08-11)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.5a1...1.6.6a1)
+
+**Merged pull requests:**
+
+- fix: drain pyee listeners before teardown to avoid reentrant-\_\_del\_\_ deadlock [\#132](https://github.com/OpenVoiceOS/ovoscope/pull/132) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.5a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.5a1) (2026-08-11)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.4a1...1.6.5a1)

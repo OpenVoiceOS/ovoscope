@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.5a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.5a1) (2026-08-11)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.4a1...1.6.5a1)
+
+**Merged pull requests:**
+
+- fix: resolve unbounded get\_response\(\) hang on FakeBus [\#130](https://github.com/OpenVoiceOS/ovoscope/pull/130) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.4a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.4a1) (2026-08-02)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.3a2...1.6.4a1)

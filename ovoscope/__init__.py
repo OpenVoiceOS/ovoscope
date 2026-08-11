@@ -306,6 +306,7 @@ class MiniCroft(SkillManager):
                  pipeline_config: Optional[Dict[str, Dict]] = None,
                  modernize: bool = True,
                  emit_legacy: bool = True,
+                 get_response_timeout: float = 2.0,
                  *args, **kwargs):
         # Namespace-migration flags forwarded to the harness FakeBus so callers
         # can choose which bus namespace(s) to exercise:
@@ -379,6 +380,28 @@ class MiniCroft(SkillManager):
         # test. Track them so stop() can cancel them.
         self._tts_timers: List[threading.Timer] = []
         self._tts_timers_lock = threading.Lock()
+
+        # get_response()/ask_yesno() spawn a killable background thread
+        # (OVOSSkill._real_wait_response) and the calling thread busy-polls
+        # for its result. With `num_retries=-1` (the OVOSSkill default) that
+        # thread re-prompts and waits forever if nothing ever answers it —
+        # there is no ceiling on the calling thread's wait either. On a real
+        # voice satellite this eventually gets a `mycroft.skills.abort_question`
+        # from the listener/GUI on user silence or session teardown; the
+        # synchronous FakeBus never generates one. Track the pending
+        # "wait for an answer" timers here so stop() can cancel them the same
+        # way it cancels the mock-TTS ones.
+        # Keyed by (skill_id, session_id) — the SAME two-part scope upstream's
+        # own @killable_event("mycroft.skills.abort_question",
+        # check_skill_id=True) uses to decide which stalled thread an abort
+        # is actually for (session_id match + optional skill_id match). A
+        # flat list here would let one skill's `.disable` cancel a DIFFERENT
+        # skill's (or a different concurrent session's) still-pending
+        # watchdog, leaving it to hang forever again in a multi-skill
+        # MiniCroft where two get_response() calls are in flight at once.
+        self._get_response_timeout = get_response_timeout
+        self._get_response_timers: Dict[tuple, threading.Timer] = {}
+        self._get_response_timers_lock = threading.Lock()
         # Guards the `_stopped` flag against the mock-TTS emits. A plain
         # `if not self._stopped: bus.emit(...)` is a TOCTOU: stop() can flip the
         # flag and close the bus between the check and the emit, so the emit
@@ -499,6 +522,68 @@ class MiniCroft(SkillManager):
             timer.start()
 
         bus.on(SpecMessage.SPEAK, _mock_tts)
+
+        # get_response()/ask_yesno() mock: OVOSSkill.get_response() emits
+        # "skill.converse.get_response.enable" and then blocks the calling
+        # thread until a "<skill_id>.converse.get_response" answer arrives or
+        # the killable thread is aborted via "mycroft.skills.abort_question".
+        # If a test doesn't inject a follow-up utterance, nothing ever answers
+        # it and (with the OVOSSkill default `num_retries=-1`) the skill
+        # re-prompts and waits forever. Arm a short watchdog on `.enable`
+        # that fires the SAME "mycroft.skills.abort_question" a real listener
+        # would send on user silence — this is existing bus-protocol, not a
+        # new message type. "`.disable" (emitted once get_response() actually
+        # returns, whether answered or cancelled) cancels the watchdog.
+        def _arm_get_response_watchdog(message):
+            with self._stop_lock:
+                if self._stopped:
+                    return
+                skill_id = message.data.get("skill_id")
+                session_id = SessionManager.get(message).session_id
+                key = (skill_id, session_id)
+
+                def _abort():
+                    with self._stop_lock:
+                        if self._stopped:
+                            return
+                        with self._get_response_timers_lock:
+                            # Already disarmed (answered/cancelled) between
+                            # the Timer firing and this lock — nothing to do.
+                            if self._get_response_timers.get(key) is not timer:
+                                return
+                            del self._get_response_timers[key]
+                        bus.emit(message.forward("mycroft.skills.abort_question",
+                                                 {"skill_id": skill_id}))
+
+                timer = threading.Timer(self._get_response_timeout, _abort)
+                timer.daemon = True
+                with self._get_response_timers_lock:
+                    old = self._get_response_timers.get(key)
+                    if old is not None and old.is_alive():
+                        old.cancel()
+                    self._get_response_timers[key] = timer
+                timer.start()
+
+        def _disarm_get_response_watchdog(message):
+            # This ONE get_response() call returned (answered, cancelled,
+            # retries exhausted, or already aborted by our own watchdog) —
+            # cancel only ITS entry. Other (skill_id, session_id) pairs with
+            # their own in-flight get_response() must keep their watchdog
+            # armed (this is exactly what the flat-list version got wrong:
+            # any skill's `.disable` cancelled every pending watchdog).
+            skill_id = message.data.get("skill_id")
+            session_id = SessionManager.get(message).session_id
+            key = (skill_id, session_id)
+            with self._get_response_timers_lock:
+                timer = self._get_response_timers.pop(key, None)
+            if timer is not None:
+                try:
+                    timer.cancel()
+                except Exception:
+                    pass
+
+        bus.on("skill.converse.get_response.enable", _arm_get_response_watchdog)
+        bus.on("skill.converse.get_response.disable", _disarm_get_response_watchdog)
 
         self.skill_ids = skill_ids
         self.extra_skills = extra_skills or {}
@@ -679,6 +764,10 @@ class MiniCroft(SkillManager):
             # "default" session onto the process-wide SessionManager).
             with self._tts_timers_lock:
                 timers, self._tts_timers = self._tts_timers, []
+            with self._get_response_timers_lock:
+                gr_timers = list(self._get_response_timers.values())
+                self._get_response_timers = {}
+        timers = timers + gr_timers
         for t in timers:
             try:
                 t.cancel()

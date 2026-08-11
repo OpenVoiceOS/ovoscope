@@ -1,5 +1,6 @@
 import inspect
 import dataclasses
+import gc
 import json
 import threading
 from copy import deepcopy
@@ -783,6 +784,32 @@ class MiniCroft(SkillManager):
         except Exception:
             pass
         if hasattr(self, "bus") and self.bus:
+            try:
+                # pyee's EventEmitter.remove_all_listeners() holds its internal,
+                # non-reentrant lock while dropping self._events. The "defence
+                # in depth" block near the end of this method (below) calls
+                # exactly that, on this same bus's emitter, to release
+                # listener references. If dropping the last reference to a
+                # bound-method listener there runs that listener owner's
+                # __del__, and that __del__ calls bus.remove()/
+                # remove_listener(), the __del__ runs synchronously inside
+                # the locked block and deadlocks trying to re-acquire the
+                # same lock (30-minute CI hangs). Drain the listener dict
+                # ourselves here, outside the lock, and force any pending
+                # __del__ to run now instead, before that later call ever
+                # takes the lock -- by the time it runs, _events is already
+                # empty, so it is a safe no-op. Same workaround as the
+                # minicroft fixture in ovos-skill-application-launcher's
+                # test/end2end/test_intents_en_us.py (PR #108).
+                ee = getattr(self.bus, "ee", None)
+                if ee is not None:
+                    events = getattr(ee, "_events", None)
+                    if events is not None:
+                        for key in list(events.keys()):
+                            events.pop(key, None)
+                        gc.collect()
+            except Exception:
+                pass
             try:
                 self.bus.close()
             except Exception:

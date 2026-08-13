@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from ovos_bus_client.message import Message
 from ovos_bus_client.session import Session
@@ -84,7 +85,7 @@ def _make_custom(msg_type: str, data=None,
 _FAILURE_SEQ = [
     # message itself is index 0 (caller provides it)
     Message("mycroft.audio.play_sound", {"uri": "snd/error.mp3"}),
-    Message("complete_intent_failure", {}),
+    Message("ovos.intent.unmatched", {}),
     Message("ovos.utterance.handled", {}),
 ]
 
@@ -147,7 +148,7 @@ class TestExecuteReturnValue(unittest.TestCase):
         result = test.execute(timeout=10)
         types = [m.msg_type for m in result]
         self.assertIn("unittest.echo", types)
-        self.assertIn("speak", types)
+        self.assertIn("ovos.utterance.speak", types)
         self.assertIn("ovos.utterance.handled", types)
 
     def test_execute_result_length_matches_expected(self):
@@ -165,7 +166,7 @@ class TestExecuteReturnValue(unittest.TestCase):
             source_message=src,
             expected_messages=[
                 src,
-                Message("speak", {"utterance": "count test"}),
+                Message("ovos.utterance.speak", {"utterance": "count test"}),
                 Message("ovos.utterance.handled", {}),
             ],
             # filter out handler.start / handler.complete so count is 3
@@ -290,7 +291,7 @@ class TestAssertions(unittest.TestCase):
     def test_ignore_messages_excluded_from_captured_list(self):
         """Messages in ignore_messages do not appear in the captured sequence."""
         src = _make_custom("unittest.echo", {"text": "filter"})
-        # Add "speak" to ignored — only 2 messages remain: src + eof
+        # Add "ovos.utterance.speak" to ignored — only 2 messages remain: src + eof
         test = End2EndTest(
             minicroft=self.mc,
             skill_ids=[SKILL_ID],
@@ -299,7 +300,7 @@ class TestAssertions(unittest.TestCase):
                 src,
                 Message("ovos.utterance.handled", {}),
             ],
-            ignore_messages=["ovos.skills.settings_changed", "speak"]
+            ignore_messages=["ovos.skills.settings_changed", "ovos.utterance.speak"]
                             + HANDLER_LIFECYCLE,
             test_routing=False,
             test_active_skills=False,
@@ -332,7 +333,7 @@ class TestManagedLifecycle(unittest.TestCase):
             expected_messages=[
                 message,
                 Message("mycroft.audio.play_sound", {"uri": "snd/error.mp3"}),
-                Message("complete_intent_failure", {}),
+                Message("ovos.intent.unmatched", {}),
                 Message("ovos.utterance.handled", {}),
             ],
             flip_points=["recognizer_loop:utterance"],
@@ -391,6 +392,29 @@ class TestAssertSpoke(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self._spoke_test("correct text").assert_spoke("WRONG TEXT", timeout=10)
 
+    def test_assert_spoke_accepts_canonical_only_captured_stream(self):
+        """assert_spoke matches a captured stream that only carries the
+        canonical "ovos.utterance.speak" topic (post-workshop#425 producers).
+        """
+        test = self._spoke_test("canonical text")
+        captured = [
+            Message("ovos.utterance.speak",
+                    {"utterance": "canonical text", "lang": "en-US"}),
+        ]
+        with patch.object(End2EndTest, "execute", return_value=captured):
+            test.assert_spoke("canonical text", timeout=10)
+
+    def test_assert_spoke_accepts_legacy_only_captured_stream(self):
+        """assert_spoke matches a captured stream that only carries the
+        legacy "speak" topic (pre-spec producer vintage on the wire).
+        """
+        test = self._spoke_test("legacy text")
+        captured = [
+            Message("speak", {"utterance": "legacy text", "lang": "en-US"}),
+        ]
+        with patch.object(End2EndTest, "execute", return_value=captured):
+            test.assert_spoke("legacy text", timeout=10)
+
 
 # ---------------------------------------------------------------------------
 # Tests: serialization round-trip (serialize / deserialize / save / from_path)
@@ -418,7 +442,7 @@ class TestSerialization(unittest.TestCase):
             expected_messages=[
                 src,
                 Message("mycroft.audio.play_sound", {"uri": "snd/error.mp3"}),
-                Message("complete_intent_failure", {}),
+                Message("ovos.intent.unmatched", {}),
                 Message("ovos.utterance.handled", {}),
             ],
             flip_points=["recognizer_loop:utterance"],
@@ -510,11 +534,11 @@ class TestMultiTurn(unittest.TestCase):
             expected_messages=[
                 turn1,
                 Message("mycroft.audio.play_sound", {"uri": "snd/error.mp3"}),
-                Message("complete_intent_failure", {}),
+                Message("ovos.intent.unmatched", {}),
                 Message("ovos.utterance.handled", {}),
                 turn2,
                 Message("mycroft.audio.play_sound", {"uri": "snd/error.mp3"}),
-                Message("complete_intent_failure", {}),
+                Message("ovos.intent.unmatched", {}),
                 Message("ovos.utterance.handled", {}),
             ],
             flip_points=["recognizer_loop:utterance"],

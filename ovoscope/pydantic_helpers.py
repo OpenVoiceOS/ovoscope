@@ -85,7 +85,11 @@ def to_bus_message(pydantic_msg: "OpenVoiceOSMessage") -> Message:
         from ovos_pydantic_models import SpeakMessage, SpeakData
 
         bus_msg = to_bus_message(SpeakMessage(data=SpeakData(utterance="Hello!")))
-        assert bus_msg.msg_type == "speak"
+        # Accepts both the legacy "speak" and canonical "ovos.utterance.speak"
+        # spellings (producers emit canonical since workshop#425; captured
+        # streams from pre-spec producer vintages can still carry the legacy
+        # name).
+        assert bus_msg.msg_type in {"speak", "ovos.utterance.speak"}
         assert bus_msg.data["utterance"] == "Hello!"
     """
     _require_pydantic()

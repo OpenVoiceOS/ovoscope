@@ -212,6 +212,35 @@ class TestAssertions(unittest.TestCase):
         defaults.update(overrides)
         return defaults
 
+    def test_expected_messages_bare_string_raises_clear_type_error(self):
+        """A bare topic string in expected_messages (e.g. ["speak"]) must
+        raise a clear TypeError naming the mistake at construction time,
+        never an obscure AttributeError deep inside execute()'s assertion
+        loop. Message objects are, and have always been, the only accepted
+        shape for this field."""
+        src = _make_custom("unittest.echo", {"text": "string test"})
+        with self.assertRaises(TypeError):
+            End2EndTest(
+                minicroft=self.mc,
+                skill_ids=[SKILL_ID],
+                source_message=src,
+                expected_messages=["speak"],
+                **self._base_flags(),
+            )
+
+    def test_expected_boot_sequence_bare_string_raises_clear_type_error(self):
+        """Same guard applies to expected_boot_sequence."""
+        src = _make_custom("unittest.echo", {"text": "boot string test"})
+        with self.assertRaises(TypeError):
+            End2EndTest(
+                minicroft=self.mc,
+                skill_ids=[SKILL_ID],
+                source_message=src,
+                expected_messages=[],
+                expected_boot_sequence=["mycroft.ready"],
+                **self._base_flags(),
+            )
+
     def test_wrong_message_count_raises(self):
         """test_message_number=True raises AssertionError on count mismatch."""
         src = _make_custom("unittest.echo", {"text": "count"})

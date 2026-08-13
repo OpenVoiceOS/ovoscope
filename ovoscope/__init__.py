@@ -1216,6 +1216,27 @@ class End2EndTest:
         # would leave a single (non-iterable) Message and break later iteration.
         if not isinstance(self.source_message, list):
             self.source_message = [self.source_message]
+
+        # expected_messages (and expected_boot_sequence) must be Message
+        # objects: execute() reads .msg_type / .data / .context off every
+        # entry while walking the captured stream. A bare topic string (e.g.
+        # expected_messages=["speak"]) used to fail deep in that loop with an
+        # obscure AttributeError ('str' object has no attribute 'msg_type'/
+        # 'serialize') instead of naming the actual mistake at construction
+        # time. Message objects were the only shape this dataclass ever
+        # accepted (unchanged since the first commit) — fail fast and clearly
+        # instead.
+        for _field_name in ("expected_messages", "expected_boot_sequence"):
+            for _i, _m in enumerate(getattr(self, _field_name)):
+                if not isinstance(_m, Message):
+                    raise TypeError(
+                        f"❌ {_field_name}[{_i}] must be a Message instance, "
+                        f"got {type(_m).__name__}: {_m!r}. Bare topic strings "
+                        f"(e.g. expected_messages=[\"speak\"]) are not "
+                        f"supported — build a Message(topic, data, context) "
+                        f"for each expected entry."
+                    )
+
         if self.ignore_gui:
             # ensure we don't mutate a shared default list
             self.ignore_messages = list(self.ignore_messages)

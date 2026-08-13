@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.7a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.7a1) (2026-08-13)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.6a1...1.6.7a1)
+
+**Merged pull requests:**
+
+- fix: accept canonical spec topics in captured-stream assertions [\#136](https://github.com/OpenVoiceOS/ovoscope/pull/136) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.6a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.6a1) (2026-08-11)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.5a1...1.6.6a1)

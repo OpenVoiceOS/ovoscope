@@ -18,6 +18,7 @@ from ovos_utils.fakebus import FakeBus
 from ovos_utils.log import LOG
 from ovos_utils.process_utils import ProcessState
 from ovos_spec_tools import SpecMessage
+from ovos_spec_tools.messages import MIGRATION_MAP, SPEC_TO_LEGACY
 from ovos_workshop.skills.api import SkillApi
 from ovos_workshop.skills.ovos import OVOSSkill
 
@@ -1093,6 +1094,34 @@ class CaptureSession:
             pass
 
 
+def _topic_matches(msg_type: str, name: str) -> bool:
+    """True if ``msg_type`` is ``name`` under either its legacy or canonical spelling.
+
+    Producers emit canonical ``ovos.*`` spec topics since workshop#425, but
+    ovoscope's ``execute()`` captures every message via the bus catch-all
+    (faithfully to the real wire), so a pre-spec producer vintage in the
+    captured stream can still carry the legacy name instead. Assertions that
+    filter the captured stream by ``msg_type`` must therefore accept both
+    spellings.
+
+    The legacy<->canonical pairing is not hand-rolled here: it reuses the
+    same static maps ``ovos-bus-client``'s ``MessageBusClient`` and
+    ``ovos-utils``' ``FakeBus`` use for their dual-emit bridging (see
+    ``ovos_spec_tools.messages.NamespaceTranslator`` /
+    ``MIGRATION_MAP`` / ``SPEC_TO_LEGACY``), so the pairing can't drift out
+    of sync with the real bus behaviour.
+    """
+    if msg_type == name:
+        return True
+    canonical = MIGRATION_MAP.get(name)
+    if canonical is not None and msg_type == canonical.value:
+        return True
+    legacy = SPEC_TO_LEGACY.get(name)
+    if legacy is not None and msg_type == legacy:
+        return True
+    return False
+
+
 @dataclasses.dataclass()
 class End2EndTest:
     skill_ids: List[str]  # skill_ids to load during the test (from skill plugins)
@@ -1571,7 +1600,7 @@ class End2EndTest:
         speak_utterances = [
             m.data.get("utterance")
             for m in messages
-            if m.msg_type == "speak" and m.data.get("lang") == lang
+            if _topic_matches(m.msg_type, "speak") and m.data.get("lang") == lang
         ]
         assert text in speak_utterances, (
             f"❌ speak '{text}' (lang={lang}) not found. "

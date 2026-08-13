@@ -624,7 +624,7 @@ class TestVerboseOutput(unittest.TestCase):
             source_message=src,
             expected_messages=[
                 src,
-                Message("speak", {"utterance": "verbose"}),
+                Message("ovos.utterance.speak", {"utterance": "verbose"}),
                 Message("ovos.utterance.handled", {}),
             ],
             ignore_messages=DEFAULT_IGNORED + HANDLER_LIFECYCLE,

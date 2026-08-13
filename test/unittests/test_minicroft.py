@@ -1,6 +1,7 @@
 """Unit tests for MiniCroft and get_minicroft()."""
 import threading
 import unittest
+from unittest.mock import patch
 
 from ovos_bus_client.message import Message
 from ovos_spec_tools import SpecMessage
@@ -82,6 +83,18 @@ class TestGetMiniCroft(unittest.TestCase):
             self.assertIsInstance(mc, MiniCroft)
         finally:
             mc.stop()
+
+    def test_basedexception_during_boot_still_stops_croft(self):
+        """A BaseException (e.g. pytest-timeout's Failed, or a real
+        KeyboardInterrupt) raised while waiting for READY must still trigger
+        croft.stop() before propagating. Regression test for get_minicroft's
+        cleanup handler only catching `Exception`, which let BaseException
+        subclasses skip cleanup and leak the started MiniCroft process."""
+        with patch.object(MiniCroft, "start", side_effect=KeyboardInterrupt), \
+             patch.object(MiniCroft, "stop") as mock_stop:
+            with self.assertRaises(KeyboardInterrupt):
+                get_minicroft([])
+            mock_stop.assert_called_once()
 
 
 class TestMiniCroftSessionManagerBusRestore(unittest.TestCase):

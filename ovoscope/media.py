@@ -340,30 +340,12 @@ class OCPPlayerHarness:
         gui_mock = MagicMock()
         self.gui = gui_mock
 
-        # Patch Playlist so that Playlist("Search Results") doesn't try to
-        # add the string as a media entry.  The installed ovos_utils.ocp.Playlist
-        # treats all positional args as entries; we need a subclass that silently
-        # drops bare string args (which are titles, not entries) and still
-        # satisfies isinstance(x, Playlist) checks inside player.py.
-        from ovos_utils.ocp import Playlist as _RealPlaylist
-
-        class _TolerantPlaylist(_RealPlaylist):
-            """Playlist subclass that ignores bare string constructor args."""
-
-            def __init__(self, *args, **kwargs):
-                valid = [a for a in args if not isinstance(a, str)]
-                super().__init__(*valid, **kwargs)
-
         # Every mock.patch below is process-wide until stopped. If anything
         # after the first start() raises (a missing ovos_media attribute, a
         # backend constructor error), an unguarded exit would leave those
         # patches active for the rest of the process and silently corrupt
         # every later test. Unwind through __exit__ before propagating.
         try:
-            p_playlist = patch("ovos_media.player.Playlist", _TolerantPlaylist)
-            p_playlist.start()
-            self._patches.append(p_playlist)
-
             simple_targets = [
                 "ovos_media.player.AudioService",
                 "ovos_media.player.VideoService",

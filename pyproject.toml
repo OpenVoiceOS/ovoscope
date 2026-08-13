@@ -45,7 +45,7 @@ pydantic = ["ovos-pydantic-models>=0.1.0"]
 # ovos-spec-tools 0.10.0a1, so that is the real floor.
 audio = ["ovos-audio>=1.3.0a1", "ovos-spec-tools>=0.10.0a1"]
 # OCP / ovos-media player harnesses (ovoscope.media: OCPPlayerHarness, ...).
-media = ["ovos-media>=0.0.2a3"]
+media = ["ovos-media>=0.4.3a1"]
 # MiniListener plugin_instances path (feed_audio_stream) needs the dinkum
 # AudioTransformersService. >=0.7.2a1 is the first release that allows
 # ovos-bus-client 2.x (older pins cap it <2.0.0 and conflict with ovos-core).
@@ -64,7 +64,7 @@ tts = [
 ]
 dev = [
     "ovos-audio>=1.3.0a1",
-    "ovos-media>=0.0.2a3",
+    "ovos-media>=0.4.3a1",
     "ovos-dinkum-listener>=0.7.2a1",
     "ovos-pydantic-models>=0.1.0",
     "numpy",

@@ -31,8 +31,8 @@ Usage (one call, in a test module owned by the skill)
         globals(),
         skill_id="ovos-skill-personal.openvoiceos",
         handlers={
-            "WhoAreYou.intent": "PersonalSkill.handle_who_are_you_intent",
-            "WhatAreYou.intent": "PersonalSkill.handle_what_are_you_intent",
+            "WhoAreYou": "PersonalSkill.handle_who_are_you_intent",
+            "WhatAreYou": "PersonalSkill.handle_what_are_you_intent",
             # ...
         },
         cases_dir=Path(__file__).parent / "cases",
@@ -107,6 +107,17 @@ class IntentCase:
 # ---------------------------------------------------------------------------
 # Case-file discovery
 # ---------------------------------------------------------------------------
+def canonical_intent(name):
+    """Fold the legacy ``<file>.intent`` id onto the OVOS-INTENT-4 canonical
+    suffixless id. Matcher plugins (ovos-padatious >= 2.0) dealias at
+    registration, so engine matches carry the suffixless name; case files keep
+    the ``<Intent>.intent.test`` naming, and suffixed entries in
+    ``known_intents``/``handlers`` are accepted and folded the same way."""
+    if name and name.endswith(".intent"):
+        return name[:-len(".intent")]
+    return name
+
+
 def _read_lines(path: Path) -> List[str]:
     out: List[str] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -134,7 +145,8 @@ def load_intent_cases(cases_dir: Union[str, Path],
     base = Path(cases_dir)
     if not base.is_dir():
         return []
-    known = set(known_intents) if known_intents is not None else None
+    known = ({canonical_intent(i) for i in known_intents}
+             if known_intents is not None else None)
     cases: List[IntentCase] = []
     for lang_dir in sorted(base.iterdir()):
         if not lang_dir.is_dir() or lang_dir.name.startswith("_"):
@@ -144,7 +156,8 @@ def load_intent_cases(cases_dir: Union[str, Path],
             if case_file.name == "no_match.test":
                 expected: Optional[str] = None
             elif case_file.stem.endswith(".intent"):
-                expected = case_file.stem  # "<IntentName>.intent"
+                # engine matches are suffixless (OVOS-INTENT-4 canonical id)
+                expected = canonical_intent(case_file.stem)
                 if known is not None and expected not in known:
                     raise AssertionError(
                         f"{case_file} targets unknown intent "
@@ -215,6 +228,7 @@ def assert_intent_case(minicroft, skill_id: str, handlers: Dict[str, str],
             test_msg_context=False,
         )
     else:
+        handlers = {canonical_intent(k): v for k, v in handlers.items()}
         if case.intent not in handlers:
             raise AssertionError(
                 f"No handler mapping for intent {case.intent!r} "

@@ -33,8 +33,8 @@ register_intent_case_tests(
     globals(),
     skill_id="ovos-skill-personal.openvoiceos",
     handlers={
-        "WhoAreYou.intent": "PersonalSkill.handle_who_are_you_intent",
-        "WhatAreYou.intent": "PersonalSkill.handle_what_are_you_intent",
+        "WhoAreYou": "PersonalSkill.handle_who_are_you_intent",
+        "WhatAreYou": "PersonalSkill.handle_what_are_you_intent",
     },
     cases_dir=Path(__file__).parent / "cases",
 )
@@ -58,12 +58,12 @@ Frozen dataclass: a single expectation — `utterance` in `lang` should match
 |---|---|---|
 | `lang` | `str` | Language directory the case came from. |
 | `utterance` | `str` | The utterance text. |
-| `intent` | `Optional[str]` | Expected `"<IntentName>.intent"`, or `None` to assert the utterance falls through to `complete_intent_failure`. |
+| `intent` | `Optional[str]` | Expected canonical intent name (`"<IntentName>"`, the `.intent` suffix is folded off), or `None` to assert the utterance falls through to `complete_intent_failure`. |
 | `source` | `Path` | The `.test` file the case was read from. |
 
 ## `load_intent_cases(cases_dir, known_intents=None) -> List[IntentCase]`
 Discover every `IntentCase` under `cases_dir`. Returns `[]` if `cases_dir`
-does not exist. If `known_intents` is given, every `<Intent>.intent`
+does not exist. If `known_intents` is given, every discovered intent name (suffix folded)
 filename found is validated against it — a typo raises `AssertionError`
 instead of being silently skipped.
 

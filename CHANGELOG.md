@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.9a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.9a1) (2026-08-15)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.8a1...1.6.9a1)
+
+**Merged pull requests:**
+
+- fix: assert canonical suffixless intent ids in intent\_cases [\#140](https://github.com/OpenVoiceOS/ovoscope/pull/140) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.8a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.8a1) (2026-08-13)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.7a1...1.6.8a1)

@@ -360,3 +360,29 @@ class TestOCPHarnessNamespaceBridging:
             h.bus.emit(Message(str(SpecMessage.LISTENER_RECORD_STARTED)))
             time.sleep(0.2)  # give any (incorrect) bridge a chance to fire
             h.assert_player_state(PlayerState.PLAYING)
+
+
+@pytest.mark.skipif(not _HAS_OVOS_MEDIA,
+                    reason="requires the [media] extra (ovos-media)")
+class TestOCPHarnessDuckUnduckEmitsSpecTopics:
+    """``duck()``/``unduck()`` simulate what the real ``ovos-audio`` service
+    emits on speech begin/end — the spec topics ``ovos.audio.output.started``/
+    ``ended`` — not the legacy ``recognizer_loop:audio_output_*`` aliases.
+
+    Bridging is turned off here (``modernize=False, emit_legacy=False``) so
+    the assertion pins the topic the *producer* actually emits, rather than
+    one FakeBus synthesizes from the other namespace."""
+
+    def test_duck_emits_spec_topic(self) -> None:
+        with OCPPlayerHarness(modernize=False, emit_legacy=False) as h:
+            seen = []
+            h.bus.on("ovos.audio.output.started", lambda m: seen.append(m))
+            h.duck()
+            assert seen, "duck() did not emit ovos.audio.output.started"
+
+    def test_unduck_emits_spec_topic(self) -> None:
+        with OCPPlayerHarness(modernize=False, emit_legacy=False) as h:
+            seen = []
+            h.bus.on("ovos.audio.output.ended", lambda m: seen.append(m))
+            h.unduck()
+            assert seen, "unduck() did not emit ovos.audio.output.ended"

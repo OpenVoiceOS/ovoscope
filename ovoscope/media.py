@@ -293,10 +293,14 @@ class OCPPlayerHarness:
                 bridge lets a spec-namespace producer's ovos.audio.output.* /
                 ovos.listener.record.* reach those legacy handlers.
             emit_legacy: FakeBus also emits the legacy topic when an ovos.* spec
-                topic is emitted (spec producer -> legacy listener). Because the
-                player subscribes on the legacy topics, this is the bridge that
-                connects a spec producer to the player. Set both False to exercise
-                a single namespace with no bridging.
+                topic is emitted (spec producer -> legacy listener). This is the
+                bridge that connects a spec producer to a player build that
+                binds only the legacy topics — including
+                :meth:`OCPPlayerHarness.duck`/:meth:`~OCPPlayerHarness.unduck`,
+                which emit ``ovos.audio.output.started/ended`` (matching what
+                the real ``ovos-audio`` service emits) rather than the legacy
+                aliases. Set both False to exercise a single namespace with no
+                bridging.
         """
         self.backend_namespace: str = backend_namespace
         self.backend_factory = backend_factory
@@ -500,7 +504,16 @@ class OCPPlayerHarness:
         time.sleep(0.05)
 
     def duck(self) -> None:
-        """Lower the audio backend volume via ``recognizer_loop:audio_output_start``.
+        """Lower the audio backend volume via ``ovos.audio.output.started``.
+
+        Simulates the start of TTS playback the way the real ``ovos-audio``
+        service does it: ``ovos_audio/playback.py`` emits the spec topic
+        ``ovos.audio.output.started`` unconditionally on every speech begin
+        (via ``SpecMessage``). The legacy ``recognizer_loop:audio_output_start``
+        alias is not guaranteed to be emitted, so the harness targets the spec
+        topic directly; the ``emit_legacy``/``modernize`` bridge on
+        :class:`~ovos_utils.fakebus.FakeBus` still connects it to a
+        legacy-only listener when needed.
 
         Ducking lowers volume while the voice assistant speaks.  The player
         **stays PLAYING** — only the backend volume is reduced.
@@ -509,11 +522,18 @@ class OCPPlayerHarness:
         Handler: ``OCPMediaPlayer.handle_duck_request`` —
         ``ovos_media/player.py:1216``.
         """
-        self.bus.emit(Message("recognizer_loop:audio_output_start"))
+        self.bus.emit(Message("ovos.audio.output.started"))
         time.sleep(0.05)
 
     def unduck(self) -> None:
-        """Restore the audio backend volume via ``recognizer_loop:audio_output_end``.
+        """Restore the audio backend volume via ``ovos.audio.output.ended``.
+
+        Simulates the end of TTS playback the way the real ``ovos-audio``
+        service does it: ``ovos_audio/playback.py`` emits the spec topic
+        ``ovos.audio.output.ended`` unconditionally on every speech end (via
+        ``SpecMessage``). See :meth:`duck` for why the harness targets the
+        spec topic rather than the legacy ``recognizer_loop:audio_output_end``
+        alias.
 
         Note: ``handle_unduck_request`` only restores volume when the player is
         PAUSED (``state == PlayerState.PAUSED``).  After a pure duck cycle the
@@ -523,7 +543,7 @@ class OCPPlayerHarness:
         Handler: ``OCPMediaPlayer.handle_unduck_request`` —
         ``ovos_media/player.py:1228``.
         """
-        self.bus.emit(Message("recognizer_loop:audio_output_end"))
+        self.bus.emit(Message("ovos.audio.output.ended"))
         time.sleep(0.05)
 
     def cork(self) -> None:

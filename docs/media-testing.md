@@ -29,7 +29,9 @@ Wraps a real `OCPMediaPlayer` (`ovos_media.player`) with a `MockOCPBackend` on a
 - `ovos_media.player.VideoService` — mocked
 - `ovos_media.player.WebService` — mocked
 - `ovos_media.player.OcpMprisExporter` — mocked (no D-Bus session required)
-- `ovos_media.player.GUIInterface` — mocked (exposed as `harness.gui`)
+- `ovos_media.player.GUIInterface` — mocked (exposed as `harness.gui`), only
+  on `ovos-media` builds that define it; builds without in-core GUI
+  integration skip this patch
 - `ovos_media.player.OCPMediaCatalog` — mocked
 - `ovos_media.player.Configuration` — returns `{"media": {}}`
 
@@ -332,7 +334,7 @@ harness drives that real backend through a real `AudioService` (see
 | `player` | `OCPMediaPlayer` | Real player instance |
 | `bus` | `FakeBus` | Shared in-process bus |
 | `backend` | `MockOCPBackend` | Injected mock audio backend |
-| `gui` | `MagicMock` | Mocked GUIInterface |
+| `gui` | `MagicMock` | Mocked GUIInterface (unused if the `ovos-media` build has no GUI integration) |
 
 ### OCPCaptureSession
 
@@ -354,8 +356,11 @@ Default `track_prefixes` captures: `"ovos.common_play."`, `"ovos.audio."`.
   trigger end-of-track logic.
 - **No MPRIS**: `OcpMprisExporter` is mocked out — MPRIS D-Bus integration is
   not exercised.
-- **No GUI rendering**: `GUIInterface` is a `MagicMock`. Test GUI calls via
-  `harness.gui.show_media_player.assert_called_with(...)`.
+- **No GUI rendering**: on `ovos-media` builds that still define
+  `GUIInterface`, it is patched with a `MagicMock`; test GUI calls via
+  `harness.gui.show_media_player.assert_called_with(...)`. Builds without
+  in-core GUI integration have no `GUIInterface` to patch, and `harness.gui`
+  is an unused `MagicMock`.
 - **No VideoService / WebService**: Only audio playback (`PlaybackType.AUDIO`)
   is wired with a real mock backend.
 - **FakeBus is synchronous**: Handlers run in the same thread that calls

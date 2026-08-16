@@ -260,7 +260,9 @@ class OCPPlayerHarness:
     - ``ovos_media.player.VideoService``
     - ``ovos_media.player.WebService``
     - ``ovos_media.player.OcpMprisExporter``
-    - ``ovos_media.player.GUIInterface``  (exposed as ``harness.gui``)
+    - ``ovos_media.player.GUIInterface``  (exposed as ``harness.gui``, when
+      the installed ``ovos-media`` still defines it — builds that have
+      dropped in-core GUI integration skip this patch)
     - ``ovos_media.player.OCPMediaCatalog``
     - ``ovos_media.player.Configuration``  (returns ``{"media": {}}``)
 
@@ -385,10 +387,15 @@ class OCPPlayerHarness:
             p_cfg.start()
             self._patches.append(p_cfg)
 
-            p_gui = patch("ovos_media.player.GUIInterface",
-                          return_value=gui_mock)
-            p_gui.start()
-            self._patches.append(p_gui)
+            # GUIInterface only exists on ovos-media builds that still carry
+            # in-core GUI integration; newer builds have dropped the symbol
+            # entirely, so patching it unconditionally would AttributeError.
+            import ovos_media.player as _ocp_player_module
+            if hasattr(_ocp_player_module, "GUIInterface"):
+                p_gui = patch("ovos_media.player.GUIInterface",
+                              return_value=gui_mock)
+                p_gui.start()
+                self._patches.append(p_gui)
 
             # Instantiate the real player (all heavy deps are now mocked)
             self.player = OCPMediaPlayer(self.bus, config={})
@@ -413,7 +420,14 @@ class OCPPlayerHarness:
                 audio_svc.default = self.backend
                 self.backend.set_track_start_callback(audio_svc.track_start)
                 # load_services() (skipped with autoload=False) would register these.
-                self.bus.on(f"ovos.{ns}.service.play", audio_svc.handle_play)
+                # handle_play routed the per-namespace ovos.{ns}.service.play bus
+                # topic on builds that had it; newer ovos-media dropped that whole
+                # per-namespace bus surface (pause/resume/stop survive as plain
+                # methods) — playback goes exclusively through OCPMediaPlayer.play()
+                # calling audio_service.play() directly, so there is nothing to
+                # register in its absence.
+                if hasattr(audio_svc, "handle_play"):
+                    self.bus.on(f"ovos.{ns}.service.play", audio_svc.handle_play)
                 self.bus.on(f"ovos.{ns}.service.pause", audio_svc.pause)
                 self.bus.on(f"ovos.{ns}.service.resume", audio_svc.resume)
                 self.bus.on(f"ovos.{ns}.service.stop", audio_svc.stop)
@@ -430,7 +444,8 @@ class OCPPlayerHarness:
                 self.backend.set_track_start_callback(audio_svc.track_start)
                 # Register the audio service bus handlers manually
                 # (normally done inside BaseMediaService.load_services)
-                self.bus.on(f"ovos.{ns}.service.play", audio_svc.handle_play)
+                if hasattr(audio_svc, "handle_play"):
+                    self.bus.on(f"ovos.{ns}.service.play", audio_svc.handle_play)
                 self.bus.on(f"ovos.{ns}.service.pause", audio_svc.pause)
                 self.bus.on(f"ovos.{ns}.service.resume", audio_svc.resume)
                 self.bus.on(f"ovos.{ns}.service.stop", audio_svc.stop)

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.11a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.11a1) (2026-08-16)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.10a1...1.6.11a1)
+
+**Merged pull requests:**
+
+- fix: make OCPPlayerHarness tolerate ovos-media dropping GUI and per-namespace bus surfaces [\#144](https://github.com/OpenVoiceOS/ovoscope/pull/144) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.10a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.10a1) (2026-08-16)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.9a1...1.6.10a1)

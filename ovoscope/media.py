@@ -260,9 +260,6 @@ class OCPPlayerHarness:
     - ``ovos_media.player.VideoService``
     - ``ovos_media.player.WebService``
     - ``ovos_media.player.OcpMprisExporter``
-    - ``ovos_media.player.GUIInterface``  (exposed as ``harness.gui``, when
-      the installed ``ovos-media`` still defines it — builds that have
-      dropped in-core GUI integration skip this patch)
     - ``ovos_media.player.OCPMediaCatalog``
     - ``ovos_media.player.Configuration``  (returns ``{"media": {}}``)
 
@@ -346,30 +343,12 @@ class OCPPlayerHarness:
         gui_mock = MagicMock()
         self.gui = gui_mock
 
-        # Patch Playlist so that Playlist("Search Results") doesn't try to
-        # add the string as a media entry.  The installed ovos_utils.ocp.Playlist
-        # treats all positional args as entries; we need a subclass that silently
-        # drops bare string args (which are titles, not entries) and still
-        # satisfies isinstance(x, Playlist) checks inside player.py.
-        from ovos_utils.ocp import Playlist as _RealPlaylist
-
-        class _TolerantPlaylist(_RealPlaylist):
-            """Playlist subclass that ignores bare string constructor args."""
-
-            def __init__(self, *args, **kwargs):
-                valid = [a for a in args if not isinstance(a, str)]
-                super().__init__(*valid, **kwargs)
-
         # Every mock.patch below is process-wide until stopped. If anything
         # after the first start() raises (a missing ovos_media attribute, a
         # backend constructor error), an unguarded exit would leave those
         # patches active for the rest of the process and silently corrupt
         # every later test. Unwind through __exit__ before propagating.
         try:
-            p_playlist = patch("ovos_media.player.Playlist", _TolerantPlaylist)
-            p_playlist.start()
-            self._patches.append(p_playlist)
-
             simple_targets = [
                 "ovos_media.player.AudioService",
                 "ovos_media.player.VideoService",
@@ -387,16 +366,6 @@ class OCPPlayerHarness:
             p_cfg.start()
             self._patches.append(p_cfg)
 
-            # GUIInterface only exists on ovos-media builds that still carry
-            # in-core GUI integration; newer builds have dropped the symbol
-            # entirely, so patching it unconditionally would AttributeError.
-            import ovos_media.player as _ocp_player_module
-            if hasattr(_ocp_player_module, "GUIInterface"):
-                p_gui = patch("ovos_media.player.GUIInterface",
-                              return_value=gui_mock)
-                p_gui.start()
-                self._patches.append(p_gui)
-
             # Instantiate the real player (all heavy deps are now mocked)
             self.player = OCPMediaPlayer(self.bus, config={})
 
@@ -409,7 +378,7 @@ class OCPPlayerHarness:
                 # a Music Assistant client's play_media() call).
                 from ovos_media.media_backends.audio import AudioService as _RealAudioService
                 audio_svc = _RealAudioService(self.bus, config={"audio_players": {}},
-                                              autoload=False, validate_source=False)
+                                              autoload=False)
                 self.player.audio_service = audio_svc
                 # Deferred uris (e.g. library://, {sei}//) are resolved by the OCP
                 # pipeline's stream extractors *before* the player sees them; this

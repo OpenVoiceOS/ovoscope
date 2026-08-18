@@ -300,6 +300,28 @@ class TestOCPPlayerHarnessBackendInjection:
             assert h.backend.play_calls == ["library://track/42"]
 
 
+@pytest.mark.skipif(not _HAS_OVOS_MEDIA,
+                    reason="requires the [media] extra (ovos-media)")
+class TestOCPHarnessRealPlaylistIsinstance:
+    """A genuine ovos_utils.ocp.Playlist must satisfy the isinstance checks
+    inside ovos_media.player.set_now_playing when driven through the harness.
+
+    A harness that swaps ``ovos_media.player.Playlist`` for a local subclass
+    would make this fail: set_now_playing does `isinstance(track, Playlist)`
+    against the *module-global* name, so a caller passing a real Playlist
+    would be rejected as neither a MediaEntry nor a Playlist.
+    """
+
+    def test_real_playlist_passes_isinstance_in_set_now_playing(self) -> None:
+        from ovos_utils.ocp import MediaEntry, Playlist, PlaybackType
+
+        with OCPPlayerHarness() as h:
+            entry = MediaEntry(uri="library://track/1", playback=PlaybackType.AUDIO)
+            playlist = Playlist(entry)
+            h.player.set_now_playing(playlist)
+            assert h.player.now_playing.uri == "library://track/1"
+
+
 # ---------------------------------------------------------------------------
 # Namespace bridging
 # ---------------------------------------------------------------------------

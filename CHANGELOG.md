@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.12a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.12a1) (2026-08-18)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.11a1...1.6.12a1)
+
+**Merged pull requests:**
+
+- fix: drop the tolerant playlist patch from the media harness [\#146](https://github.com/OpenVoiceOS/ovoscope/pull/146) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.11a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.11a1) (2026-08-16)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.10a1...1.6.11a1)

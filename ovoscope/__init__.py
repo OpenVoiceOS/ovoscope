@@ -979,7 +979,10 @@ def get_minicroft(skill_ids: Union[List[str], str], *args,
                 )
             sleep(0.1)
         return croft
-    except Exception:
+    except BaseException:
+        # pytest-timeout's Failed and KeyboardInterrupt derive from
+        # BaseException, not Exception; catching only Exception here let
+        # them skip cleanup and leak the started MiniCroft process.
         croft.stop()
         raise
 

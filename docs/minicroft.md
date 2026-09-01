@@ -49,7 +49,7 @@ MiniCroft(
 | `boot_messages` | `list[Message]` | All messages captured during startup |
 | `status` | `ProcessState` | Current lifecycle state |
 ### `MiniCroft.run()`
-Loads plugins and marks the runtime as ready. Called internally by `start()`. Does not block — returns after all skills are loaded.
+Loads plugins and marks the runtime as ready. Called internally by `start()`. Does not block: returns after all skills are loaded.
 ### `MiniCroft.stop()`
 Shuts down skills and closes the bus.
 ---
@@ -119,8 +119,11 @@ All overrides are restored to their original values in `MiniCroft.stop()`.
 ---
 ## Boot Sequence
 On startup, MiniCroft captures all messages emitted during skill loading into `boot_messages`. These can be asserted in `End2EndTest.expected_boot_sequence`. The typical boot sequence includes:
-1. `mycroft.skills.train` — intent pipeline training request
-2. `mycroft.skills.initialized` — skills initialized
-3. `mycroft.skills.ready` — skills service ready
-4. `mycroft.ready` — all core services ready
+1. `mycroft.skills.train`: intent pipeline training request
+2. `mycroft.skills.initialized`: skills initialized
+3. `mycroft.skills.ready`: skills service ready
+4. `mycroft.ready`: all core services ready
 Skills that participate in `converse` or `fallback` registration also emit messages during boot (e.g. `ovos.skills.fallback.register`).
+
+---
+[← CI Integration](ci-integration.md) · [Home](../README.md) · [Capture Session →](capture-session.md)

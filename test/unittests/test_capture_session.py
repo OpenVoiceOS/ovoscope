@@ -10,6 +10,7 @@ Race-condition coverage for the same class lives in
 ``test_audit_round2.py::TestCaptureSessionArming``.
 """
 import threading
+import time
 import unittest
 from types import SimpleNamespace
 
@@ -225,6 +226,65 @@ class TestCaptureSession(unittest.TestCase):
         msgs = cs.finish()
         types = [m.msg_type for m in msgs]
         self.assertIn("test.partial", types)
+
+    def test_unmatched_utterance_ends_on_terminal_signal_not_timeout(self):
+        """A caller narrowing eof_msgs to a mid-pipeline topic (e.g. to dodge
+        a get_response() deadlock on a *matched* handler, the exact pattern
+        ovos-skill-alerts' multilang golden suite uses) must still end
+        capture promptly for an UNMATCHED utterance, which never reaches
+        that topic. capture() must fall back to the pipeline's own terminal
+        signal (ovos.utterance.handled) instead of paying the full timeout
+        on every unmatched row.
+        """
+        cs = CaptureSession(self.mc,
+                            eof_msgs=["mycroft.skill.handler.start"],
+                            ignore_messages=[])
+        self._emit_after(0.05, Message("recognizer_loop:utterance"))
+        self._emit_after(0.10, Message("ovos.intent.unmatched"))
+        self._emit_after(0.12, Message("ovos.utterance.handled"))
+        # "mycroft.skill.handler.start" never fires: only the timeout backstop
+        # (5s) would return without the terminal-signal fallback.
+        start = time.monotonic()
+        completed = cs.capture(Message("test.trigger"), timeout=5)
+        elapsed = time.monotonic() - start
+        msgs = cs.finish()
+
+        self.assertTrue(completed, "capture must end on a terminal signal, not time out")
+        self.assertLess(elapsed, 2, "capture must not wait out the full timeout")
+        types = [m.msg_type for m in msgs]
+        # ovos.intent.unmatched fires first but is not a terminal signal —
+        # capture keeps going until ovos.utterance.handled, the single true
+        # end-marker, and includes both in the captured messages.
+        self.assertIn("ovos.intent.unmatched", types)
+        self.assertIn("ovos.utterance.handled", types)
+
+    def test_terminal_signals_can_be_disabled(self):
+        """terminal_signals=False restores the old eof_msgs-only behaviour."""
+        cs = CaptureSession(self.mc,
+                            eof_msgs=["mycroft.skill.handler.start"],
+                            ignore_messages=[],
+                            terminal_signals=False)
+        self._emit_after(0.05, Message("ovos.intent.unmatched"))
+        self._emit_after(0.08, Message("ovos.utterance.handled"))
+        completed = cs.capture(Message("test.trigger"), timeout=0.3)
+        cs.finish()
+        self.assertFalse(completed, "terminal signals must be ignored when disabled")
+
+    def test_terminal_signals_skipped_when_eof_count_above_one(self):
+        """eof_count>1 counts occurrences of ovos.utterance.handled across
+        concurrent lifecycles; the terminal-signal fallback must not
+        short-circuit that count after only one occurrence."""
+        cs = CaptureSession(self.mc,
+                            eof_msgs=["ovos.utterance.handled"],
+                            eof_count=2,
+                            ignore_messages=[])
+        self._emit_after(0.05, Message("ovos.intent.unmatched"))
+        self._emit_after(0.08, Message("ovos.utterance.handled"))
+        # only ONE ovos.utterance.handled fires — eof_count=2 must not be
+        # satisfied early by the terminal-signal fallback.
+        completed = cs.capture(Message("test.trigger"), timeout=0.3)
+        cs.finish()
+        self.assertFalse(completed, "eof_count must not be short-circuited by terminal signals")
 
 
 if __name__ == "__main__":

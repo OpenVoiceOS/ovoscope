@@ -16,6 +16,7 @@ A `dataclass` that wraps a `MiniCroft` and manages message collection for one te
 | `responses` | `list[Message]` | `[]` | Ordered synchronous messages captured |
 | `async_responses` | `list[Message]` | `[]` | Async messages (arrive from external threads, unordered) |
 | `eof_msgs` | `list[str]` | `["ovos.utterance.handled"]` | Message types that signal end of interaction |
+| `terminal_signals` | `bool` | `True` | Also end capture on the pipeline's own terminal markers (see below) |
 | `ignore_messages` | `list[str]` | `["ovos.skills.settings_changed"]` | Message types to discard |
 | `async_messages` | `list[str]` | `[]` | Message types to route to `async_responses` instead |
 | `done` | `threading.Event` |: | Set when an EOF message is received |
@@ -39,6 +40,26 @@ incoming message
         └─ otherwise                   → responses (ordered)
 eof_msgs trigger done.set() → capture.wait() returns
 ```
+### Terminal signals
+An utterance's lifecycle is over the instant this lands on the bus, whether
+it was matched or not:
+```python
+TERMINAL_SIGNALS = ["ovos.utterance.handled"]
+```
+`ovos.utterance.handled` fires exactly once per utterance, always last —
+after any matched, unmatched, or fallback handling — which is what makes it
+safe to use as an early-exit signal without dropping messages that follow
+it. By default (`terminal_signals=True`) `capture()` merges this into
+whatever `eof_msgs` was given, so a caller who narrows `eof_msgs` down to a
+topic that only a *matched* utterance reaches (e.g. to dodge a
+`get_response()` deadlock on a specific skill handler) still gets a prompt
+return for an unmatched or misrouted utterance instead of paying the full
+`timeout` on every such row. Set `terminal_signals=False` to opt back into
+the exact `eof_msgs`-only behaviour. The merge is skipped whenever
+`eof_count > 1`: that knob counts occurrences of one topic across several
+concurrent lifecycles, and letting the terminal signal count toward it would
+end capture after only one lifecycle finished instead of all of them.
+
 ### Default ignored messages
 ```python
 DEFAULT_IGNORED = ["ovos.skills.settings_changed"]

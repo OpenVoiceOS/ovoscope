@@ -31,6 +31,16 @@ GUI_IGNORED = ["gui.clear.namespace",
                "mycroft.gui.screen.close",
                "gui.page.show"]
 DEFAULT_EOF = ["ovos.utterance.handled"]
+# The pipeline's own terminal marker: an utterance's lifecycle is over the
+# instant this lands, matched or not. ``ovos.utterance.handled`` is the
+# universal §9.5 end-marker — it fires exactly once, always, after every
+# other signal on the utterance's path (matched, unmatched, or fallback) —
+# so it alone is safe to use to end capture early without dropping trailing
+# messages. Pre-terminal signals such as ``ovos.intent.unmatched`` and its
+# legacy bridge ``complete_intent_failure`` fire *before* this marker and
+# must not be added here. See CaptureSession.capture's ``terminal_signals``
+# kwarg.
+TERMINAL_SIGNALS = ["ovos.utterance.handled"]
 DEFAULT_ENTRY_POINTS = ["recognizer_loop:utterance"]
 DEFAULT_FLIP_POINTS = []
 DEFAULT_KEEP_SRC = ["ovos.skills.fallback.ping"]
@@ -999,6 +1009,17 @@ class CaptureSession:
     # same eof topic (e.g. two ovos.utterance.handled — one per utterance — when a
     # stop interrupts a running skill), so capture spans all of them.
     eof_count: int = 1
+    # Merge the pipeline's own TERMINAL_SIGNALS into eof_msgs so capture ends
+    # the moment an utterance's lifecycle is over, matched or not, instead of
+    # only on whatever topic the caller happened to list (a caller chasing a
+    # different deadlock, e.g. get_response(), commonly narrows eof_msgs down
+    # to a single mid-pipeline topic that an unmatched/misrouted utterance
+    # never reaches, paying the full timeout every time). Left off when
+    # eof_count > 1: that knob means the caller is counting occurrences of ONE
+    # topic across several concurrent lifecycles, and an unmatched utterance
+    # firing two terminal topics (unmatched + handled) would inflate the count
+    # and end capture before every lifecycle actually finished.
+    terminal_signals: bool = True
     ignore_messages: List[str] = dataclasses.field(default_factory=lambda: DEFAULT_IGNORED)
     async_messages: List[str] = dataclasses.field(default_factory=list) # these come from an external thread and might come in any order
     done: threading.Event = dataclasses.field(default_factory=lambda: threading.Event())
@@ -1037,9 +1058,17 @@ class CaptureSession:
                 self._done_generation = self._generation
                 self.done.set()
 
+    def _effective_eof_msgs(self) -> List[str]:
+        topics = list(self.eof_msgs)
+        if self.terminal_signals and self.eof_count == 1:
+            for sig in TERMINAL_SIGNALS:
+                if sig not in topics:
+                    topics.append(sig)
+        return topics
+
     def __post_init__(self):
         self.minicroft.bus.on("message", self.handle_message)
-        for m in self.eof_msgs:
+        for m in self._effective_eof_msgs():
             self.minicroft.bus.on(m, self.handle_end_of_test)
 
     def capture(self, source_message: Message, timeout=20) -> bool:
@@ -1078,7 +1107,7 @@ class CaptureSession:
             self._armed = False
         self.done.set()
         self.minicroft.bus.remove("message", self.handle_message)
-        for m in self.eof_msgs:
+        for m in self._effective_eof_msgs():
             self.minicroft.bus.remove(m, self.handle_end_of_test)
         # Return a snapshot: the live list is still owned by this session (and
         # __del__ calls finish() again), so handing it out invites surprise

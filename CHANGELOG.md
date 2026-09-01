@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.14a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.14a1) (2026-09-01)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.13a2...1.6.14a1)
+
+**Merged pull requests:**
+
+- fix: end capture on the utterance's terminal bus signals [\#150](https://github.com/OpenVoiceOS/ovoscope/pull/150) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.13a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.13a2) (2026-09-01)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.13a1...1.6.13a2)

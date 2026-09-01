@@ -443,7 +443,19 @@ def pytest_pycollect_makemodule(module_path, parent):
         return collector
     try:
         mod = collector.obj  # imports the module if not already loaded
-    except Exception:
+    except KeyboardInterrupt:
+        raise
+    except BaseException:
+        # Importing the module here is a side effect of auto-discovery,
+        # not the real collection attempt. A module-level
+        # ``pytest.skip()``/``pytest.importorskip()`` raises
+        # ``pytest.skip.Exception``, which subclasses ``BaseException``
+        # (via ``_pytest.outcomes.OutcomeException``), not ``Exception`` -
+        # a plain ``except Exception`` here lets it escape the hook
+        # wrapper uncaught and abort the whole collection session. Swallow
+        # it (and any other import-time failure) here and let pytest's own
+        # protected collection call re-import the module later, where it
+        # is reported as a normal per-module skip or error instead.
         return collector
     if not hasattr(mod, "ovoscope_intent_cases"):
         return collector

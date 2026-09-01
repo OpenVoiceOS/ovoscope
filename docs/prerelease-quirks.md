@@ -5,6 +5,13 @@ reset at each stable release.
 
 ## next alpha
 
+- The `pytest_pycollect_makemodule` hook no longer lets a module-level
+  `pytest.skip()`/`pytest.importorskip()` abort the whole collection
+  session. `pytest.skip.Exception` derives from `BaseException`, not
+  `Exception`, so it used to slip past the hook's guard, escape uncaught,
+  and make pytest report zero collected items for the entire run. It is
+  now swallowed the same way as any other import-time failure, so only the
+  module that asked to be skipped is affected.
 - `CaptureSession.capture()` now ends on the pipeline's own terminal signal
   (`ovos.utterance.handled`) in addition to whatever `eof_msgs` was given,
   so an unmatched or misrouted utterance no longer pays the full `timeout`

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.13a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.13a2) (2026-09-01)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.13a1...1.6.13a2)
+
+**Merged pull requests:**
+
+- docs: rewrite README in Simplified Technical English [\#119](https://github.com/OpenVoiceOS/ovoscope/pull/119) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.13a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.13a1) (2026-08-31)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.12a1...1.6.13a1)

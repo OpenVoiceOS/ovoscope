@@ -84,14 +84,14 @@ naming only the skill(s) that registered an intent and never got a
 an unrelated, intentless skill loaded alongside it. Pass
 `wait_for_trained=False` to opt out.
 
-Only `ovos-core[lgpl,plugins]` (or the specific pipeline plugin packages)
-ship Adapt/Padatious/Padacioso matchers. Adapt and Padacioso live in
-`[plugins]`; Padatious is LGPL-licensed and lives in `[lgpl]` instead —
-`[plugins]` alone leaves Padatious missing. Installing bare `ovos-core` in
-a test environment leaves only Padacioso available, so every
-Adapt-registered intent silently fails to match — install
-`ovos-core[lgpl,plugins]` (or the plugins your skills under test actually
-need) alongside ovoscope.
+Only `ovos-core[plugins]` (or the specific pipeline plugin packages)
+ship Adapt/Padatious/Padacioso matchers. All three live in the `[plugins]`
+extra as of ovos-core 3.0.1a1. Installing bare `ovos-core` in a test
+environment leaves only Padacioso available, so every Adapt or Padatious
+registered intent silently fails to match — install `ovos-core[plugins]`
+(or the plugins your skills under test actually need) alongside ovoscope.
+Environments pinned to older ovos-core versions should add the `[lgpl]`
+extra themselves if Padatious support is needed.
 ---
 ## Injecting Skills Under Test
 To test a skill class that isn't installed as a plugin, inject it directly via `extra_skills`:

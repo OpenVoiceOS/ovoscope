@@ -692,14 +692,14 @@ class TestTrainedTimeoutDefaults(unittest.TestCase):
     def tearDown(self):
         LOG.set_level("CRITICAL")
 
-    def test_ci_default_timeout_is_60_seconds(self):
-        """When CI=true, the default computed timeout must be 60s."""
-        # Test the logic: when CI env var is present, default should be 60s
+    def test_ci_default_timeout_is_180_seconds(self):
+        """When CI=true, the default computed timeout must be 180s."""
+        # Test the logic: when CI env var is present, default should be 180s
         with patch.dict("os.environ", {"CI": "true"}):
-            timeout = 60.0 if self.os_module.environ.get("CI") else 5.0
-            self.assertEqual(timeout, 60.0,
-                             "CI default timeout must be 60s to accommodate cold caches "
-                             "and contended runners")
+            timeout = 180.0 if self.os_module.environ.get("CI") else 5.0
+            self.assertEqual(timeout, 180.0,
+                             "CI default timeout must be 180s to accommodate cold caches, "
+                             "coverage instrumentation, and contended runners")
 
     def test_local_default_timeout_is_5_seconds(self):
         """When CI is not set, the default computed timeout must be 5s."""

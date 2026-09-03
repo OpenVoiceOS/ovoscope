@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.17a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.17a1) (2026-09-03)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.16a1...1.6.17a1)
+
+**Merged pull requests:**
+
+- fix: MiniCroft boots a lean default pipeline instead of every installed matcher [\#157](https://github.com/OpenVoiceOS/ovoscope/pull/157) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.16a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.16a1) (2026-09-03)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.15a1...1.6.16a1)

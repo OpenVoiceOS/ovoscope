@@ -1123,7 +1123,10 @@ TRAINED_QUIET_WINDOW = 0.5
 # The overall bound on the trained-wait is env-tunable so CI (slower, cold
 # caches, contended runners) gets a generous default while local runs stay
 # tight. Presence of the CI env var (not its value) selects the default.
-_DEFAULT_TRAINED_TIMEOUT = 30.0 if os.environ.get("CI") else 5.0
+# CI default is 60s (measured: 5 cold single-skill boots, worst case 16.8s
+# READY→trained gap; 60s provides >3x margin at no cost on happy path where
+# the wait returns at the quiet window).
+_DEFAULT_TRAINED_TIMEOUT = 60.0 if os.environ.get("CI") else 5.0
 
 
 def get_minicroft(skill_ids: Union[List[str], str], *args,
@@ -1137,6 +1140,16 @@ def get_minicroft(skill_ids: Union[List[str], str], *args,
     skill actually registered an intent (``register_intent`` /
     ``padatious:register_intent``), mirroring padatious' own
     ``needs_compile`` gate: nothing to train means nothing to wait for.
+
+    Timeout behavior: On timeout waiting for training, get_minicroft's
+    exception handler calls croft.stop(), which stops the MiniCroft process and
+    kills background training threads. A timeout guard that is too tight can
+    mask a slow trainer: the except block's stop() kills the thread before
+    training completes, making a slow-but-successful event look like it never
+    arrived. Testing shows training can arrive 3.5–4.0 seconds after READY
+    when MiniCroft is kept alive; this is why the default timeout is
+    conservative and suites with many secondary languages should pass their own
+    larger max_wait (see "Multilingual Testing" in docs/minicroft.md).
 
     Args:
         skill_ids: One or more skill plugin IDs to load.

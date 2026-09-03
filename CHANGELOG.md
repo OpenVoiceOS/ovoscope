@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.19a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.19a1) (2026-09-03)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.18a1...1.6.19a1)
+
+**Merged pull requests:**
+
+- fix: document pytest-timeout convention for get\_minicroft callers [\#161](https://github.com/OpenVoiceOS/ovoscope/pull/161) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.18a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.18a1) (2026-09-03)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.17a1...1.6.18a1)

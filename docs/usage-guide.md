@@ -493,9 +493,13 @@ from ovoscope import (
     DEFAULT_TEST_PIPELINE, # all standard stages, no AI/persona/OCP: the default
 )
 ```
-`DEFAULT_TEST_PIPELINE` is the default value of `MiniCroft.default_pipeline` when
-`isolate_config=True`.  It excludes persona, Ollama, OCP, and m2v stages, giving fully
-reproducible results regardless of which AI plugins are installed.
+`MiniCroft.default_pipeline` defaults to the narrower `LEAN_DEFAULT_PIPELINE`
+(Stop, Converse, Adapt, Padatious, Padacioso, Fallback — high/medium tiers
+only; see [minicroft.md](minicroft.md#lean-default-pipeline)) — use
+`extra_pipelines=` to add a stage on top of it, or pass `DEFAULT_TEST_PIPELINE`
+explicitly for the wider set including the `-low` tier and Common Query.
+Both exclude persona, Ollama, OCP, and m2v stages, giving fully reproducible
+results regardless of which AI plugins are installed.
 **Composing custom pipelines:**
 ```python
 # Adapt intent only: fastest, no fallback

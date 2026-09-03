@@ -107,6 +107,35 @@ NEBULENTO_PIPELINE = ["ovos-nebulento-pipeline-plugin"]
 # Palavreado — keyword/slot intent parser (ConfidenceMatcherPipeline).
 PALAVREADO_PIPELINE = ["palavreado"]
 
+# Lean default pipeline — the matcher families the ovoscope test suite (and
+# every skill-fixture/harness suite built on it) actually asserts against:
+# stop (mandatory — skills assert stop behavior fleet-wide and the default
+# config always runs it), converse, adapt, padatious/padacioso and fallback,
+# high+medium tiers only. Nothing here references the `-low` tier or
+# common_query — grep the ovoscope test suite (test/unittests/*.py) turns up
+# no assertion on either, so they are left out of the boot-by-default set.
+# Anything heavier (m2v, persona, OCP, common_query, `-low` tiers, ...) is
+# opt-in via `extra_pipelines=` or a full `default_pipeline=` override — see
+# docs/minicroft.md. This is what MiniCroft/get_minicroft boot by default;
+# it also drives `intents.blacklisted_pipelines` so the *other* installed
+# pipeline plugins (e.g. ovos-m2v-pipeline, whose handler does a synchronous
+# sleep(3) on init) are never instantiated in the first place — merely
+# leaving a plugin out of `intents.pipeline` does NOT stop IntentService from
+# loading it; only the blacklist does.
+LEAN_DEFAULT_PIPELINE = [
+    "ovos-stop-pipeline-plugin-high",
+    "ovos-stop-pipeline-plugin-medium",
+    "ovos-converse-pipeline-plugin",
+    "ovos-adapt-pipeline-plugin-high",
+    "ovos-adapt-pipeline-plugin-medium",
+    "ovos-padatious-pipeline-plugin-high",
+    "ovos-padatious-pipeline-plugin-medium",
+    "ovos-padacioso-pipeline-plugin-high",
+    "ovos-padacioso-pipeline-plugin-medium",
+    "ovos-fallback-pipeline-plugin-high",
+    "ovos-fallback-pipeline-plugin-medium",
+]
+
 # Standard test pipeline — all standard built-in stages.
 # This requires ovos-adapt-pipeline-plugin and ovos-padatious-pipeline-plugin.
 # If these are not installed, use LIGHT_TEST_PIPELINE instead.
@@ -314,6 +343,38 @@ def is_pipeline_available(pipeline: List[str]) -> bool:
     return True
 
 
+def _pipeline_base_id(stage: str) -> str:
+    """Strip a confidence-tier suffix (``-high``/``-medium``/``-low``) off a
+    pipeline matcher id, returning the installed OPM plugin id it maps to.
+    """
+    for suffix in ("-high", "-medium", "-low"):
+        if stage.endswith(suffix):
+            return stage[: -len(suffix)]
+    return stage
+
+
+def _compute_pipeline_blacklist(pipeline: List[str]) -> List[str]:
+    """Return the installed ``opm.pipeline`` plugin ids NOT covered by
+    *pipeline*.
+
+    IntentService loads every installed pipeline plugin except the ones
+    listed in ``intents.blacklisted_pipelines`` — ``intents.pipeline`` alone
+    only orders/selects among already-loaded matchers, it does not stop the
+    others from being instantiated. So keeping a boot lean requires setting
+    the blacklist to "everything installed that this pipeline doesn't need".
+    """
+    import importlib.metadata
+
+    try:
+        installed = {ep.name for ep in
+                     importlib.metadata.entry_points(group="opm.pipeline")}
+    except TypeError:
+        installed = {ep.name for ep in
+                     importlib.metadata.entry_points().get("opm.pipeline", [])}
+    wanted = {_pipeline_base_id(stage) for stage in pipeline}
+    return sorted(installed - wanted)
+
+
 class MiniCroft(SkillManager):
     def __init__(self, skill_ids,
                  enable_installer=False,
@@ -324,6 +385,7 @@ class MiniCroft(SkillManager):
                  extra_skills: Optional[Dict[str, OVOSSkill]] = None,
                  isolate_config: bool = True,
                  default_pipeline: Optional[List[str]] = DEFAULT_PIPELINE_UNSET,
+                 extra_pipelines: Optional[List[str]] = None,
                  lang: Optional[str] = None,
                  secondary_langs: Optional[List[str]] = None,
                  pipeline_config: Optional[Dict[str, Dict]] = None,
@@ -436,12 +498,27 @@ class MiniCroft(SkillManager):
         self._stopped = False
 
         if default_pipeline is DEFAULT_PIPELINE_UNSET:
-            if is_pipeline_available(DEFAULT_TEST_PIPELINE):
-                self._default_pipeline = DEFAULT_TEST_PIPELINE
+            if is_pipeline_available(LEAN_DEFAULT_PIPELINE):
+                self._default_pipeline = list(LEAN_DEFAULT_PIPELINE)
+            elif is_pipeline_available(DEFAULT_TEST_PIPELINE):
+                self._default_pipeline = list(DEFAULT_TEST_PIPELINE)
             else:
-                self._default_pipeline = LIGHT_TEST_PIPELINE
+                self._default_pipeline = list(LIGHT_TEST_PIPELINE)
         else:
             self._default_pipeline = default_pipeline
+
+        # extra_pipelines appends matcher ids on top of whatever base was
+        # chosen above (the lean default, or a caller's `default_pipeline=`
+        # override) — a heavyweight suite that needs e.g. m2v says
+        # `extra_pipelines=M2V_PIPELINE` instead of restating the whole lean
+        # list. Deduped, order-preserving; a bare `default_pipeline=None`
+        # (explicitly "leave the pipeline alone") is left untouched.
+        if extra_pipelines and self._default_pipeline is not None:
+            merged = list(self._default_pipeline)
+            for stage in extra_pipelines:
+                if stage not in merged:
+                    merged.append(stage)
+            self._default_pipeline = merged
 
         self._original_pipeline: Optional[List[str]] = None
         self._original_cfg_pipeline: Optional[List[str]] = None
@@ -504,6 +581,27 @@ class MiniCroft(SkillManager):
                 self._original_pipeline_configs[plugin_key] = intents_cfg.get(plugin_key)
                 intents_cfg[plugin_key] = plugin_cfg
                 LOG.debug(f"ovoscope: pipeline_config patched '{plugin_key}'")
+
+        # Blacklist every installed pipeline plugin the chosen pipeline
+        # doesn't need, BEFORE super().__init__() constructs IntentService.
+        # `intents.pipeline` (patched later, in run()) only orders/selects
+        # among matchers IntentService already instantiated at construction
+        # time — it does NOT stop the others from loading. Without this,
+        # a lean `default_pipeline`/LEAN_DEFAULT_PIPELINE still boots every
+        # OTHER installed pipeline plugin (e.g. ovos-m2v-pipeline, whose
+        # handle_sync_intents does a synchronous sleep(3) on init) and gains
+        # nothing.
+        self._original_blacklisted_pipelines: Optional[List[str]] = None
+        self._had_blacklisted_pipelines: bool = False
+        if self._default_pipeline is not None:
+            cfg = Configuration()
+            intents_cfg = cfg.setdefault("intents", {})
+            self._had_blacklisted_pipelines = "blacklisted_pipelines" in intents_cfg
+            self._original_blacklisted_pipelines = intents_cfg.get("blacklisted_pipelines")
+            intents_cfg["blacklisted_pipelines"] = _compute_pipeline_blacklist(
+                self._default_pipeline)
+            LOG.debug(f"ovoscope: blacklisted_pipelines set to "
+                      f"{intents_cfg['blacklisted_pipelines']}")
 
         self.boot_messages: List[Message] = []
         bus = FakeBus(modernize=self._modernize,
@@ -749,7 +847,7 @@ class MiniCroft(SkillManager):
         self.load_plugin_skills()
         if self._default_pipeline is not None:
             if not self._check_pipeline_available(self._default_pipeline):
-                if self._default_pipeline == DEFAULT_TEST_PIPELINE:
+                if self._default_pipeline in (LEAN_DEFAULT_PIPELINE, DEFAULT_TEST_PIPELINE):
                     LOG.info("ovoscope: falling back to LIGHT_TEST_PIPELINE")
                     self._default_pipeline = LIGHT_TEST_PIPELINE
                 else:
@@ -878,6 +976,14 @@ class MiniCroft(SkillManager):
                 else:
                     cfg["intents"].pop("pipeline", None)
             LOG.debug("ovoscope: default session pipeline restored")
+        if self._default_pipeline is not None:
+            cfg = Configuration()
+            intents_cfg = cfg.setdefault("intents", {})
+            if self._had_blacklisted_pipelines:
+                intents_cfg["blacklisted_pipelines"] = self._original_blacklisted_pipelines
+            else:
+                intents_cfg.pop("blacklisted_pipelines", None)
+            LOG.debug("ovoscope: blacklisted_pipelines restored")
         if self._isolated_config:
             cfg = Configuration()
             skills_cfg = cfg.get("skills", {})
@@ -1042,7 +1148,11 @@ def get_minicroft(skill_ids: Union[List[str], str], *args,
         TimeoutError: If MiniCroft does not reach READY within ``max_wait`` seconds.
         RuntimeError: If a loaded skill registered intents but
             "mycroft.skills.trained" never arrives within
-            ``OVOSCOPE_TRAINED_TIMEOUT`` seconds.
+            ``OVOSCOPE_TRAINED_TIMEOUT`` seconds, OR if any pipeline id in
+            the configured pipeline (the lean default, an
+            ``extra_pipelines=`` addition, or a full ``default_pipeline=``
+            override) failed to load — a missing/erroring plugin is never
+            silently dropped.
     """
     if isinstance(skill_ids, str):
         skill_ids = [skill_ids]
@@ -1058,6 +1168,21 @@ def get_minicroft(skill_ids: Union[List[str], str], *args,
                     f"check skill startup logs (skill_ids={skill_ids})"
                 )
             sleep(0.1)
+
+        if croft._default_pipeline is not None:
+            loaded = set(croft.intents.pipeline_plugins.keys())
+            missing = sorted({
+                stage for stage in croft._default_pipeline
+                if _pipeline_base_id(stage) not in loaded
+            })
+            if missing:
+                raise RuntimeError(
+                    "MiniCroft: configured pipeline stage(s) failed to "
+                    f"load: {missing} — plugin absent or errored during "
+                    "init (see logs above for the load failure); a "
+                    "configured-but-unloadable matcher is never silently "
+                    "skipped"
+                )
 
         with croft._training_lock:
             registered = set(croft._registered_skill_ids)

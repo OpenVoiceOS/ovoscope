@@ -58,6 +58,8 @@ Shuts down skills and closes the bus.
 from ovoscope import get_minicroft
 croft = get_minicroft(
     skill_ids: list[str] | str,
+    max_wait: float = 60,
+    wait_for_trained: bool = True,
     **kwargs  # forwarded to MiniCroft constructor
 )
 ```
@@ -66,6 +68,30 @@ Creates, starts, and waits for a `MiniCroft` to reach `READY` state. Returns the
 croft = get_minicroft(["skill-weather.openvoiceos", "skill-timer.openvoiceos"])
 # croft.status.state == ProcessState.READY
 ```
+
+Loading skills only registers their intents; the pipeline plugin (Adapt,
+Padatious, ...) still has to compile them before matching is reliable. Once
+`READY`, `get_minicroft()` also waits for `mycroft.skills.trained` to go
+quiet — no new event for a short window — before returning, but only if a
+loaded skill actually registered an intent. Skills with nothing to train
+(pure event-handler skills, an empty `skill_ids`) skip the wait entirely,
+mirroring the pipeline plugin's own "nothing dirty, nothing to compile"
+check. If an intent was registered and training never completes within
+`OVOSCOPE_TRAINED_TIMEOUT` seconds (default: 30s when the `CI` environment
+variable is set, 5s otherwise), `get_minicroft()` raises `RuntimeError`
+naming only the skill(s) that registered an intent and never got a
+`mycroft.skills.trained` reply — a stuck trainer in one skill never blames
+an unrelated, intentless skill loaded alongside it. Pass
+`wait_for_trained=False` to opt out.
+
+Only `ovos-core[lgpl,plugins]` (or the specific pipeline plugin packages)
+ship Adapt/Padatious/Padacioso matchers. Adapt and Padacioso live in
+`[plugins]`; Padatious is LGPL-licensed and lives in `[lgpl]` instead —
+`[plugins]` alone leaves Padatious missing. Installing bare `ovos-core` in
+a test environment leaves only Padacioso available, so every
+Adapt-registered intent silently fails to match — install
+`ovos-core[lgpl,plugins]` (or the plugins your skills under test actually
+need) alongside ovoscope.
 ---
 ## Injecting Skills Under Test
 To test a skill class that isn't installed as a plugin, inject it directly via `extra_skills`:

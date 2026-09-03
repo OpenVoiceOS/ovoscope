@@ -486,3 +486,103 @@ class TestSkillManagerKwargCompat(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Trained-quiet-window wait (get_minicroft)
+# ---------------------------------------------------------------------------
+class RegistersIntentSkill(OVOSSkill):
+    """Emits 'register_intent' with context['skill_id'] set, exactly as
+    _AdaptIntentApi.register_intent (ovos_workshop.intents) always stamps
+    it before emitting, but never fires 'mycroft.skills.trained' itself —
+    used to simulate a pipeline plugin that never reports training done."""
+
+    def initialize(self):
+        self.bus.emit(Message("register_intent", {"name": "unittest.stub"},
+                              {"skill_id": self.skill_id}))
+
+
+class RegistersAndTrainsSkill(OVOSSkill):
+    """Emits 'register_intent' (with context['skill_id'] stamped, as adapt
+    does) then 'mycroft.skills.trained', like a real pipeline plugin
+    finishing a training pass."""
+
+    def initialize(self):
+        self.bus.emit(Message("register_intent", {"name": "unittest.stub"},
+                              {"skill_id": self.skill_id}))
+        self.bus.emit(Message("mycroft.skills.trained"))
+
+
+class TestTrainedQuietWindow(unittest.TestCase):
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+
+    def tearDown(self):
+        LOG.set_level("CRITICAL")
+
+    def test_no_intents_registered_skips_wait(self):
+        """Nothing registered an intent -> get_minicroft must not wait on
+        'mycroft.skills.trained' at all (mirrors padatious' needs_compile:
+        nothing to train, nothing to wait for)."""
+        skill_id = "ovoscope-unittest-no-intents.test"
+        mc = get_minicroft([skill_id], extra_skills={skill_id: PingSkill})
+        try:
+            self.assertEqual(mc._registered_skill_ids, set())
+            self.assertEqual(mc._trained_times, [])
+        finally:
+            mc.stop()
+
+    def test_trained_event_lets_quiet_window_elapse_and_return(self):
+        """An intent was registered and 'mycroft.skills.trained' arrived ->
+        get_minicroft must record it and return once the quiet window
+        elapses, without raising."""
+        skill_id = "ovoscope-unittest-trains.test"
+        mc = get_minicroft([skill_id],
+                           extra_skills={skill_id: RegistersAndTrainsSkill})
+        try:
+            self.assertEqual(mc._registered_skill_ids, {skill_id})
+            self.assertEqual(len(mc._trained_times), 1)
+        finally:
+            mc.stop()
+
+    @patch.dict("os.environ", {"OVOSCOPE_TRAINED_TIMEOUT": "0.3"})
+    def test_never_trained_raises_naming_skill(self):
+        """An intent was registered but 'mycroft.skills.trained' never
+        arrives within the bound -> get_minicroft must raise loudly, never
+        proceed silently as if it were READY and trained."""
+        skill_id = "ovoscope-unittest-stuck.test"
+        with self.assertRaises(RuntimeError) as ctx:
+            get_minicroft([skill_id],
+                          extra_skills={skill_id: RegistersIntentSkill})
+        self.assertIn(skill_id, str(ctx.exception))
+        self.assertIn("mycroft.skills.trained", str(ctx.exception))
+
+    @patch.dict("os.environ", {"OVOSCOPE_TRAINED_TIMEOUT": "0.3"})
+    def test_never_trained_raises_naming_only_stuck_skill(self):
+        """A mixed load: one skill registers an intent and never gets
+        trained, another skill registers no intent at all. The raised
+        error must name ONLY the stuck skill — an intentless skill loaded
+        alongside a hung trainer must never be blamed."""
+        stuck_id = "ovoscope-unittest-stuck-mixed.test"
+        intentless_id = "ovoscope-unittest-intentless-mixed.test"
+        with self.assertRaises(RuntimeError) as ctx:
+            get_minicroft([stuck_id, intentless_id],
+                          extra_skills={stuck_id: RegistersIntentSkill,
+                                        intentless_id: PingSkill})
+        message = str(ctx.exception)
+        self.assertIn(stuck_id, message)
+        self.assertNotIn(intentless_id, message)
+
+    def test_wait_for_trained_false_opts_out(self):
+        """wait_for_trained=False must skip the wait/raise entirely even
+        when an intent was registered and never trained."""
+        skill_id = "ovoscope-unittest-optout.test"
+        mc = get_minicroft([skill_id],
+                           extra_skills={skill_id: RegistersIntentSkill},
+                           wait_for_trained=False)
+        try:
+            self.assertEqual(mc._registered_skill_ids, {skill_id})
+            self.assertEqual(mc._trained_times, [])
+        finally:
+            mc.stop()

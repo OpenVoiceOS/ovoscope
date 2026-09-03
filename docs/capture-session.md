@@ -17,7 +17,7 @@ A `dataclass` that wraps a `MiniCroft` and manages message collection for one te
 | `async_responses` | `list[Message]` | `[]` | Async messages (arrive from external threads, unordered) |
 | `eof_msgs` | `list[str]` | `["ovos.utterance.handled"]` | Message types that signal end of interaction |
 | `terminal_signals` | `bool` | `True` | Also end capture on the pipeline's own terminal markers (see below) |
-| `ignore_messages` | `list[str]` | `["ovos.skills.settings_changed"]` | Message types to discard |
+| `ignore_messages` | `list[str]` | `DEFAULT_IGNORED` | Message types to discard |
 | `async_messages` | `list[str]` | `[]` | Message types to route to `async_responses` instead |
 | `done` | `threading.Event` |: | Set when an EOF message is received |
 ### Methods
@@ -62,8 +62,16 @@ end capture after only one lifecycle finished instead of all of them.
 
 ### Default ignored messages
 ```python
-DEFAULT_IGNORED = ["ovos.skills.settings_changed"]
+DEFAULT_IGNORED = ["ovos.skills.settings_changed"] + TRAINING_NOISE
 ```
+`TRAINING_NOISE` (`["mycroft.skills.trained"]`) is MiniCroft's own
+boot/training orchestration noise, not something any scenario's message
+sequence should assert on: a pipeline plugin can legitimately re-emit it
+mid-capture (e.g. a `secondary_langs` re-training pass), and it is filtered
+out before any exact sequence comparison runs. This is deliberately narrow —
+only genuine orchestration noise goes in `TRAINING_NOISE`, never a general
+subsequence-matching mode. Comparisons stay exact on everything else, so a
+message that is missing or duplicated for real still fails the test.
 ### Default GUI ignored (when `ignore_gui=True` on `End2EndTest`)
 ```python
 GUI_IGNORED = [

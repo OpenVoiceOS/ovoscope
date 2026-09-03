@@ -1123,10 +1123,15 @@ TRAINED_QUIET_WINDOW = 0.5
 # The overall bound on the trained-wait is env-tunable so CI (slower, cold
 # caches, contended runners) gets a generous default while local runs stay
 # tight. Presence of the CI env var (not its value) selects the default.
-# CI default is 60s (measured: 5 cold single-skill boots, worst case 16.8s
-# READY→trained gap; 60s provides >3x margin at no cost on happy path where
-# the wait returns at the quiet window).
-_DEFAULT_TRAINED_TIMEOUT = 60.0 if os.environ.get("CI") else 5.0
+# CI default is 180s: worst-case uninstrumented on taskset-2 was 16.8s, but
+# fleet CI jobs run under coverage instrumentation on throttled 2-core shared
+# VMs where a large single-skill intent set exceeded 60s in the field (weather:
+# 262 trained-timeout failures at 60s; the alerts multilang fixture
+# independently documents "under coverage instrumentation, booting reliably
+# needs more than 60s"). 180s serves the real condition, costs nothing on
+# healthy boots (quiet-window return), and the loud never-trained guard still
+# fires.
+_DEFAULT_TRAINED_TIMEOUT = 180.0 if os.environ.get("CI") else 5.0
 
 
 def get_minicroft(skill_ids: Union[List[str], str], *args,

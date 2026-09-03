@@ -125,7 +125,7 @@ loaded skill actually registered an intent. Skills with nothing to train
 (pure event-handler skills, an empty `skill_ids`) skip the wait entirely,
 mirroring the pipeline plugin's own "nothing dirty, nothing to compile"
 check. If an intent was registered and training never completes within
-`OVOSCOPE_TRAINED_TIMEOUT` seconds (default: 30s when the `CI` environment
+`OVOSCOPE_TRAINED_TIMEOUT` seconds (default: 180s when the `CI` environment
 variable is set, 5s otherwise), `get_minicroft()` raises `RuntimeError`
 naming only the skill(s) that registered an intent and never got a
 `mycroft.skills.trained` reply — a stuck trainer in one skill never blames
@@ -190,7 +190,7 @@ The test suite itself can then settle to a quiet window using the same pattern `
 ---
 ## pytest-timeout Convention
 
-Any test suite using `get_minicroft` must set `pytest-timeout` comfortably above the `get_minicroft` trained-wait ceiling. On slow 2-core CI runners, a pytest-timeout that equals or falls below the trained-wait ceiling can kill the `setUpClass` or `setUp` mid-training-wait before `get_minicroft` returns, and the failure masquerades as a boot failure rather than a timeout — diagnosis is difficult without knowing to check the framework timeout separately. Set `pytest-timeout` to at least 3x the `max_wait` value: for single-language suites with the 60-second CI default, use 180 seconds or more; for multilingual suites, use 300 seconds or more (or 3x your suite's maximum `max_wait` value).
+Any test suite using `get_minicroft` must set `pytest-timeout` comfortably above the `get_minicroft` trained-wait ceiling. On slow 2-core CI runners, a pytest-timeout that equals or falls below the trained-wait ceiling can kill the `setUpClass` or `setUp` mid-training-wait before `get_minicroft` returns, and the failure masquerades as a boot failure rather than a timeout — diagnosis is difficult without knowing to check the framework timeout separately. Set `pytest-timeout` to at least `trained-ceiling + 120s` with margin: for single-language suites with the 180-second CI default, use 300 seconds or more; for multilingual suites, set `pytest-timeout ≥ max_wait + 120s` to ensure the wait completes before the framework timeout fires.
 
 ---
 ## Pipeline Plugin Config Overrides

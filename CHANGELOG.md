@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.18a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.18a1) (2026-09-03)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.17a1...1.6.18a1)
+
+**Merged pull requests:**
+
+- fix: raise OVOSCOPE\_TRAINED\_TIMEOUT CI default from 30s to 60s [\#159](https://github.com/OpenVoiceOS/ovoscope/pull/159) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.17a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.17a1) (2026-09-03)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.16a1...1.6.17a1)

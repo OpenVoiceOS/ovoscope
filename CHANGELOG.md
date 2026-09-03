@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.20a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.20a1) (2026-09-03)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.19a1...1.6.20a1)
+
+**Merged pull requests:**
+
+- fix: raise CI trained-timeout to 180s and disable padaos by default [\#163](https://github.com/OpenVoiceOS/ovoscope/pull/163) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.19a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.19a1) (2026-09-03)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.18a1...1.6.19a1)

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.16a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.16a1) (2026-09-03)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.15a1...1.6.16a1)
+
+**Merged pull requests:**
+
+- fix: wait for skills-trained quiet window; filter training noise from exact comparisons [\#154](https://github.com/OpenVoiceOS/ovoscope/pull/154) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.15a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.15a1) (2026-09-01)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.14a1...1.6.15a1)

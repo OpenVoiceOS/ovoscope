@@ -1150,6 +1150,8 @@ def get_minicroft(skill_ids: Union[List[str], str], *args,
     when MiniCroft is kept alive; this is why the default timeout is
     conservative and suites with many secondary languages should pass their own
     larger max_wait (see "Multilingual Testing" in docs/minicroft.md).
+    Callers' pytest-timeout must exceed this wait's ceiling with margin; see
+    "pytest-timeout Convention" in docs/minicroft.md.
 
     Args:
         skill_ids: One or more skill plugin IDs to load.

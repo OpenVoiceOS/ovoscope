@@ -188,6 +188,11 @@ croft = get_minicroft(
 The test suite itself can then settle to a quiet window using the same pattern `ovos-skill-alerts` uses for its multilingual fixtures: `max_wait=300 + settle passes` to ensure all per-language training completes before assertions run.
 
 ---
+## pytest-timeout Convention
+
+Any test suite using `get_minicroft` must set `pytest-timeout` comfortably above the `get_minicroft` trained-wait ceiling. On slow 2-core CI runners, a pytest-timeout that equals or falls below the trained-wait ceiling can kill the `setUpClass` or `setUp` mid-training-wait before `get_minicroft` returns, and the failure masquerades as a boot failure rather than a timeout — diagnosis is difficult without knowing to check the framework timeout separately. Set `pytest-timeout` to at least 3x the `max_wait` value: for single-language suites with the 60-second CI default, use 180 seconds or more; for multilingual suites, use 300 seconds or more (or 3x your suite's maximum `max_wait` value).
+
+---
 ## Pipeline Plugin Config Overrides
 Use `pipeline_config` to override per-plugin configuration under `Configuration()["intents"]` before pipeline plugins initialize. This ensures tests are reproducible regardless of the user's local `mycroft.conf`.
 

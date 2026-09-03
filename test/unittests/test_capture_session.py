@@ -289,3 +289,57 @@ class TestCaptureSession(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCaptureSessionTrainingNoise(unittest.TestCase):
+    """A 'mycroft.skills.trained' event can legitimately interleave with a
+    capture window (e.g. a pipeline plugin re-training for a secondary
+    lang). It is filtered out via TRAINING_NOISE/DEFAULT_IGNORED so
+    sequence comparisons stay exact on everything else — genuinely missing
+    or duplicated real messages must still be caught, never masked as a
+    subsequence match would."""
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+        self.mc = SimpleNamespace(bus=FakeBus())
+
+    def tearDown(self):
+        self.mc.bus.close()
+        LOG.set_level("CRITICAL")
+
+    def test_trained_event_interleaved_is_filtered_not_counted(self):
+        from ovoscope import CaptureSession, DEFAULT_IGNORED, TRAINING_NOISE
+
+        self.assertIn("mycroft.skills.trained", TRAINING_NOISE)
+        self.assertIn("mycroft.skills.trained", DEFAULT_IGNORED)
+
+        session = CaptureSession(minicroft=self.mc)
+        session._armed = True
+        self.mc.bus.emit(Message("speak", {"utterance": "hi"}))
+        self.mc.bus.emit(Message("mycroft.skills.trained"))
+        self.mc.bus.emit(Message("ovos.utterance.handled"))
+
+        types = [m.msg_type for m in session.responses]
+        self.assertEqual(types, ["speak", "ovos.utterance.handled"],
+                         "'mycroft.skills.trained' must be filtered out of "
+                         "the exact-comparison sequence, not counted as a "
+                         "captured message")
+
+    def test_genuinely_missing_message_still_fails_exact_comparison(self):
+        """Filtering the training-noise topic must not become an excuse to
+        subsequence-match the rest: a real message that never arrives has
+        to still make an exact sequence comparison fail."""
+        from ovoscope import CaptureSession
+
+        session = CaptureSession(minicroft=self.mc)
+        session._armed = True
+
+        expected_types = ["speak", "mycroft.skill.handler.complete", "ovos.utterance.handled"]
+        self.mc.bus.emit(Message("mycroft.skills.trained"))
+        self.mc.bus.emit(Message("speak", {"utterance": "hi"}))
+        # "mycroft.skill.handler.complete" never arrives.
+        self.mc.bus.emit(Message("ovos.utterance.handled"))
+
+        received_types = [m.msg_type for m in session.responses]
+        self.assertNotEqual(received_types, expected_types)
+        self.assertEqual(len(received_types), 2)

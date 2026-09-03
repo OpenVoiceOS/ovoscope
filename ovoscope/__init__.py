@@ -2,6 +2,7 @@ import inspect
 import dataclasses
 import gc
 import json
+import os
 import threading
 from copy import deepcopy
 from time import sleep, time
@@ -25,7 +26,17 @@ from ovos_workshop.skills.ovos import OVOSSkill
 SerializedMessage = Dict[str, Union[str, Dict[str, Any]]]
 SerializedTest = Dict[str, Union[str, bool, List[str], SerializedMessage]]
 
-DEFAULT_IGNORED = ["ovos.skills.settings_changed"]
+# Bus orchestration noise that is not part of any scenario's own message
+# sequence: it fires from MiniCroft's boot/training machinery (see
+# get_minicroft's trained-quiet-window wait) rather than from a skill or
+# pipeline reacting to a captured utterance, and can legitimately interleave
+# with a capture window (e.g. a pipeline plugin re-training for a
+# secondary_langs pass). Sequence comparisons filter this set out and then
+# stay strictly exact on what remains — never subsequence-matched, or a
+# lost/duplicated real message would slip through undetected.
+TRAINING_NOISE = ["mycroft.skills.trained"]
+
+DEFAULT_IGNORED = ["ovos.skills.settings_changed"] + TRAINING_NOISE
 GUI_IGNORED = ["gui.clear.namespace",
                "gui.value.set",
                "mycroft.gui.screen.close",
@@ -635,6 +646,39 @@ class MiniCroft(SkillManager):
             self.stop()
             raise
 
+        # Track training readiness from the moment the bus exists — NOT after
+        # load_plugin_skills() emits "mycroft.skills.train" in run() (which
+        # runs on a separate thread started by start()). Subscribing late
+        # risks missing the very first "mycroft.skills.trained" reply if a
+        # pipeline plugin (e.g. padatious) answers before get_minicroft()
+        # gets around to waiting for it.
+        self._trained_times: List[float] = []
+        # Populated with the skill_id of every register_intent /
+        # padatious:register_intent event observed, so a stuck-trainer
+        # timeout can name only the skill(s) that actually asked to be
+        # trained instead of every skill_id passed to get_minicroft (a
+        # 5-skill load with one hung trainer must not blame the other 4).
+        self._registered_skill_ids: set = set()
+        self._training_lock = threading.Lock()
+        self.bus.on("mycroft.skills.trained", self._on_skills_trained)
+        self.bus.on("register_intent", self._on_intent_registered)
+        self.bus.on("padatious:register_intent", self._on_intent_registered)
+
+    def _on_skills_trained(self, message: Message):
+        with self._training_lock:
+            self._trained_times.append(time())
+
+    def _on_intent_registered(self, message: Message):
+        # register_intent/padatious:register_intent always carry skill_id,
+        # either in context (set by OVOSSkill.bus on every outgoing message)
+        # or, for padatious, in data as a fallback (ovos_padatious.opm
+        # defaults it to "anonymous_skill" if genuinely absent).
+        skill_id = message.data.get("skill_id") or (message.context or {}).get("skill_id")
+        if not skill_id:
+            skill_id = "anonymous_skill"
+        with self._training_lock:
+            self._registered_skill_ids.add(skill_id)
+
     @property
     def pipeline(self) -> List[str]:
         """Return the current active pipeline stages for this instance.
@@ -963,16 +1007,42 @@ class MiniCroft(SkillManager):
         LOG.debug("ovoscope: default session state restored")
 
 
+# How long a quiet window (no new "mycroft.skills.trained" event) must hold
+# before we consider training settled. Kept short and non-tunable: it only
+# absorbs the gap between successive per-language training passes, it is not
+# meant to paper over a slow trainer (that's what OVOSCOPE_TRAINED_TIMEOUT is
+# for).
+TRAINED_QUIET_WINDOW = 0.5
+
+# The overall bound on the trained-wait is env-tunable so CI (slower, cold
+# caches, contended runners) gets a generous default while local runs stay
+# tight. Presence of the CI env var (not its value) selects the default.
+_DEFAULT_TRAINED_TIMEOUT = 30.0 if os.environ.get("CI") else 5.0
+
+
 def get_minicroft(skill_ids: Union[List[str], str], *args,
-                  max_wait: float = 60, **kwargs) -> MiniCroft:
+                  max_wait: float = 60, wait_for_trained: bool = True,
+                  **kwargs) -> MiniCroft:
     """Create a MiniCroft, start it, and block until it reaches READY state.
+
+    Once READY, and unless ``wait_for_trained=False``, this also waits for
+    "mycroft.skills.trained" to go quiet (no new event for
+    ``TRAINED_QUIET_WINDOW`` seconds) before returning — but only if a loaded
+    skill actually registered an intent (``register_intent`` /
+    ``padatious:register_intent``), mirroring padatious' own
+    ``needs_compile`` gate: nothing to train means nothing to wait for.
 
     Args:
         skill_ids: One or more skill plugin IDs to load.
         max_wait: Maximum seconds to wait for READY before raising TimeoutError.
+        wait_for_trained: Wait for the trained-quiet-window after READY.
+            Set False to opt out (e.g. skills with no intents to train).
 
     Raises:
         TimeoutError: If MiniCroft does not reach READY within ``max_wait`` seconds.
+        RuntimeError: If a loaded skill registered intents but
+            "mycroft.skills.trained" never arrives within
+            ``OVOSCOPE_TRAINED_TIMEOUT`` seconds.
     """
     if isinstance(skill_ids, str):
         skill_ids = [skill_ids]
@@ -988,6 +1058,44 @@ def get_minicroft(skill_ids: Union[List[str], str], *args,
                     f"check skill startup logs (skill_ids={skill_ids})"
                 )
             sleep(0.1)
+
+        with croft._training_lock:
+            registered = set(croft._registered_skill_ids)
+        if wait_for_trained and registered:
+            timeout = float(os.environ.get("OVOSCOPE_TRAINED_TIMEOUT",
+                                            _DEFAULT_TRAINED_TIMEOUT))
+            trained_deadline = time() + timeout
+            while True:
+                with croft._training_lock:
+                    times = list(croft._trained_times)
+                now = time()
+                if not times:
+                    if now > trained_deadline:
+                        # "mycroft.skills.trained" carries no skill_id — it
+                        # reports a pipeline plugin's container(s), not a
+                        # single skill — so it can't attribute which of
+                        # several registered skills is the one still stuck.
+                        # Name the full registered set (never the untouched
+                        # skill_ids param: an intentless skill in the same
+                        # load must not be blamed).
+                        raise RuntimeError(
+                            "MiniCroft: skill(s) registered intents but "
+                            f"'mycroft.skills.trained' never arrived within "
+                            f"{timeout}s (untrained skill_ids="
+                            f"{sorted(registered)}) — the pipeline plugin's "
+                            "intent container(s) never finished training"
+                        )
+                elif now - max(times) >= TRAINED_QUIET_WINDOW:
+                    break
+                elif now > trained_deadline:
+                    LOG.warning(
+                        "MiniCroft: 'mycroft.skills.trained' kept firing "
+                        f"past the {timeout}s bound (skill_ids="
+                        f"{sorted(registered)}); proceeding without "
+                        "reaching a quiet window"
+                    )
+                    break
+                sleep(0.05)
         return croft
     except BaseException:
         # pytest-timeout's Failed and KeyboardInterrupt derive from

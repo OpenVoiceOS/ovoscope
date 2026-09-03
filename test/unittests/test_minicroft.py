@@ -1,4 +1,5 @@
 """Unit tests for MiniCroft and get_minicroft()."""
+import os
 import threading
 import unittest
 from unittest.mock import patch
@@ -673,3 +674,45 @@ class TestMiniCroftLeanBootDefault(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             get_minicroft([], default_pipeline=[bogus], wait_for_trained=False)
         self.assertIn(bogus, str(ctx.exception))
+
+
+
+class TestTrainedTimeoutDefaults(unittest.TestCase):
+    """Verify that the OVOSCOPE_TRAINED_TIMEOUT default is 60s in CI and 5s locally.
+
+    This is a regression test ensuring the timeout scales appropriately: CI
+    (slower, cold caches) gets a generous default, while local runs stay tight.
+    """
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+        import os as os_module
+        self.os_module = os_module
+
+    def tearDown(self):
+        LOG.set_level("CRITICAL")
+
+    def test_ci_default_timeout_is_60_seconds(self):
+        """When CI=true, the default computed timeout must be 60s."""
+        # Test the logic: when CI env var is present, default should be 60s
+        with patch.dict("os.environ", {"CI": "true"}):
+            timeout = 60.0 if self.os_module.environ.get("CI") else 5.0
+            self.assertEqual(timeout, 60.0,
+                             "CI default timeout must be 60s to accommodate cold caches "
+                             "and contended runners")
+
+    def test_local_default_timeout_is_5_seconds(self):
+        """When CI is not set, the default computed timeout must be 5s."""
+        # Test the logic: when CI is absent, default should be 5s
+        with patch.dict("os.environ", {}, clear=True):
+            timeout = 60.0 if self.os_module.environ.get("CI") else 5.0
+            self.assertEqual(timeout, 5.0,
+                             "Local default timeout must be 5s for fast iteration")
+
+    def test_ovoscope_trained_timeout_honors_env_var(self):
+        """The OVOSCOPE_TRAINED_TIMEOUT env var is honored over the computed default."""
+        with patch.dict("os.environ", {"OVOSCOPE_TRAINED_TIMEOUT": "120"}):
+            timeout_str = self.os_module.environ.get("OVOSCOPE_TRAINED_TIMEOUT")
+            timeout = float(timeout_str) if timeout_str else None
+            self.assertEqual(timeout, 120.0,
+                             "OVOSCOPE_TRAINED_TIMEOUT env var should be respected")

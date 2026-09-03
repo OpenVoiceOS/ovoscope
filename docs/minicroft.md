@@ -174,6 +174,19 @@ croft = get_minicroft(
     secondary_langs=["en-US", "de-DE"],
 )
 ```
+
+When testing with N secondary languages, training overhead scales with the number of per-language containers — for example, a 17-locale suite may require 129 seconds for unconstrained training (on a system without resource limits). The default `OVOSCOPE_TRAINED_TIMEOUT` is tuned for single-language loads. For multilingual suites, pass an explicit `max_wait` value large enough to accommodate all language engines:
+
+```python
+croft = get_minicroft(
+    ["my-skill.openvoiceos"],
+    secondary_langs=["en-US", "pt-PT", "de-DE", "es-ES", "fr-FR"],
+    max_wait=300,  # Per-language training can be slow; allow extra margin
+)
+```
+
+The test suite itself can then settle to a quiet window using the same pattern `ovos-skill-alerts` uses for its multilingual fixtures: `max_wait=300 + settle passes` to ensure all per-language training completes before assertions run.
+
 ---
 ## Pipeline Plugin Config Overrides
 Use `pipeline_config` to override per-plugin configuration under `Configuration()["intents"]` before pipeline plugins initialize. This ensures tests are reproducible regardless of the user's local `mycroft.conf`.

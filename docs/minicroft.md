@@ -17,7 +17,8 @@ MiniCroft(
     enable_skill_api: bool = True,
     extra_skills: dict[str, OVOSSkill] | None = None,
     isolate_config: bool = True,
-    default_pipeline: list[str] | None = DEFAULT_TEST_PIPELINE,
+    default_pipeline: list[str] | None = LEAN_DEFAULT_PIPELINE,
+    extra_pipelines: list[str] | None = None,
     lang: str | None = None,
     secondary_langs: list[str] | None = None,
     pipeline_config: dict[str, dict] | None = None,
@@ -36,7 +37,8 @@ MiniCroft(
 | `enable_skill_api` | `True` | Enable skill API exposure |
 | `extra_skills` | `None` | Inject skill instances directly (useful for testing a skill class before packaging) |
 | `isolate_config` | `True` | Clear user XDG configs so tests are reproducible |
-| `default_pipeline` | `DEFAULT_TEST_PIPELINE` | Override the session pipeline for deterministic intent matching |
+| `default_pipeline` | `LEAN_DEFAULT_PIPELINE` | Full override of the session pipeline. Replaces the lean default entirely — see "Lean Default Pipeline" below. |
+| `extra_pipelines` | `None` | Matcher ids to append on top of whichever pipeline was chosen above (the lean default, or a `default_pipeline=` override), without having to restate the whole list — e.g. `extra_pipelines=M2V_PIPELINE` to add M2V to the lean default. |
 | `lang` | `None` | Override the system default language (`Configuration()["lang"]`). Patched before Adapt/Padatious init so vocab is registered for this language. |
 | `secondary_langs` | `None` | Set `Configuration()["secondary_langs"]`. Adapt and Padatious create per-language engines for each language in this list, enabling multilingual intent matching. |
 | `pipeline_config` | `None` | Per-pipeline plugin config overrides. A `dict` keyed by the plugin's config key under `Configuration()["intents"]` (e.g. `"ovos_m2v_pipeline"`). Patched before `super().__init__()` so pipeline plugins read overridden values during their `__init__`. Restored in `stop()`. |
@@ -52,6 +54,52 @@ MiniCroft(
 Loads plugins and marks the runtime as ready. Called internally by `start()`. Does not block: returns after all skills are loaded.
 ### `MiniCroft.stop()`
 Shuts down skills and closes the bus.
+---
+## Lean Default Pipeline
+By default, MiniCroft boots only `LEAN_DEFAULT_PIPELINE`: the Stop, Converse,
+Adapt, Padatious, Padacioso and Fallback matchers, high and medium
+confidence tiers. This is the set the ovoscope test suite (and every
+skill-fixture suite built on it) actually exercises — Stop is included
+unconditionally because skills assert stop behavior fleet-wide and the
+default config always runs it.
+
+Every OTHER installed pipeline plugin — `ovos-m2v-pipeline`,
+`ovos-m2v-prototype-pipeline`, `ovos-persona-pipeline-plugin`,
+`ovos-common-query-pipeline-plugin`, the OCP pipeline plugins, the `-low`
+confidence tier, and any third-party `opm.pipeline` plugin — is never
+instantiated by a lean-default boot. This matters beyond intent-matching
+determinism: some pipeline plugins do expensive or even blocking work at
+init or on common bus events (e.g. `ovos-m2v-pipeline`'s intent-sync handler
+sleeps synchronously), and instantiating every installed plugin regardless
+of what a test actually needs can push MiniCroft's `READY` wait well past
+what a CI job budgets for.
+
+Listing a matcher in `intents.pipeline` alone does **not** stop
+`IntentService` from loading the other installed plugins — only
+`intents.blacklisted_pipelines` does. MiniCroft computes and sets that
+blacklist for you: it is "every installed pipeline plugin not covered by
+the chosen pipeline", patched before `IntentService` is constructed, and
+restored in `stop()`.
+
+To keep the lean set but add one heavy matcher for a suite that needs it,
+use `extra_pipelines` instead of restating the whole lean list:
+
+```python
+from ovoscope import get_minicroft, M2V_PIPELINE
+
+croft = get_minicroft(["my-skill.openvoiceos"], extra_pipelines=M2V_PIPELINE)
+```
+
+To replace the pipeline entirely (e.g. to test Adapt in isolation, or to
+run the heavier `DEFAULT_TEST_PIPELINE`/`PERSONA_PIPELINE`/`M2V_PIPELINE`
+combinations documented elsewhere in this file), pass `default_pipeline=`
+as a full override — it is not merged with the lean default.
+
+If any matcher id in the resulting pipeline — lean default, `extra_pipelines`
+addition, or `default_pipeline` override — fails to load (the plugin isn't
+installed, or raises during construction), `get_minicroft()` raises
+`RuntimeError` naming the missing stage(s) once `READY` is reached, rather
+than silently running with fewer matchers than the test expects.
 ---
 ## Factory: `get_minicroft()`
 ```python
@@ -83,6 +131,11 @@ naming only the skill(s) that registered an intent and never got a
 `mycroft.skills.trained` reply — a stuck trainer in one skill never blames
 an unrelated, intentless skill loaded alongside it. Pass
 `wait_for_trained=False` to opt out.
+
+`get_minicroft()` also raises `RuntimeError` if any matcher id in the
+configured pipeline (see "Lean Default Pipeline" above) failed to load —
+naming the missing stage(s) — so a plugin that's absent or errors during
+init is never silently dropped from the boot.
 
 Only `ovos-core[lgpl,plugins]` (or the specific pipeline plugin packages)
 ship Adapt/Padatious/Padacioso matchers. Adapt and Padacioso live in

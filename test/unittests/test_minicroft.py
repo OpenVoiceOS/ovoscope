@@ -10,7 +10,9 @@ from ovos_workshop.skills.ovos import OVOSSkill
 
 from ovos_bus_client.session import SessionManager
 
-from ovoscope import MiniCroft, get_minicroft, DEFAULT_TEST_PIPELINE, LIGHT_TEST_PIPELINE, ADAPT_PIPELINE
+from ovoscope import (MiniCroft, get_minicroft, DEFAULT_TEST_PIPELINE,
+                      LIGHT_TEST_PIPELINE, ADAPT_PIPELINE, LEAN_DEFAULT_PIPELINE,
+                      M2V_PIPELINE, PERSONA_PIPELINE, is_pipeline_available)
 
 LEGACY_UTTERANCE = "recognizer_loop:utterance"
 SPEC_UTTERANCE = str(SpecMessage.UTTERANCE)  # ovos.utterance.handle
@@ -154,14 +156,15 @@ class TestMiniCroftPipelineIsolation(unittest.TestCase):
         mc.stop()
         self.assertEqual(SessionManager.default_session.pipeline, original)
 
-    def test_isolate_config_uses_default_test_pipeline(self):
-        """isolate_config=True with no explicit default_pipeline uses DEFAULT_TEST_PIPELINE or fallback."""
+    def test_isolate_config_uses_lean_default_pipeline(self):
+        """isolate_config=True with no explicit default_pipeline uses LEAN_DEFAULT_PIPELINE or fallback."""
         mc = get_minicroft([])
         try:
-            # If all plugins are installed, it uses DEFAULT_TEST_PIPELINE.
-            # Otherwise it falls back to LIGHT_TEST_PIPELINE.
-            # Both are valid outcomes of the "isolation + default" logic.
-            self.assertIn(mc.pipeline, [DEFAULT_TEST_PIPELINE, LIGHT_TEST_PIPELINE])
+            # If all plugins are installed, it uses LEAN_DEFAULT_PIPELINE.
+            # Otherwise it falls back to DEFAULT_TEST_PIPELINE/LIGHT_TEST_PIPELINE.
+            # All three are valid outcomes of the "isolation + default" logic.
+            self.assertIn(mc.pipeline,
+                          [LEAN_DEFAULT_PIPELINE, DEFAULT_TEST_PIPELINE, LIGHT_TEST_PIPELINE])
             self.assertEqual(SessionManager.default_session.pipeline, mc.pipeline)
         finally:
             mc.stop()
@@ -586,3 +589,87 @@ class TestTrainedQuietWindow(unittest.TestCase):
             self.assertEqual(mc._trained_times, [])
         finally:
             mc.stop()
+
+
+class TestMiniCroftLeanBootDefault(unittest.TestCase):
+    """The lean default pipeline must boot ONLY the matcher families the
+    ovoscope suite (and skill-fixture suites built on it) actually assert
+    against — heavier installed pipeline plugins (m2v, persona, common_query,
+    OCP, ...) must never be instantiated by default, and must stay opt-in via
+    `extra_pipelines=`/`default_pipeline=`.
+    """
+
+    def setUp(self):
+        LOG.set_level("ERROR")
+
+    def tearDown(self):
+        LOG.set_level("CRITICAL")
+
+    def test_lean_default_excludes_heavy_pipelines(self):
+        """LEAN_DEFAULT_PIPELINE must not reference m2v/persona/common_query/OCP."""
+        for stage in LEAN_DEFAULT_PIPELINE:
+            self.assertNotIn("m2v", stage, f"m2v stage found: {stage}")
+            self.assertNotIn("persona", stage, f"persona stage found: {stage}")
+            self.assertNotIn("common-query", stage, f"common_query stage found: {stage}")
+            self.assertNotIn("ocp", stage, f"OCP stage found: {stage}")
+            self.assertNotIn("-low", stage, f"-low tier stage found: {stage}")
+
+    def test_lean_default_boots_only_lean_plugins(self):
+        """A lean-default MiniCroft must not instantiate heavy pipeline
+        plugins that ARE installed but not part of the lean set — this is
+        the actual fix: `intents.pipeline` alone does not stop IntentService
+        from loading every installed plugin, only `blacklisted_pipelines`
+        does.
+        """
+        if not is_pipeline_available(LEAN_DEFAULT_PIPELINE):
+            raise unittest.SkipTest("lean pipeline plugins not installed")
+        mc = get_minicroft([], wait_for_trained=False)
+        try:
+            loaded = set(mc.intents.pipeline_plugins.keys())
+            for heavy in ("ovos-m2v-pipeline", "ovos-m2v-prototype-pipeline",
+                         "ovos-persona-pipeline-plugin",
+                         "ovos-common-query-pipeline-plugin",
+                         "ovos-ocp-pipeline-plugin",
+                         "ovos-ocp-pipeline-plugin-legacy"):
+                self.assertNotIn(heavy, loaded,
+                                 f"{heavy} was instantiated by a lean-default MiniCroft")
+            self.assertIn("ovos-adapt-pipeline-plugin", loaded)
+            self.assertIn("ovos-stop-pipeline-plugin", loaded)
+        finally:
+            mc.stop()
+
+    def test_extra_pipelines_appends_to_lean_default(self):
+        """extra_pipelines= appends stages on top of the lean default,
+        without the caller having to restate the whole lean list."""
+        if not is_pipeline_available(LEAN_DEFAULT_PIPELINE + M2V_PIPELINE):
+            raise unittest.SkipTest("lean + m2v pipeline plugins not installed")
+        mc = get_minicroft([], extra_pipelines=M2V_PIPELINE, wait_for_trained=False)
+        try:
+            for stage in LEAN_DEFAULT_PIPELINE:
+                self.assertIn(stage, mc.pipeline)
+            for stage in M2V_PIPELINE:
+                self.assertIn(stage, mc.pipeline)
+            loaded = set(mc.intents.pipeline_plugins.keys())
+            self.assertIn("ovos-m2v-pipeline", loaded)
+        finally:
+            mc.stop()
+
+    def test_default_pipeline_full_override_still_works(self):
+        """default_pipeline= remains a full override — it replaces the lean
+        default entirely rather than extending it."""
+        mc = get_minicroft([], default_pipeline=ADAPT_PIPELINE, wait_for_trained=False)
+        try:
+            self.assertEqual(mc.pipeline, ADAPT_PIPELINE)
+            for stage in LEAN_DEFAULT_PIPELINE:
+                if stage not in ADAPT_PIPELINE:
+                    self.assertNotIn(stage, mc.pipeline)
+        finally:
+            mc.stop()
+
+    def test_bogus_pipeline_id_raises_naming_it(self):
+        """A configured-but-unloadable pipeline id must raise, naming it —
+        never silently vanish the way the m2v/adapt hole did."""
+        bogus = "ovos-definitely-not-a-real-pipeline-plugin-high"
+        with self.assertRaises(RuntimeError) as ctx:
+            get_minicroft([], default_pipeline=[bogus], wait_for_trained=False)
+        self.assertIn(bogus, str(ctx.exception))

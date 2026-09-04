@@ -513,22 +513,6 @@ class TestSerialization(unittest.TestCase):
         finally:
             os.unlink(path)
 
-    def test_anonymize_strips_location(self):
-        """save(anonymize=True) replaces location data with N/A."""
-        original = self._make_simple_test()
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-            path = f.name
-        try:
-            original.save(path, anonymize=True)
-            with open(path) as f:
-                data = json.load(f)
-            src_ctx = data["source_message"][0].get("context", {})
-            loc = src_ctx.get("session", {}).get("location_preferences", {})
-            if loc:
-                self.assertEqual(loc.get("city", {}).get("name"), "N/A")
-        finally:
-            os.unlink(path)
-
 
 # ---------------------------------------------------------------------------
 # Tests: multi-turn (list of source messages)

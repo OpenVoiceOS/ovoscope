@@ -1775,20 +1775,10 @@ class End2EndTest:
     def anonymize_message(message: Message) -> Message:
         msg = Message(message.msg_type, message.data, message.context)
         sess = SessionManager.get(message)
-        sess.location_preferences = {
-            "city": {
-                "code": "N/A",
-                "name": "N/A",
-                "state": {
-                    "code": "N/A",
-                    "name": "N/A",
-                    "country": {
-                        "code": "N/A", "name": "N/A"
-                    }
-                }
-            },
-            "coordinate": {"latitude": 0, "longitude": 0},
-            "timezone": {"code": "Europe/Lisbon", "name": "Europe/Lisbon"}
+        sess.location = {
+            "lat": 0.0,
+            "lon": 0.0,
+            "tz": "Europe/Lisbon"
         }
         msg.context["session"] = sess.serialize()
         return msg

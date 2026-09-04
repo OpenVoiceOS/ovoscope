@@ -597,7 +597,7 @@ class TestMiniCroftLangConfig(unittest.TestCase):
         """MiniCroft lang parameter overrides session lang."""
         mc = get_minicroft([], lang="pt-BR")
         try:
-            self.assertEqual(SessionManager.default_session.lang, "pt-BR")
+            self.assertEqual(SessionManager.get_default_session().lang, "pt-BR")
         finally:
             mc.stop()
 

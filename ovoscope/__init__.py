@@ -425,14 +425,14 @@ class MiniCroft(SkillManager):
         # instance be collected.
         self._original_skill_api_bus = SkillApi.bus
 
-        # SessionManager.default_session is a process-wide singleton. Booting a
-        # MiniCroft (and running a test through it) mutates it in several ways:
-        # run() overrides pipeline/lang, End2EndTest.execute() calls
-        # activate_skill() for `inject_active`, and any message that carries a
-        # session with id "default" folds its wire values onto the live object.
-        # Snapshot the whole thing so stop() can put it back exactly as found —
-        # otherwise every later test in the process inherits the mutation.
-        self._default_session_obj = SessionManager.default_session
+        # SessionManager.get_default_session() returns the process-wide "default"
+        # entry of the session registry; booting a MiniCroft (and running a test
+        # through it) mutates it in several ways (run() overrides pipeline/lang,
+        # End2EndTest.execute() activates skills for `inject_active`, and any
+        # message carrying a session id "default" folds its wire values onto the
+        # live object), so snapshot it here and put it back in stop() exactly as
+        # found -- otherwise every later test in the process inherits the mutation.
+        self._default_session_obj = SessionManager.get_default_session()
         try:
             # ovos-bus-client 2.x names these to_dict/from_dict; 1.x uses
             # serialize/deserialize. Support both — a silent None here would
@@ -856,7 +856,7 @@ class MiniCroft(SkillManager):
 
             # Two-pronged pipeline override:
             #
-            # 1. SessionManager.default_session — controls sessions created from
+            # 1. SessionManager.get_default_session() — controls sessions created from
             #    messages that carry NO explicit session context (e.g. bare
             #    `Message("recognizer_loop:utterance", ...)` without session).
             #
@@ -865,8 +865,8 @@ class MiniCroft(SkillManager):
             #    `Configuration().get('intents', {}).get('pipeline')`.
             #    Note: Configuration.reload() does NOT invalidate the dict cache
             #    in-place, so we must patch the live singleton directly.
-            self._original_pipeline = SessionManager.default_session.pipeline[:]
-            SessionManager.default_session.pipeline = self._default_pipeline
+            self._original_pipeline = SessionManager.get_default_session().pipeline[:]
+            SessionManager.get_default_session().pipeline = self._default_pipeline
             cfg = Configuration()
             intents_cfg = cfg.get("intents", {})
             self._had_cfg_pipeline = "pipeline" in intents_cfg
@@ -878,8 +878,8 @@ class MiniCroft(SkillManager):
                       f"({len(self._default_pipeline)} stages, "
                       f"was {len(self._original_pipeline)})")
         if self._lang is not None:
-            self._original_lang = SessionManager.default_session.lang
-            SessionManager.default_session.lang = self._lang
+            self._original_lang = SessionManager.get_default_session().lang
+            SessionManager.get_default_session().lang = self._lang
         if self._isolated_config:
             # Session.__init__ reads Configuration()["skills"]["blacklisted_skills"]
             # and Configuration()["intents"]["blacklisted_intents"] from the live
@@ -968,7 +968,7 @@ class MiniCroft(SkillManager):
             except Exception:
                 pass
         if self._default_pipeline is not None and self._original_pipeline is not None:
-            SessionManager.default_session.pipeline = self._original_pipeline
+            SessionManager.get_default_session().pipeline = self._original_pipeline
             cfg = Configuration()
             if "intents" in cfg:
                 if self._had_cfg_pipeline:
@@ -1003,7 +1003,7 @@ class MiniCroft(SkillManager):
                 cfg["lang"] = self._original_cfg_lang
             else:
                 cfg.pop("lang", None)
-            SessionManager.default_session.lang = self._original_lang
+            SessionManager.get_default_session().lang = self._original_lang
             LOG.debug(f"ovoscope: lang restored to '{self._original_lang}'")
         if self._secondary_langs is not None:
             cfg = Configuration()
@@ -1065,7 +1065,7 @@ class MiniCroft(SkillManager):
             # The snapshot failed. Do not degrade to a total no-op: skills
             # activated during the run are the mutation that leaks hardest,
             # so put active_skills back explicitly.
-            sess = SessionManager.default_session
+            sess = SessionManager.get_default_session()
             active = getattr(self, "_default_active_skills", None)
             if sess is not None and active is not None:
                 try:
@@ -1079,7 +1079,7 @@ class MiniCroft(SkillManager):
         # replace the singleton (SessionManager.reset_default_session), and
         # mutations after the swap land on the new object — bailing out on an
         # identity mismatch would leak exactly the state this exists to scrub.
-        sess = SessionManager.default_session
+        sess = SessionManager.get_default_session()
         if sess is None:
             return
         # Rebuild a pristine Session from the snapshot and copy every field

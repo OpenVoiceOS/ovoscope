@@ -383,7 +383,7 @@ class TestDefaultSessionRestoreFallbacks(unittest.TestCase):
         from ovoscope import MiniCroft
 
         croft = MiniCroft.__new__(MiniCroft)
-        sess = SessionManager.default_session
+        sess = SessionManager.get_default_session()
         if hasattr(sess, "to_dict"):
             croft._session_api = "dict"
             croft._default_session_state = sess.to_dict()
@@ -425,7 +425,7 @@ class TestDefaultSessionRestoreFallbacks(unittest.TestCase):
         croft = MiniCroft.__new__(MiniCroft)
         croft._default_session_state = None
         croft._default_active_skills = []
-        sess = SessionManager.default_session
+        sess = SessionManager.get_default_session()
         original = list(sess.active_skills)
         try:
             sess.activate_skill("ovoscope.audit.r2.leaked")

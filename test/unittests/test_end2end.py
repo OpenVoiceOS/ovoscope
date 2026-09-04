@@ -242,7 +242,10 @@ class TestAssertions(unittest.TestCase):
             )
 
     def test_wrong_message_count_raises(self):
-        """test_message_number=True raises AssertionError on count mismatch."""
+        """test_message_number=True raises AssertionError on count mismatch,
+        and the exception text itself must list the captured messages —
+        under pytest-xdist a worker's stdout doesn't reach the CI job log,
+        so the printed diagnostic loop is not enough (ovos-core#918)."""
         src = _make_custom("unittest.echo", {"text": "count"})
         test = End2EndTest(
             minicroft=self.mc,
@@ -251,8 +254,14 @@ class TestAssertions(unittest.TestCase):
             expected_messages=[src],        # only 1 but 3 will be captured
             **self._base_flags(test_message_number=True),
         )
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(AssertionError) as ctx:
             test.execute(timeout=10)
+        msg = str(ctx.exception)
+        self.assertIn("got 3 messages, expected 1", msg)
+        # the extra messages beyond the expected one must be named in the
+        # assertion text, not just printed to a stdout no one can see
+        self.assertIn("ovos.utterance.speak", msg)
+        self.assertIn("ovos.utterance.handled", msg)
 
     def test_wrong_message_type_raises(self):
         """test_msg_type=True raises AssertionError when msg_type doesn't match."""

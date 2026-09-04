@@ -1407,6 +1407,23 @@ def _topic_matches(msg_type: str, name: str) -> bool:
     return False
 
 
+def _describe_messages(messages: List[Message]) -> str:
+    """Render a captured message list as a compact, numbered one-line-per-message
+    summary for use inside assertion text.
+
+    pytest-xdist runs each worker's stdout out-of-band, so anything only
+    ``print()``-ed during a captured e2e scenario is lost from the CI job log
+    on failure. The assertion text is the only diagnostic guaranteed to
+    survive, so it must carry the message list itself.
+    """
+    lines = []
+    for i, m in enumerate(messages):
+        ctx = m.context or {}
+        trimmed_ctx = {k: ctx[k] for k in ("session_id", "pipeline_id", "skill_id") if k in ctx}
+        lines.append(f"\t{i}: {m.msg_type} data={m.data} context={trimmed_ctx}")
+    return "\n".join(lines)
+
+
 @dataclasses.dataclass()
 class End2EndTest:
     skill_ids: List[str]  # skill_ids to load during the test (from skill plugins)
@@ -1653,7 +1670,10 @@ class End2EndTest:
                             first_bad = n
                             print("⚠️ first differing message:", f"{n.msg_type} (received)", f"{e.msg_type} (expected)")
                     print("\t", i, n.serialize())
-            assert n1 == n2, f"❌ got {n2} messages, expected {n1}"
+            assert n1 == n2, (
+                f"❌ got {n2} messages, expected {n1}\n"
+                + _describe_messages(messages)
+            )
             if self.verbose:
                 print(f"✅ got {n1} messages as expected")
 

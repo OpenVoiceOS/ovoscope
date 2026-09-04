@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.21a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.21a1) (2026-09-04)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.20a1...1.6.21a1)
+
+**Merged pull requests:**
+
+- fix: set session.location with the three-key spec shape [\#167](https://github.com/OpenVoiceOS/ovoscope/pull/167) ([JarbasAl](https://github.com/JarbasAl))
+- fix: carry the captured message list in the e2e count-mismatch assertion [\#166](https://github.com/OpenVoiceOS/ovoscope/pull/166) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.20a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.20a1) (2026-09-03)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.19a1...1.6.20a1)

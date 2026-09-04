@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.24a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.24a1) (2026-09-04)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.23a1...1.6.24a1)
+
+**Merged pull requests:**
+
+- fix: stop reading the removed SessionManager.default\_session mirror [\#173](https://github.com/OpenVoiceOS/ovoscope/pull/173) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.23a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.23a1) (2026-09-04)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.22a1...1.6.23a1)

@@ -13,3 +13,9 @@ jobs:
       python_versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
       install_extras: 'audio,pydantic,media,listener,bench'
       test_path: 'test/unittests/'
+      # TEMPORARY until ovos-plugin-manager 3.0.0a1 + ovos-media release the
+      # MediaBackend v2 port; then delete. pre_install_pip runs before the
+      # wheel+extras install step, seeding these git versions so the later
+      # `ovos-media>=2.0.0a9` floor (already satisfied by the newer git
+      # version) does not pull the pre-v2-port release from PyPI instead.
+      pre_install_pip: "git+https://github.com/OpenVoiceOS/ovos-plugin-manager@feat/media-backend-v2 git+https://github.com/OpenVoiceOS/ovos-media@feat/media-backend-v2-port"

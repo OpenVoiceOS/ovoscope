@@ -11,6 +11,7 @@
 | [end2end-test.md](end2end-test.md) | `End2EndTest`: full test runner reference |
 | [e2e-pipeline-harness.md](e2e-pipeline-harness.md) | `E2EPipelineHarness`, `wait_for_match`, `make_utterance_message`: testing a single pipeline plugin (Adapt/Padatious/...) against raw bus messages |
 | [intent-cases.md](intent-cases.md) | `IntentCase`, `register_intent_case_tests`: file-based intent test cases (`.intent.test`) with per-pipeline-family generated tests |
+| [multi-engine-golden.md](multi-engine-golden.md) | `run_golden_suite`, `build_engine_intents`, `assert_gates`: golden-utterance corpus scored against Padatious/Padacioso/Nebulento (gating) and Model2Vec's `m2v-prototype` (informational), with arena-shaped prediction rows |
 | [pydantic-integration.md](pydantic-integration.md) | Using `ovos-pydantic-models` with OvoScope |
 | [audio-testing.md](audio-testing.md) | `AudioServiceHarness`, `PlaybackServiceHarness`: testing audio services |
 | [media-testing.md](media-testing.md) | `OCPPlayerHarness`, `OCPCaptureSession`, `MockOCPBackend`: testing the `ovos-media` OCP player (and driving a real OCP backend) |

@@ -87,6 +87,24 @@ class TestGetMiniCroft(unittest.TestCase):
         finally:
             mc.stop()
 
+    def test_boot_and_stop_without_default_session_class_attribute(self):
+        """ovos-spec-tools>=1.10.5a2 removed SessionManager.default_session as a
+        class attribute; get_minicroft() must only ever go through
+        get_default_session()/the sessions registry, never that mirror."""
+        had_attr = "default_session" in vars(SessionManager)
+        original = vars(SessionManager).get("default_session")
+        if had_attr:
+            delattr(SessionManager, "default_session")
+        try:
+            mc = get_minicroft([])
+            try:
+                self.assertIsInstance(mc, MiniCroft)
+            finally:
+                mc.stop()
+        finally:
+            if had_attr:
+                SessionManager.default_session = original
+
     def test_basedexception_during_boot_still_stops_croft(self):
         """A BaseException (e.g. pytest-timeout's Failed, or a real
         KeyboardInterrupt) raised while waiting for READY must still trigger
@@ -143,19 +161,19 @@ class TestMiniCroftPipelineIsolation(unittest.TestCase):
         LOG.set_level("CRITICAL")
 
     def test_default_pipeline_overrides_default_session(self):
-        """default_pipeline is applied to SessionManager.default_session."""
+        """default_pipeline is applied to SessionManager.get_default_session()."""
         mc = get_minicroft([], default_pipeline=ADAPT_PIPELINE)
         try:
-            self.assertEqual(SessionManager.default_session.pipeline, ADAPT_PIPELINE)
+            self.assertEqual(SessionManager.get_default_session().pipeline, ADAPT_PIPELINE)
         finally:
             mc.stop()
 
     def test_default_pipeline_restored_after_stop(self):
         """After stop(), default_session.pipeline is restored to its previous value."""
-        original = SessionManager.default_session.pipeline[:]
+        original = SessionManager.get_default_session().pipeline[:]
         mc = get_minicroft([], default_pipeline=ADAPT_PIPELINE)
         mc.stop()
-        self.assertEqual(SessionManager.default_session.pipeline, original)
+        self.assertEqual(SessionManager.get_default_session().pipeline, original)
 
     def test_isolate_config_uses_lean_default_pipeline(self):
         """isolate_config=True with no explicit default_pipeline uses LEAN_DEFAULT_PIPELINE or fallback."""
@@ -166,7 +184,7 @@ class TestMiniCroftPipelineIsolation(unittest.TestCase):
             # All three are valid outcomes of the "isolation + default" logic.
             self.assertIn(mc.pipeline,
                           [LEAN_DEFAULT_PIPELINE, DEFAULT_TEST_PIPELINE, LIGHT_TEST_PIPELINE])
-            self.assertEqual(SessionManager.default_session.pipeline, mc.pipeline)
+            self.assertEqual(SessionManager.get_default_session().pipeline, mc.pipeline)
         finally:
             mc.stop()
 
@@ -179,10 +197,10 @@ class TestMiniCroftPipelineIsolation(unittest.TestCase):
 
     def test_no_pipeline_override_when_none(self):
         """default_pipeline=None must not alter the existing default session pipeline."""
-        before = SessionManager.default_session.pipeline[:]
+        before = SessionManager.get_default_session().pipeline[:]
         mc = get_minicroft([], isolate_config=False, default_pipeline=None)
         try:
-            self.assertEqual(SessionManager.default_session.pipeline, before)
+            self.assertEqual(SessionManager.get_default_session().pipeline, before)
         finally:
             mc.stop()
 

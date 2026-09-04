@@ -36,7 +36,7 @@ class TestTeardownOnFailure(unittest.TestCase):
 
     def test_managed_minicroft_stopped_when_assertion_fails(self):
         original_bus = SessionManager.bus
-        original_pipeline = SessionManager.default_session.pipeline[:]
+        original_pipeline = SessionManager.get_default_session().pipeline[:]
 
         test = End2EndTest(
             skill_ids=[],
@@ -51,7 +51,7 @@ class TestTeardownOnFailure(unittest.TestCase):
 
         # The whole point: globals are back even though execute() raised.
         self.assertIs(SessionManager.bus, original_bus)
-        self.assertEqual(SessionManager.default_session.pipeline, original_pipeline)
+        self.assertEqual(SessionManager.get_default_session().pipeline, original_pipeline)
         self.assertIsNone(test.minicroft)
 
     def test_capture_timeout_is_reported_as_a_timeout(self):
@@ -84,7 +84,7 @@ class TestDefaultSessionIsolation(unittest.TestCase):
         LOG.set_level("CRITICAL")
 
     def test_inject_active_does_not_leak_into_default_session(self):
-        before = {s[0] for s in SessionManager.default_session.active_skills}
+        before = {s[0] for s in SessionManager.get_default_session().active_skills}
 
         test = End2EndTest(
             skill_ids=[],
@@ -98,32 +98,32 @@ class TestDefaultSessionIsolation(unittest.TestCase):
         with self.assertRaises(AssertionError):
             test.execute(timeout=2)
 
-        after = {s[0] for s in SessionManager.default_session.active_skills}
+        after = {s[0] for s in SessionManager.get_default_session().active_skills}
         self.assertEqual(before, after,
                          "inject_active leaked into the default session")
 
     def test_stop_restores_default_session_lang_and_pipeline(self):
-        sess = SessionManager.default_session
+        sess = SessionManager.get_default_session()
         original_lang = sess.lang
         original_pipeline = sess.pipeline[:]
 
         mc = get_minicroft([], lang="pt-PT")
         try:
-            self.assertEqual(SessionManager.default_session.lang, "pt-PT")
+            self.assertEqual(SessionManager.get_default_session().lang, "pt-PT")
         finally:
             mc.stop()
 
-        self.assertEqual(SessionManager.default_session.lang, original_lang)
-        self.assertEqual(SessionManager.default_session.pipeline, original_pipeline)
+        self.assertEqual(SessionManager.get_default_session().lang, original_lang)
+        self.assertEqual(SessionManager.get_default_session().pipeline, original_pipeline)
 
     def test_default_session_mutated_mid_test_is_restored(self):
         """Even a mutation MiniCroft never made itself must be undone."""
         mc = get_minicroft([])
         try:
-            SessionManager.default_session.activate_skill("ovoscope-audit-x.test")
+            SessionManager.get_default_session().activate_skill("ovoscope-audit-x.test")
         finally:
             mc.stop()
-        actives = {s[0] for s in SessionManager.default_session.active_skills}
+        actives = {s[0] for s in SessionManager.get_default_session().active_skills}
         self.assertNotIn("ovoscope-audit-x.test", actives)
 
 

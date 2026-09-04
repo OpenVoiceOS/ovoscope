@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.23a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.23a1) (2026-09-04)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.22a1...1.6.23a1)
+
+**Merged pull requests:**
+
+- fix: playback harness leaves no state that breaks a later playback test [\#171](https://github.com/OpenVoiceOS/ovoscope/pull/171) ([JarbasAl](https://github.com/JarbasAl))
+
+## [1.6.22a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.22a1) (2026-09-04)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.21a1...1.6.22a1)
+
 ## [1.6.21a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.21a1) (2026-09-04)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.20a1...1.6.21a1)

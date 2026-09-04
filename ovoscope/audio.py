@@ -554,8 +554,9 @@ class PlaybackServiceHarness:
     observe the resulting ``ovos.audio.output.started/ended`` events.
 
     The harness patches ``ovos_utils.sound.play_audio`` so no actual audio
-    device is accessed. It also drains ``TTS.queue`` before construction to
-    prevent state bleed between tests.
+    device is accessed. It also drains ``TTS.queue`` before construction and
+    gives the harness its own ``TTSContext._caches``, so no queued utterance
+    and no already-synthesised audio bleeds between tests.
 
     Args:
         validate_source: Enable session-source validation in the service.
@@ -600,9 +601,11 @@ class PlaybackServiceHarness:
         self.mock_tts: Optional[TTS] = None
         # Paths captured from the ``play_audio`` side_effect, in playback order.
         self.captured_wavs: List[str] = []
-        # process-wide TTS.queue bookkeeping (see __enter__)
+        # process-wide TTS.queue / TTSContext._caches bookkeeping (see __enter__)
         self._previous_tts_queue = None
         self._replaced_tts_queue: bool = False
+        self._previous_tts_caches = None
+        self._replaced_tts_caches: bool = False
         self._play_audio_patcher = None
         self._audio_enabled_patcher = None
         self._audio_output_start = threading.Event()
@@ -616,6 +619,7 @@ class PlaybackServiceHarness:
             self
         """
         from ovos_audio.service import PlaybackService
+        from ovos_plugin_manager.templates.tts import TTSContext
         from queue import Queue
 
         # ``TTS.queue`` is process-wide CLASS state, so only ONE
@@ -647,6 +651,14 @@ class PlaybackServiceHarness:
             self._previous_tts_queue = TTS.queue
             self._replaced_tts_queue = True
             TTS.queue = Queue()
+            # ``TTSContext._caches`` is keyed by tts_id, so two harnesses
+            # driving the same TTS class share synthesised audio: the second
+            # harness serves the sentence from the first harness's cache and
+            # never calls ``get_tts`` at all. Give each harness its own cache
+            # store so every utterance is really synthesised.
+            self._previous_tts_caches = TTSContext._caches
+            self._replaced_tts_caches = True
+            TTSContext._caches = {}
             PlaybackServiceHarness._active = self
 
             self.bus = FakeBus(modernize=self.modernize,
@@ -716,10 +728,14 @@ class PlaybackServiceHarness:
         return self
 
     def _release_tts_queue(self) -> None:
-        """Restore the ``TTS.queue`` object this harness replaced."""
+        """Restore the process-wide TTS state this harness replaced."""
         if getattr(self, "_replaced_tts_queue", False):
             TTS.queue = self._previous_tts_queue
             self._replaced_tts_queue = False
+        if getattr(self, "_replaced_tts_caches", False):
+            from ovos_plugin_manager.templates.tts import TTSContext
+            TTSContext._caches = self._previous_tts_caches
+            self._replaced_tts_caches = False
         if PlaybackServiceHarness._active is self:
             PlaybackServiceHarness._active = None
 

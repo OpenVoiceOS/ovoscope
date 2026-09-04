@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.7.0a1) (2026-09-04)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.24a1...1.7.0a1)
+
+**Merged pull requests:**
+
+- feat: multi-engine golden-utterance runner \(ovoscope.golden\) [\#165](https://github.com/OpenVoiceOS/ovoscope/pull/165) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.6.24a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.24a1) (2026-09-04)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.23a1...1.6.24a1)

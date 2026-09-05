@@ -16,5 +16,9 @@ jobs:
       python_version: "3.12"
       test_path: "test/unittests/"
       coverage_source: "ovoscope"
-      install_extras: "audio,pydantic"
+      install_extras: "audio,pydantic,media,listener,bench"
       deploy_pages: true
+      # TEMPORARY until ovos-plugin-manager 3.0.0a1 + ovos-media release the
+      # MediaBackend v2 port; then delete. See build-tests.yml's matching
+      # comment for why this is needed even with the media extra above.
+      pre_install_pip: "git+https://github.com/OpenVoiceOS/ovos-plugin-manager@feat/media-backend-v2 git+https://github.com/OpenVoiceOS/ovos-media@feat/media-backend-v2-port"

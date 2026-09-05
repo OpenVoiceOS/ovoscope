@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.7.0a2) (2026-09-05)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.7.0a1...1.7.0a2)
+
+**Merged pull requests:**
+
+- chore: add reproducible fleet e2e test-count sweep script [\#174](https://github.com/OpenVoiceOS/ovoscope/pull/174) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.7.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.7.0a1) (2026-09-04)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.24a1...1.7.0a1)

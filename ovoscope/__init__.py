@@ -210,6 +210,7 @@ LEAN_DEFAULT_PIPELINE = [
     "ovos-padacioso-pipeline-plugin-medium",
     "ovos-fallback-pipeline-plugin-high",
     "ovos-fallback-pipeline-plugin-medium",
+    "ovos-fallback-pipeline-plugin-low",
 ]
 
 # Standard test pipeline — all standard built-in stages.

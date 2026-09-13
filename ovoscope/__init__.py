@@ -1696,6 +1696,8 @@ class CaptureSession:
     done: threading.Event = dataclasses.field(default_factory=lambda: threading.Event())
     _eof_lock: threading.Lock = dataclasses.field(default_factory=lambda: threading.Lock())
     _eof_seen: int = 0
+    # set by the first finish(); a second finish() must not touch the bus again
+    _finished: bool = False
     # Handlers are registered in __post_init__, long before the first capture()
     # and again between captures. An eof arriving outside a capture window (a
     # late message from a previous scenario, or a skill emitting the eof topic
@@ -1776,23 +1778,27 @@ class CaptureSession:
     def finish(self) -> List[Message]:
         with self._eof_lock:
             self._armed = False
+            already_finished = self._finished
+            self._finished = True
         self.done.set()
-        self.minicroft.bus.remove("message", self.handle_message)
-        for m in self._effective_eof_msgs():
-            self.minicroft.bus.remove(m, self.handle_end_of_test)
-        # Return a snapshot: the live list is still owned by this session (and
-        # __del__ calls finish() again), so handing it out invites surprise
-        # mutation from a late handler.
+        if not already_finished:
+            self.minicroft.bus.remove("message", self.handle_message)
+            for m in self._effective_eof_msgs():
+                self.minicroft.bus.remove(m, self.handle_end_of_test)
+        # Return a snapshot: the live list is still owned by this session, so
+        # handing it out invites surprise mutation from a late handler.
         return list(self.responses)
 
     def __del__(self):
-        # At interpreter shutdown, or when construction failed part-way, the
-        # MiniCroft may have no bus (or be gone entirely). finish() would then
-        # raise inside __del__, which Python can only print and swallow.
-        if getattr(getattr(self, "minicroft", None), "bus", None) is None:
-            return
+        # Take no lock and never call the bus here. The cyclic collector can
+        # run __del__ on a thread that already holds pyee's non-reentrant
+        # emitter lock (inside _call_handlers), and bus.remove() would wait on
+        # that same lock forever. __del__ also has nothing to remove: while the
+        # handlers are registered, the bus holds a reference to this session,
+        # so it can only be collected after finish() or together with its bus.
         try:
-            self.finish()
+            self._armed = False
+            self.done.set()
         except Exception:
             pass
 

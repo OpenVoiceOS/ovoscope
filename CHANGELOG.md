@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.6a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.6a1) (2026-09-13)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.5a1...1.8.6a1)
+
+**Merged pull requests:**
+
+- fix: CaptureSession.\_\_del\_\_ takes no bus lock, and finish\(\) is idempotent [\#201](https://github.com/OpenVoiceOS/ovoscope/pull/201) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.8.5a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.5a1) (2026-09-10)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.4a1...1.8.5a1)
@@ -370,10 +378,6 @@
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.22.0a1...0.22.1a1)
 
-**Merged pull requests:**
-
-- fix: pytest 9 compatibility for the pytest11 plugin [\#88](https://github.com/OpenVoiceOS/ovoscope/pull/88) ([JarbasAl](https://github.com/JarbasAl))
-
 ## [0.22.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.22.0a1) (2026-06-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.21.1a1...0.22.0a1)
@@ -385,10 +389,6 @@
 ## [0.21.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.21.0a1) (2026-06-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.20.0a1...0.21.0a1)
-
-**Merged pull requests:**
-
-- feat: export ovos-media OCP harness from the package + add \[media\] extra [\#89](https://github.com/OpenVoiceOS/ovoscope/pull/89) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [0.20.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.20.0a1) (2026-06-24)
 

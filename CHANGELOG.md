@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.6a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.6a2) (2026-09-16)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.6a1...1.8.6a2)
+
+**Merged pull requests:**
+
+- ci: release build\_tests install the test extra [\#188](https://github.com/OpenVoiceOS/ovoscope/pull/188) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.8.6a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.6a1) (2026-09-13)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.5a1...1.8.6a1)
@@ -369,10 +377,6 @@
 ## [1.0.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.0a1) (2026-06-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/0.22.1a1...1.0.0a1)
-
-**Breaking changes:**
-
-- feat!: audio harness on OVOS spec bus namespace [\#92](https://github.com/OpenVoiceOS/ovoscope/pull/92) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [0.22.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/0.22.1a1) (2026-06-25)
 

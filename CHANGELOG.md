@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.7a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.7a1) (2026-09-17)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.6a2...1.8.7a1)
+
+**Merged pull requests:**
+
+- fix: pin the keys the default boot writes, and assert stop restores them [\#200](https://github.com/OpenVoiceOS/ovoscope/pull/200) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.8.6a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.6a2) (2026-09-16)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.6a1...1.8.6a2)

@@ -416,3 +416,14 @@ class TestAssertionHelpersAcceptCanonicalTopics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWakewordDestination(unittest.TestCase):
+    def test_wakeword_destination_is_a_string(self):
+        # OVOS-MSG-1 §3.3: destination is a string, with no list form.
+        from types import SimpleNamespace
+        bus = Mock()
+        MiniVoiceLoop._emit_wakeword(SimpleNamespace(bus=bus), b"",
+                                     {"key_phrase": "hey_mycroft"})
+        msg = bus.emit.call_args[0][0]
+        self.assertEqual(msg.context["destination"], "skills")

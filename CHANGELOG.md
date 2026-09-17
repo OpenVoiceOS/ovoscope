@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.9a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.9a1) (2026-09-17)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.8a1...1.8.9a1)
+
+**Merged pull requests:**
+
+- fix: reach fallback-low tier and stop leaking state on a slow trainer [\#178](https://github.com/OpenVoiceOS/ovoscope/pull/178) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.8.8a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.8a1) (2026-09-17)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.7a1...1.8.8a1)
@@ -381,10 +389,6 @@
 ## [1.0.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.1a1) (2026-06-27)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.0.0a1...1.0.1a1)
-
-**Merged pull requests:**
-
-- fix: guard None blacklisted\_skills/intents in final-session check [\#98](https://github.com/OpenVoiceOS/ovoscope/pull/98) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.0.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.0a1) (2026-06-25)
 

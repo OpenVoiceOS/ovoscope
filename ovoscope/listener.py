@@ -525,7 +525,7 @@ class MiniListener:
                 self.bus.emit(Message(
                     "recognizer_loop:utterance",
                     {"utterances": [transcript], "lang": language},
-                    {**ctx, "destination": ["skills"]},
+                    {**ctx, "destination": "skills"},
                 ))
 
         return list(self._messages)

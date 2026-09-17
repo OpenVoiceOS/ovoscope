@@ -855,7 +855,7 @@ class MiniVoiceLoop(ListenerHarness):
         context = {
             "client_name": "ovos_dinkum_listener",
             "source": "audio",
-            "destination": ["skills"],
+            "destination": "skills",
         }
         self.bus.emit(Message("recognizer_loop:wakeword", payload, context))
 

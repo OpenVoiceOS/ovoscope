@@ -356,24 +356,48 @@ class TestMiniCroftPipelineConfig(unittest.TestCase):
             # Clean up the pre-seeded key so it doesn't leak into other tests
             cfg.get("intents", {}).pop("pre_existing_plugin", None)
 
-    def test_pipeline_config_none_does_not_patch(self):
-        """pipeline_config=None must not modify Configuration()['intents']."""
+    def test_pipeline_config_none_adds_no_keys_of_its_own(self):
+        """pipeline_config=None contributes nothing to Configuration()['intents'].
+
+        Booting still writes there: the default-pipeline logic sets ``pipeline``
+        and ``blacklisted_pipelines``, and the harness sets ``blacklisted_intents``.
+        Those three are the boot's own, and the set is pinned here so a fourth
+        cannot appear unnoticed. Anything outside it came from pipeline_config,
+        which was None.
+        """
         from ovos_config.config import Configuration
 
         before = dict(Configuration().get("intents", {}))
         mc = get_minicroft([], pipeline_config=None)
         try:
             after = dict(Configuration().get("intents", {}))
-            # The intents dict may differ (pipeline key is patched by default_pipeline
-            # logic), but no new arbitrary keys should appear from pipeline_config=None
-            # Verify no unexpected keys were introduced compared to before
             new_keys = set(after.keys()) - set(before.keys())
-            pipeline_keys = {"pipeline", "blacklisted_intents"}
-            unexpected = new_keys - pipeline_keys
+            boot_keys = {"pipeline", "blacklisted_pipelines", "blacklisted_intents"}
+            unexpected = new_keys - boot_keys
             self.assertEqual(unexpected, set(),
                              f"pipeline_config=None introduced unexpected keys: {unexpected}")
         finally:
             mc.stop()
+
+    def test_stop_restores_the_intents_config(self):
+        """Booting must leave Configuration()['intents'] as it found it.
+
+        The keys the boot writes are tracked so they can be put back. A key
+        that survives stop() leaks into every later test in the same process,
+        which shows up as an unrelated failure somewhere else.
+        """
+        from ovos_config.config import Configuration
+
+        before = dict(Configuration().get("intents", {}))
+        mc = get_minicroft([], pipeline_config=None)
+        mc.stop()
+        after = dict(Configuration().get("intents", {}))
+
+        self.assertEqual(set(after.keys()), set(before.keys()),
+                         "stop() left the intents config with a different key set")
+        for key, value in before.items():
+            self.assertEqual(after[key], value,
+                             f"stop() did not restore intents[{key!r}]")
 
     def test_pipeline_config_multiple_keys(self):
         """Multiple pipeline_config entries are all patched and all restored."""

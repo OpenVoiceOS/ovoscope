@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.8a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.8a1) (2026-09-17)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.7a1...1.8.8a1)
+
+**Merged pull requests:**
+
+- fix: emit destination as a string \(OVOS-MSG-1 §3.3\) [\#205](https://github.com/OpenVoiceOS/ovoscope/pull/205) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.8.7a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.7a1) (2026-09-17)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.6a2...1.8.7a1)
@@ -309,10 +317,6 @@
 ## [1.6.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.0a1) (2026-07-16)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.5.0...1.6.0a1)
-
-**Merged pull requests:**
-
-- feat: per-clip WakeWordProbe for benchmark/test harnesses [\#97](https://github.com/OpenVoiceOS/ovoscope/pull/97) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.5.0](https://github.com/OpenVoiceOS/ovoscope/tree/1.5.0) (2026-07-02)
 

@@ -164,6 +164,14 @@ M2V_PROTOTYPE_CONFIG_KEY = "ovos-m2v-prototype-pipeline"
 # provisional model (T-1621, t1621-m2v-dual-order.md section 3.1): prototype
 # first lost 6 of 53 volume golden rows and 7 of 117 alerts handler tests
 # against classifier first, and no suite moved the other way.
+#
+# What keeps the classifier off a prototype-owned utterance is not this
+# order but the plugin's runtime label mask: ``_match_classifier`` scores
+# only the trained classes that are registered names or ``RENAMED_LABELS``
+# targets. In T-1621 every prototype-owned label was name-mismatched with
+# the model (``volume.mute`` trained, ``volume_mute`` registered), so the
+# mask made those classes unreachable. A skill whose intent names match
+# the trained labels exactly has no such gap and was not measured.
 M2V_DUAL_PIPELINE = [
     "ovos-stop-pipeline-plugin-high",
     "ovos-converse-pipeline-plugin",
@@ -1567,9 +1575,16 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
     any utterance near a prototype it holds, so a prototype-first order
     costs the classifier rows it would have answered (T-1621: volume 50
     against 44 of 53, alerts 93 against 86 of 127, classifier first against
-    prototype first on the v6 provisional model). ``assert_m2v_label_split``
-    verifies the split holds before returning, and raises loudly if a label
-    ends up served by both engines or by neither.
+    prototype first on the v6 provisional model). The classifier is kept
+    off a prototype-owned utterance by the plugin's runtime label mask
+    (``_match_classifier`` scores only trained classes that are registered
+    names or ``RENAMED_LABELS`` targets), not by the order: in T-1621 the
+    prototype-owned labels were name-mismatched with the model, so the mask
+    made their classes unreachable. A skill whose intent names match the
+    trained labels exactly has no such protection and was not measured.
+    ``assert_m2v_label_split`` verifies the split holds before returning,
+    and raises loudly if a label ends up served by both engines or by
+    neither.
 
     With ``prototype=False`` this boots the classifier alone via
     ``M2V_PIPELINE``, exactly as it did before dual-mode existed — for

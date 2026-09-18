@@ -459,6 +459,25 @@ def cmd_bus_coverage(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def cmd_golden(args: argparse.Namespace) -> int:
+    """Run a skill's golden-utterance rows through one MiniCroft per locale.
+
+    Exit 0 when every row matched, 1 on any miss, 2 when no row loaded.
+    The loaded skill must come from ``--checkout`` (T-3351) and every
+    utterance carries its row's ``lang`` (T-3308).
+    """
+    from ovoscope.golden_minicroft import RootDirMismatch, run_golden
+
+    locales = [l for l in (args.locales or "").split(",") if l] or None
+    pipeline = [p for p in (args.pipeline or "").split(",") if p] or None
+    try:
+        return run_golden(args.rows, args.skill, args.checkout,
+                          locales=locales, pipeline=pipeline,
+                          out_dir=args.out, timeout=args.timeout)
+    except RootDirMismatch as exc:
+        _die(str(exc), 3)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser.
 
@@ -471,6 +490,27 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
+
+    # --- golden ---
+    p_golden = sub.add_parser(
+        "golden",
+        help="Run golden-utterance rows through a real intent service, "
+             "one MiniCroft per locale; exit 1 on any miss.")
+    p_golden.add_argument("--rows", nargs="+", required=True,
+                          help="glob(s) of golden_utterances*.jsonl files")
+    p_golden.add_argument("--skill", required=True,
+                          help="skill id (the entry point name)")
+    p_golden.add_argument("--checkout", default=".",
+                          help="the skill checkout the loaded skill must "
+                               "come from (default: .)")
+    p_golden.add_argument("--locales", default=None,
+                          help="comma-separated lang list to run (default: all)")
+    p_golden.add_argument("--pipeline", default=None,
+                          help="comma-separated pipeline ids (default: MiniCroft's)")
+    p_golden.add_argument("--out", default=None,
+                          help="directory for scoreboard.json and predictions.jsonl")
+    p_golden.add_argument("--timeout", type=float, default=20.0,
+                          help="seconds to wait per utterance")
 
     # --- record ---
     p_record = sub.add_parser("record", help="Record a fixture file.")
@@ -553,6 +593,7 @@ def main() -> None:
     args = parser.parse_args()
 
     dispatch = {
+        "golden": cmd_golden,
         "record": cmd_record,
         "run": cmd_run,
         "diff": cmd_diff,

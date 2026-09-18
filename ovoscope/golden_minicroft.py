@@ -34,6 +34,10 @@ from ovos_bus_client.session import Session
 from ovoscope.golden import GoldenRow, load_golden_rows
 
 RUNNER_ID = "minicroft"
+#: path segments that mark an installed copy rather than a checkout's source
+INSTALL_SEGMENTS = frozenset({"site-packages", "dist-packages", ".venv", "venv"})
+#: exit codes of ``ovoscope golden``
+EXIT_MISS, EXIT_NO_ROWS, EXIT_ROOT_DIR, EXIT_ALL_SKIPPED = 1, 2, 3, 4
 
 
 class RootDirMismatch(RuntimeError):
@@ -99,6 +103,16 @@ def assert_root_dir(minicroft, skill_id: str, checkout: Path) -> Path:
             f"skill {skill_id!r} loaded from {root}, which is not under the "
             f"checkout {checkout}. Install the checkout editable, or the run "
             f"measures another copy of the skill.")
+    # a venv inside the checkout holds a non-editable copy of the skill
+    # under site-packages; that copy is on disk under the checkout and is
+    # still not the checkout's own source
+    between = root.relative_to(checkout).parts if root != checkout else ()
+    installed = [p for p in between if p in INSTALL_SEGMENTS]
+    if installed:
+        raise RootDirMismatch(
+            f"skill {skill_id!r} loaded from {root}, an installed copy under "
+            f"{'/'.join(installed)} inside the checkout {checkout}, not the "
+            f"checkout's own source. Install the checkout editable.")
     return root
 
 
@@ -224,11 +238,18 @@ def run_golden(rows_patterns: Sequence[str], skill_id: str, checkout: str,
     rows = collect_rows(rows_patterns, locales)
     if not rows:
         echo(f"no golden rows under {list(rows_patterns)}")
-        return 2
+        return EXIT_NO_ROWS
     results = run_rows(rows, skill_id, Path(checkout), pipeline=pipeline,
                        timeout=timeout, minicroft_factory=minicroft_factory)
     board = scoreboard(results, skill_id)
     entry = board[f"{RUNNER_ID}:{skill_id}"]
+    if entry["total"] == 0:
+        echo(f"ALL SKIPPED: {entry['skipped']} row(s) loaded, every one "
+             f"needs_manual, nothing measured")
+        if out_dir:
+            for path in write_results(results, board, Path(out_dir)):
+                echo(f"wrote {path}")
+        return EXIT_ALL_SKIPPED
     for failure in entry["failures"]:
         echo(f"MISS [{failure['lang']}] {failure['utterance']!r}: expected "
              f"{failure['expected']!r}, fired {failure['got']}")
@@ -238,4 +259,4 @@ def run_golden(rows_patterns: Sequence[str], skill_id: str, checkout: str,
     if out_dir:
         for path in write_results(results, board, Path(out_dir)):
             echo(f"wrote {path}")
-    return 0 if entry["gate_passed"] else 1
+    return 0 if entry["gate_passed"] else EXIT_MISS

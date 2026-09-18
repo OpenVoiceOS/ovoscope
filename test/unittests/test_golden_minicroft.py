@@ -25,7 +25,8 @@ from pathlib import Path
 from ovos_utils.log import LOG
 
 from ovoscope import get_minicroft, is_pipeline_available, LEAN_DEFAULT_PIPELINE
-from ovoscope.golden_minicroft import (RootDirMismatch, collect_rows,
+from ovoscope.golden_minicroft import (EXIT_ALL_SKIPPED, RootDirMismatch,
+                                       assert_root_dir, collect_rows,
                                        run_golden, run_rows, scoreboard)
 
 SKILL_ID = "ovoscope-unittest-golden.test"
@@ -140,6 +141,45 @@ class TestGoldenMiniCroft(unittest.TestCase):
         self.assertIn(str(self.checkout.resolve()), str(ctx.exception))
         self.assertIn(str(other.resolve()), str(ctx.exception))
 
+    def test_an_installed_copy_inside_the_checkout_fails_the_run(self):
+        """Review of #212, gap 1: a venv inside the checkout holds a
+        non-editable copy of the skill under site-packages. It is on disk
+        under --checkout and is still not the checkout's source."""
+        nested = self.checkout / ".venv" / "lib" / "python3.11" / "site-packages" / "golden_fixture_installed"
+        shutil.copytree(self.checkout / "locale", nested / "locale")
+        shutil.copy(self.checkout / "golden_fixture_skill.py",
+                    nested / "golden_fixture_installed.py")
+        sys.path.insert(0, str(nested))
+        try:
+            installed_cls = importlib.import_module("golden_fixture_installed").GoldenFixtureSkill
+        finally:
+            sys.path.remove(str(nested))
+        rows = collect_rows([str(self.rows_path)], locales=["en-US"])
+
+        def factory(skill_id, lang, pipeline):
+            return get_minicroft([skill_id], lang=lang,
+                                 extra_skills={skill_id: installed_cls})
+        try:
+            with self.assertRaises(RootDirMismatch) as ctx:
+                run_rows(rows, SKILL_ID, self.checkout, minicroft_factory=factory)
+        finally:
+            sys.modules.pop("golden_fixture_installed", None)
+        self.assertIn("site-packages", str(ctx.exception))
+        self.assertIn(str(nested.resolve()), str(ctx.exception))
+
+    def test_every_row_needs_manual_exits_its_own_code(self):
+        """Review of #212, gap 2: an all-manual file measured nothing and
+        exited 0 like a passing suite."""
+        manual = self.tmp / "manual.jsonl"
+        _write_rows(manual, [dict(ROWS[0], needs_manual=True),
+                             dict(ROWS[2], needs_manual=True)])
+        lines = []
+        code = run_golden([str(manual)], SKILL_ID, str(self.checkout),
+                          minicroft_factory=self._factory(), echo=lines.append)
+        self.assertEqual(code, EXIT_ALL_SKIPPED, lines)
+        self.assertEqual(code, 4)
+        self.assertTrue(any(l.startswith("ALL SKIPPED: 2 row(s)") for l in lines), lines)
+
     def test_run_golden_exit_codes_and_files(self):
         out = self.tmp / "out"
         lines = []
@@ -177,3 +217,33 @@ class TestCollectRows(unittest.TestCase):
             self.assertEqual([r.utterance for r in rows], ["bom dia"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestAssertRootDirSegments(unittest.TestCase):
+    """The path check alone, no MiniCroft: which roots pass for a checkout."""
+
+    class _Loader:
+        def __init__(self, root):
+            self.instance = type("S", (), {"root_dir": str(root)})()
+
+    def _mc(self, root):
+        return type("MC", (), {"plugin_skills": {SKILL_ID: self._Loader(root)}})()
+
+    def test_segments(self):
+        checkout = Path(tempfile.mkdtemp(prefix="ovoscope-rootdir-"))
+        try:
+            good = checkout / "ovos_skill_x"
+            good.mkdir()
+            self.assertEqual(assert_root_dir(self._mc(good), SKILL_ID, checkout),
+                             good.resolve())
+            self.assertEqual(assert_root_dir(self._mc(checkout), SKILL_ID, checkout),
+                             checkout.resolve())
+            for seg in ("site-packages", "dist-packages", ".venv", "venv"):
+                bad = checkout / seg / "ovos_skill_x"
+                bad.mkdir(parents=True)
+                with self.assertRaises(RootDirMismatch, msg=seg):
+                    assert_root_dir(self._mc(bad), SKILL_ID, checkout)
+            with self.assertRaises(RootDirMismatch):
+                assert_root_dir(self._mc(checkout.parent), SKILL_ID, checkout)
+        finally:
+            shutil.rmtree(checkout, ignore_errors=True)

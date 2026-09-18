@@ -462,11 +462,14 @@ def cmd_bus_coverage(args: argparse.Namespace) -> int:
 def cmd_golden(args: argparse.Namespace) -> int:
     """Run a skill's golden-utterance rows through one MiniCroft per locale.
 
-    Exit 0 when every row matched, 1 on any miss, 2 when no row loaded.
+    Exit 0 when every row matched, 1 on any miss, 2 when no row loaded,
+    3 when the skill did not load from ``--checkout``, 4 when every row
+    was skipped as ``needs_manual``.
     The loaded skill must come from ``--checkout`` (T-3351) and every
     utterance carries its row's ``lang`` (T-3308).
     """
-    from ovoscope.golden_minicroft import RootDirMismatch, run_golden
+    from ovoscope.golden_minicroft import (EXIT_ROOT_DIR, RootDirMismatch,
+                                           run_golden)
 
     locales = [l for l in (args.locales or "").split(",") if l] or None
     pipeline = [p for p in (args.pipeline or "").split(",") if p] or None
@@ -475,7 +478,7 @@ def cmd_golden(args: argparse.Namespace) -> int:
                           locales=locales, pipeline=pipeline,
                           out_dir=args.out, timeout=args.timeout)
     except RootDirMismatch as exc:
-        _die(str(exc), 3)
+        _die(str(exc), EXIT_ROOT_DIR)
 
 
 def _build_parser() -> argparse.ArgumentParser:

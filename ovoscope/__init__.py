@@ -156,25 +156,26 @@ M2V_PROTOTYPE_CONFIG_KEY = "ovos-m2v-prototype-pipeline"
 # labels the checkpoint was trained on; prototype mode is built at boot time
 # from whatever skills load, straight from their shipped .intent files, and
 # deny-lists the classifier's own label set so each label has exactly one
-# engine. Prototype comes first in every tier: the classifier is confidently
-# wrong on a label it never saw (it will happily emit its best guess among
-# the labels it knows), while prototype mode cannot fire on the classifier's
-# labels once they are denied to it — so the only real contention is the
-# cross-label case where a skill's label was in the training set at some
-# point but is no longer, and prototype mode must win that case rather than
-# have the stale classifier answer intercept it first.
+# engine. The classifier comes first in every tier. The deny-list keeps the
+# prototype stage off the classifier's labels at registration, but a cosine
+# store still scores every utterance against the prototypes it does hold, and
+# a classifier-owned utterance that sits near one of them is claimed by the
+# prototype tier before the classifier sees it. Measured on the v6
+# provisional model (T-1621, t1621-m2v-dual-order.md section 3.1): prototype
+# first lost 6 of 53 volume golden rows and 7 of 117 alerts handler tests
+# against classifier first, and no suite moved the other way.
 M2V_DUAL_PIPELINE = [
     "ovos-stop-pipeline-plugin-high",
     "ovos-converse-pipeline-plugin",
-    "ovos-m2v-prototype-pipeline-high",
     "ovos-m2v-pipeline-high",
+    "ovos-m2v-prototype-pipeline-high",
     "ovos-fallback-pipeline-plugin-high",
     "ovos-stop-pipeline-plugin-medium",
-    "ovos-m2v-prototype-pipeline-medium",
     "ovos-m2v-pipeline-medium",
+    "ovos-m2v-prototype-pipeline-medium",
     "ovos-fallback-pipeline-plugin-medium",
-    "ovos-m2v-prototype-pipeline-low",
     "ovos-m2v-pipeline-low",
+    "ovos-m2v-prototype-pipeline-low",
     "ovos-fallback-pipeline-plugin-low",
 ]
 # Nebulento — fuzzy intent matching (ConfidenceMatcherPipeline). Single OPM
@@ -1560,13 +1561,15 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
     — for every other label. The prototype stage deny-lists the classifier's
     label set (read from the model's own ``config.json`` via
     ``m2v_model_labels``, never hard-coded) so each label is served by
-    exactly one engine, and prototype runs ahead of the classifier at every
-    tier: the classifier is confidently wrong on a label it never saw, while
-    prototype mode cannot fire on a label denied to it, so ordering
-    prototype first costs nothing on the labels the classifier owns and wins
-    the only real overlap case. ``assert_m2v_label_split`` verifies this
-    split holds before returning, and raises loudly if a label ends up
-    served by both engines or by neither.
+    exactly one engine, and the classifier runs ahead of the prototype
+    stage at every tier. The deny-list decides which labels the prototype
+    stage registers, not which utterances it scores: a cosine store claims
+    any utterance near a prototype it holds, so a prototype-first order
+    costs the classifier rows it would have answered (T-1621: volume 50
+    against 44 of 53, alerts 93 against 86 of 127, classifier first against
+    prototype first on the v6 provisional model). ``assert_m2v_label_split``
+    verifies the split holds before returning, and raises loudly if a label
+    ends up served by both engines or by neither.
 
     With ``prototype=False`` this boots the classifier alone via
     ``M2V_PIPELINE``, exactly as it did before dual-mode existed — for

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.9.0a1) (2026-09-18)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.9a1...1.9.0a1)
+
+**Merged pull requests:**
+
+- feat: golden runner passes the typed-slot map to every fighter [\#209](https://github.com/OpenVoiceOS/ovoscope/pull/209) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.8.9a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.8.9a1) (2026-09-17)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.8.8a1...1.8.9a1)
@@ -381,10 +389,6 @@
 ## [1.0.2a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.2a1) (2026-06-27)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.0.1a1...1.0.2a1)
-
-**Merged pull requests:**
-
-- fix: MockTTS destructor must not stop the shared playback thread [\#100](https://github.com/OpenVoiceOS/ovoscope/pull/100) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.0.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.0.1a1) (2026-06-27)
 

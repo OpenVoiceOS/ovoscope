@@ -75,10 +75,10 @@ class _StubAvailableM2V(M2VPrototypeAdapter):
     def available(self):
         return True, None
 
-    def build(self, intents, *, skill_id, lang, entities=None):
+    def build(self, intents, *, skill_id, lang, entities=None, slot_types=None):
         return {name: object() for name, lines in intents.items() if lines}
 
-    def match(self, container, utterance, lang):
+    def match(self, container, utterance, lang, typed_slots=None):
         # Always "matches" the first registered intent name at a fixed
         # confidence — deterministic and network-free.
         name = next(iter(container), None) if container else None

@@ -128,6 +128,39 @@ reason, core_total, core_matched, gate_passed, gate_reason, failures}}`
 — `failures` lists every missed row's utterance, language, expected and
 actual intent, so a red gate points straight at the missing template.
 
+## Typed slots (OVOS-INTENT-1 §5.6)
+
+A template may type a slot: `set the brightness to {number:b}`. The
+expanded lines the fighters train on are bare (`{b}`, the §3.4
+degrade), so the declaration has to travel beside them, and the
+utterance has to carry the map the intent service computes. Both are
+opt-in:
+
+```python
+from ovoscope.golden import build_engine_slot_types
+
+slot_types = {
+    ("ovos-skill-brightness.openvoiceos", "en-US"):
+        build_engine_slot_types("locale", "en-US"),   # {"brightness": {"b": "number"}}
+}
+scoreboard, predictions = run_golden_suite(rows, groups,
+                                           slot_types_by_group=slot_types)
+```
+
+With `slot_types_by_group` given and `ovos-typed-slots-transformer`
+installed (`typed_slots_available()`), the runner registers each
+intent with its `slot_types`, the way ovos-workshop does, and computes
+one map per utterance for the group's declared types
+(`compute_typed_slots`), placed on `recognizer_loop:utterance`
+`data['typed_slots']`. An engine MAY bind from it; padatious 2.2 prefers
+the listed span, so `set the brightness to twenty five please` binds
+`b = "twenty five"` instead of `"twenty five please"`. Each prediction
+row then carries `typed_slots`: `{"b": {"type": "number", "surface":
+"twenty five", "value": 25}}` for every bound surface the map lists,
+`{}` when the engine bound a surface the map does not list, `None`
+when no map was computed. `predicted_slots` stays the surface string
+(OVOS-PIPELINE-1 §4.3).
+
 ## One corpus, two consumers
 
 `run_golden_suite` also returns a list of prediction rows shaped like

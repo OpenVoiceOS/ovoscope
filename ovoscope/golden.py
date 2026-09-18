@@ -170,6 +170,10 @@ class PredictionRow:
     reference_intent: Optional[str] = None
     reference_slots: Optional[dict] = None
     predicted_slots: Optional[dict] = None
+    # OVOS-INTENT-1 §5.6: ``{slot: {type, surface, value}}`` for every
+    # predicted slot whose surface the typed-slot map lists under the
+    # slot's declared type; ``None`` when no map was computed.
+    typed_slots: Optional[dict] = None
     exact_match: bool = False
     confidence: float = 0.0
     bucket: Optional[str] = None
@@ -234,20 +238,27 @@ class EngineAdapter:
         raise NotImplementedError
 
     def build(self, intents: Dict[str, List[str]], *, skill_id: str, lang: str,
-              entities: Optional[Dict[str, List[str]]] = None) -> Any:
+              entities: Optional[Dict[str, List[str]]] = None,
+              slot_types: Optional[Dict[str, Dict[str, str]]] = None) -> Any:
         """Instantiate+train a container for one (skill_id, lang) group.
         ``intents`` maps intent name -> list of template/example lines.
         ``entities`` maps ``{name}`` slot name -> its registered value
         set (see :func:`build_engine_entities`) — omitting it leaves a
         template's ``{name}`` slot an unconstrained wildcard, which the
         real shipping pipeline never does once that entity is
-        registered."""
+        registered. ``slot_types`` maps intent name -> ``{slot: type}``
+        (see :func:`build_engine_slot_types`), the OVOS-INTENT-1 §5.6
+        declaration a skill registration carries as ``slot_types``."""
         raise NotImplementedError
 
-    def match(self, container: Any, utterance: str, lang: str
+    def match(self, container: Any, utterance: str, lang: str,
+              typed_slots: Optional[dict] = None
               ) -> Tuple[Optional[str], float, float, Optional[dict]]:
         """Return ``(intent_name_or_None, confidence, latency_ms,
-        matched_slots_or_None)``."""
+        matched_slots_or_None)``. ``typed_slots`` is the OVOS-INTENT-1
+        §5.6 map for this utterance (see :func:`compute_typed_slots`);
+        an adapter puts it on the utterance message the way the intent
+        service does, and an engine MAY bind from it."""
         raise NotImplementedError
 
 
@@ -376,9 +387,10 @@ class GenericOPMAdapter(EngineAdapter):
             return False, REASON_INIT_ERROR
         return True, None
 
-    def build(self, intents, *, skill_id, lang, entities=None):
+    def build(self, intents, *, skill_id, lang, entities=None, slot_types=None):
         from ovos_spec_tools.message import Message
         from ovos_utils.fakebus import FakeBus
+        slot_types = slot_types or {}
         if self._probe is not None:
             plugin, self._probe = self._probe, None
         else:
@@ -393,19 +405,25 @@ class GenericOPMAdapter(EngineAdapter):
         for name, lines in intents.items():
             if not lines:
                 continue
-            msg = Message(f"{self.plugin_id}:register_intent",
-                          {"name": name, "samples": lines, "lang": lang},
+            data = {"name": name, "samples": lines, "lang": lang}
+            if slot_types.get(name):
+                # the lines are already bare (§3.4), so the declaration
+                # travels beside them as it does from ovos-workshop
+                data["slot_types"] = dict(slot_types[name])
+            msg = Message(f"{self.plugin_id}:register_intent", data,
                           {"skill_id": skill_id})
             plugin.register_intent(msg)
         if hasattr(plugin, "train"):
             plugin.train(Message("mycroft.skills.train", {}, {}))
         return plugin
 
-    def match(self, container, utterance, lang):
+    def match(self, container, utterance, lang, typed_slots=None):
         from ovos_spec_tools.message import Message
         plugin = container
-        msg = Message("recognizer_loop:utterance",
-                      {"utterances": [utterance], "lang": lang}, {})
+        data = {"utterances": [utterance], "lang": lang}
+        if typed_slots:
+            data["typed_slots"] = typed_slots
+        msg = Message("recognizer_loop:utterance", data, {})
         t0 = time.monotonic()
         tier_method = getattr(plugin, f"match_{self.spec.tier}")
         verdict = tier_method([utterance], lang, msg)
@@ -474,7 +492,7 @@ class M2VPrototypeAdapter(EngineAdapter):
             return False, REASON_NO_MODEL
         return True, None
 
-    def build(self, intents, *, skill_id, lang, entities=None):
+    def build(self, intents, *, skill_id, lang, entities=None, slot_types=None):
         import numpy as np
         ok, _ = self.available()
         if not ok:
@@ -487,9 +505,9 @@ class M2VPrototypeAdapter(EngineAdapter):
             prototypes[name] = np.mean(vecs, axis=0)
         return prototypes
 
-    def match(self, container, utterance, lang):
+    def match(self, container, utterance, lang, typed_slots=None):
         if not container:
-            return None, 0.0, 0.0
+            return None, 0.0, 0.0, None
         import numpy as np
         t0 = time.monotonic()
         vec = self._model.encode([utterance])[0]
@@ -600,6 +618,80 @@ def build_engine_intents(resources_dir: Union[str, Path], lang: str
     return intents
 
 
+def build_engine_slot_types(resources_dir: Union[str, Path], lang: str
+                            ) -> Dict[str, Dict[str, str]]:
+    """Build ``{intent_name: {slot: type}}`` from the raw ``*.intent``
+    lines of ``locale/<lang>`` (OVOS-INTENT-1 §5.6 ``{type:name}``).
+
+    :func:`build_engine_intents` expands the lines, and expansion strips
+    the type prefix (the §3.4 degrade), so the declaration has to be
+    read from the raw lines and handed to the fighter beside the bare
+    samples, the way ovos-workshop sends ``slot_types``. An intent that
+    declares no type is absent from the result.
+    """
+    try:
+        from ovos_spec_tools import declared_slot_types
+    except ImportError as e:
+        raise ImportError(
+            "build_engine_slot_types requires ovos-spec-tools "
+            "(pip install 'ovoscope[engines]')") from e
+    lang_dir = Path(resources_dir) / lang
+    if not lang_dir.is_dir():
+        return {}
+    out: Dict[str, Dict[str, str]] = {}
+    for intent_file in lang_dir.glob("*.intent"):
+        declared = dict(declared_slot_types(_read_lines(intent_file)))
+        if declared:
+            out[intent_file.stem] = declared
+    return out
+
+
+def typed_slots_available() -> bool:
+    """True when ovos-typed-slots-transformer is importable, so
+    :func:`compute_typed_slots` can build a §5.6 map."""
+    try:
+        import ovos_typed_slots_transformer  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def compute_typed_slots(utterance: str, lang: str, types: FrozenSet[str]
+                        ) -> dict:
+    """Return the OVOS-INTENT-1 §5.6 map for ``utterance``, restricted to
+    ``types``: ``{type: [{span, surface, value}, ...]}``. Empty when
+    ``types`` is empty or the transformer is not installed. This is the
+    map the intent service puts on ``recognizer_loop:utterance``
+    ``data['typed_slots']`` before the match round."""
+    if not types or not typed_slots_available():
+        return {}
+    from ovos_bus_client.session import Session
+    from ovos_typed_slots_transformer import TypedSlotsTransformer
+    sess = Session("golden-runner")
+    sess.lang = lang
+    out = TypedSlotsTransformer().transform([utterance], frozenset(types), sess)
+    return dict(out or {})
+
+
+def _typed_values(slots: Optional[dict], declared: Dict[str, str],
+                  typed_slots: dict) -> Optional[dict]:
+    """Pair every predicted slot whose declared type lists its surface
+    with the typed value: ``{slot: {type, surface, value}}``. ``None``
+    when nothing was declared or no map was computed; an empty dict
+    when the engine bound a surface the map does not list."""
+    if not declared or not typed_slots:
+        return None
+    out = {}
+    for slot, surface in (slots or {}).items():
+        slot_type = declared.get(slot)
+        for entry in typed_slots.get(slot_type, []) if slot_type else []:
+            if entry.get("surface") == surface:
+                out[slot] = {"type": slot_type, "surface": surface,
+                             "value": entry.get("value")}
+                break
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
@@ -619,6 +711,7 @@ def run_golden_suite(
         intents_by_group: Dict[Tuple[str, str], Dict[str, List[str]]],
         *,
         entities_by_group: Optional[Dict[Tuple[str, str], Dict[str, List[str]]]] = None,
+        slot_types_by_group: Optional[Dict[Tuple[str, str], Dict[str, Dict[str, str]]]] = None,
         engines: Optional[Dict[str, EngineAdapter]] = None,
         gating_engines: FrozenSet[str] = DEFAULT_GATING_ENGINES,
         m2v_gating: bool = False,
@@ -635,6 +728,13 @@ def run_golden_suite(
     — a ``{name}`` slot referenced by a template is only constrained at
     match time once its entity is registered here; omitting it leaves
     every such slot an unconstrained wildcard, unlike the real pipeline.
+    ``slot_types_by_group`` maps the same keys to ``{intent: {slot:
+    type}}`` (build with :func:`build_engine_slot_types`). When it is
+    given and ovos-typed-slots-transformer is installed, the runner
+    computes the OVOS-INTENT-1 §5.6 map per utterance for the group's
+    declared types and puts it on the utterance message, as the intent
+    service does; every prediction row then reports ``typed_slots``,
+    the typed value beside each bound surface the map lists.
 
     Callers passing ``engines=None`` (the default) get FRESH adapter
     instances built from :data:`FIGHTERS`/:class:`M2VPrototypeAdapter`
@@ -657,7 +757,25 @@ def run_golden_suite(
     """
     engines = dict(engines) if engines is not None else _make_default_engines()
     entities_by_group = entities_by_group or {}
+    slot_types_by_group = slot_types_by_group or {}
     now = datetime.now(timezone.utc).isoformat()
+
+    # one §5.6 map per (group, utterance): the map is a property of the
+    # utterance and the group's declared types, not of the fighter
+    typed_by_row: Dict[Tuple[Tuple[str, str], str], dict] = {}
+    declared_by_group: Dict[Tuple[str, str], Dict[str, str]] = {}
+    for group, per_intent in slot_types_by_group.items():
+        declared: Dict[str, str] = {}
+        for types in per_intent.values():
+            declared.update(types)
+        declared_by_group[group] = declared
+    for row in rows:
+        group = (row.skill_id, row.lang)
+        key = (group, row.utterance)
+        if key in typed_by_row or group not in declared_by_group:
+            continue
+        typed_by_row[key] = compute_typed_slots(
+            row.utterance, row.lang, frozenset(declared_by_group[group].values()))
 
     scoreboard: Dict[str, dict] = {}
     predictions: List[PredictionRow] = []
@@ -683,17 +801,20 @@ def run_golden_suite(
 
         containers = {
             group: adapter.build(group_intents, skill_id=group[0], lang=group[1],
-                                  entities=entities_by_group.get(group))
+                                  entities=entities_by_group.get(group),
+                                  slot_types=slot_types_by_group.get(group))
             for group, group_intents in intents_by_group.items()
         }
 
         for row in rows:
             group = (row.skill_id, row.lang)
             container = containers.get(group)
+            typed_slots = typed_by_row.get((group, row.utterance), {})
             if container is None:
                 predicted, conf, latency, slots = None, 0.0, 0.0, None
             else:
-                predicted, conf, latency, slots = adapter.match(container, row.utterance, row.lang)
+                predicted, conf, latency, slots = adapter.match(
+                    container, row.utterance, row.lang, typed_slots=typed_slots)
             expected_short = _short_intent(row.expected_intent)
             matched = _short_intent(predicted) == expected_short
             if matched:
@@ -724,6 +845,8 @@ def run_golden_suite(
                 reference_intent=row.expected_intent,
                 reference_slots=None,
                 predicted_slots=slots,
+                typed_slots=_typed_values(slots, declared_by_group.get(group, {}),
+                                          typed_slots),
                 exact_match=matched,
                 confidence=conf,
                 bucket=None,

@@ -19,6 +19,7 @@ import shutil
 import sys
 import tempfile
 import textwrap
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -32,7 +33,9 @@ from ovoscope import (get_minicroft, get_m2v_minicroft, is_pipeline_available,
 from ovoscope.golden_minicroft import (EXIT_ALL_SKIPPED, EXIT_PRESET,
                                        PresetUnavailable, RootDirMismatch,
                                        assert_root_dir, collect_rows,
+                                       WORKER_BOOT_ALLOWANCE, WORKER_MODULE,
                                        preset_factory, preset_unavailable,
+                                       worker_timeout,
                                        resolve_pipeline, run_golden, run_rows,
                                        scoreboard)
 
@@ -435,6 +438,10 @@ HOOK_SRC = textwrap.dedent('''
                 fh.write(f"{lang} {os.getpid()}\\n")
             if os.environ.get("OVOSCOPE_GOLDEN_RAISE"):
                 raise RuntimeError("weights download failed after warm-up")
+            hang = float(os.environ.get("OVOSCOPE_GOLDEN_SLEEP") or 0)
+            if hang:
+                import time
+                time.sleep(hang)
             return get_minicroft([skill_id], lang=lang,
                                  extra_skills={skill_id: GoldenFixtureSkill})
         return boot
@@ -534,3 +541,95 @@ class TestGoldenBootFailureAndProcesses(unittest.TestCase):
                               per_locale_process=True)
         self.assertEqual(code, EXIT_PRESET, lines)
         self.assertIn("weights download failed after warm-up", lines[-1])
+
+
+class TestGoldenWorkerFailures(unittest.TestCase):
+    """T-3688: a worker that hangs, or that writes a result nobody can read,
+    is a boot failure like any other: exit 5 naming the locale."""
+
+    @classmethod
+    def setUpClass(cls):
+        LOG.set_level("ERROR")
+        cls.tmp = Path(tempfile.mkdtemp(prefix="ovoscope-golden-worker-"))
+        cls.checkout = cls.tmp / "checkout"
+        cls.skill_cls = _write_skill(cls.checkout, "golden_fixture_skill")
+        cls.rows_path = cls.checkout / "test" / "end2end" / "golden_utterances_all.jsonl"
+        _write_rows(cls.rows_path)
+        (cls.checkout / "golden_worker_hook.py").write_text(HOOK_SRC,
+                                                            encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        LOG.set_level("CRITICAL")
+        sys.modules.pop("golden_fixture_skill", None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _run(self, echo_lines, **env):
+        path = os.pathsep.join([str(self.checkout),
+                                os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+        base = {"OVOSCOPE_GOLDEN_FACTORY": "golden_worker_hook:factory",
+                "OVOSCOPE_GOLDEN_PIDFILE": str(self.tmp / "pids.txt"),
+                "PYTHONPATH": path}
+        base.update(env)
+        with mock.patch.dict(os.environ, base):
+            return run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), echo=echo_lines.append,
+                              per_locale_process=True)
+
+    def test_the_derived_bound_covers_the_boot_and_every_row(self):
+        self.assertEqual(worker_timeout(3, 20.0),
+                         WORKER_BOOT_ALLOWANCE + 60.0)
+        # a locale with no active row still gets the boot allowance
+        self.assertEqual(worker_timeout(0, 20.0),
+                         WORKER_BOOT_ALLOWANCE + 20.0)
+
+    def test_the_environment_sets_the_bound(self):
+        with mock.patch.dict(os.environ, {"OVOSCOPE_WORKER_TIMEOUT": "7.5"}):
+            self.assertEqual(worker_timeout(100, 20.0), 7.5)
+        with mock.patch.dict(os.environ, {"OVOSCOPE_WORKER_TIMEOUT": "soon"}):
+            self.assertEqual(worker_timeout(1, 20.0),
+                             WORKER_BOOT_ALLOWANCE + 20.0)
+
+    def test_a_worker_that_hangs_is_killed_and_exits_5(self):
+        lines = []
+        code = self._run(lines, OVOSCOPE_GOLDEN_SLEEP="300",
+                         OVOSCOPE_WORKER_TIMEOUT="3")
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("did not finish in 3s", lines[-1])
+        self.assertIn("en-US", lines[-1])
+
+    def _with_worker_writing(self, text, returncode=-9):
+        """Run with a stubbed worker that writes *text* as its result."""
+        real_run = subprocess.run
+
+        def fake_run(args, **kwargs):
+            if len(args) > 3 and args[1:3] == ["-m", WORKER_MODULE]:
+                Path(args[4]).write_text(text, encoding="utf-8")
+                return subprocess.CompletedProcess(args, returncode)
+            return real_run(args, **kwargs)  # pragma: no cover - not used
+
+        lines = []
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            code = run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), echo=lines.append,
+                              per_locale_process=True)
+        return code, lines
+
+    def test_a_truncated_result_file_exits_5(self):
+        code, lines = self._with_worker_writing('{"results": [{"utteranc')
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("cannot be read", lines[-1])
+        self.assertIn("exit code -9", lines[-1])
+        self.assertIn("en-US", lines[-1])
+
+    def test_a_result_file_without_rows_exits_5(self):
+        code, lines = self._with_worker_writing("{}", returncode=0)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("wrong shape", lines[-1])
+        self.assertIn("en-US", lines[-1])
+
+    def test_a_result_row_of_the_wrong_shape_exits_5(self):
+        code, lines = self._with_worker_writing('{"results": [{"nope": 1}]}',
+                                                returncode=0)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("wrong shape", lines[-1])

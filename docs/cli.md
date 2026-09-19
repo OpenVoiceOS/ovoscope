@@ -242,6 +242,19 @@ system reclaims in full at exit, and one command measures the whole corpus.
 `--processes single` keeps the old one-process behaviour, and
 `--processes per-locale` uses one process per locale for any pipeline.
 
+Each worker is bound in time: 900 seconds for the boot plus the locale's
+row count times `--timeout`. A worker that passes the bound is killed, and
+the run exits 5 naming the locale. `OVOSCOPE_WORKER_TIMEOUT` sets the bound
+in seconds instead. A worker that writes no result file, or a file that
+cannot be read because the process was killed while it wrote, also exits 5
+with the child's return code in the message.
+
+`OVOSCOPE_GOLDEN_FACTORY` is a test hook. It names a `module:callable` that
+the worker imports to build a stand-in MiniCroft factory, so a test can
+drive the per-locale path without the real boot. A deployment never sets
+it, and it grants nothing new: whoever can set it can already set
+`PYTHONPATH` for the same interpreter.
+
 The scoreboard records `preset` and `pipeline` beside the counts.
 
 Exit codes: 0 every row matched; 1 a miss; 2 no row loaded; 3 the skill did

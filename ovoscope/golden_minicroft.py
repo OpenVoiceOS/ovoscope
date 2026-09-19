@@ -39,6 +39,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 from ovos_bus_client.message import Message
 from ovos_bus_client.session import Session
+from ovos_utils.log import LOG
 
 from ovoscope.golden import GoldenRow, load_golden_rows
 
@@ -55,6 +56,12 @@ PRESETS = (PRESET_REPO, PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL)
 M2V_PRESETS = (PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL)
 #: the module one locale of an isolated run boots in
 WORKER_MODULE = "ovoscope.golden_worker"
+#: seconds a worker gets for the boot, on top of its rows' own timeouts.
+#: An m2v boot downloads and loads the model before the first row.
+WORKER_BOOT_ALLOWANCE = 900.0
+#: seconds one worker may take in total; unset, the bound is derived from
+#: the locale's row count (see ``worker_timeout``)
+WORKER_TIMEOUT_ENV = "OVOSCOPE_WORKER_TIMEOUT"
 #: a test names ``module:callable`` here; the worker calls it with the
 #: preset name and boots the ``minicroft_factory`` it returns
 WORKER_FACTORY_ENV = "OVOSCOPE_GOLDEN_FACTORY"
@@ -361,6 +368,24 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
     return results
 
 
+def worker_timeout(rows: int, timeout: float) -> float:
+    """Seconds one locale's worker may take, boot included.
+
+    The per-row ``timeout`` bounds one utterance inside the child, not the
+    child. Without a bound of its own a child whose boot hangs blocks the
+    run until the CI job is cancelled, and a cancelled job carries no exit
+    code to read. ``OVOSCOPE_WORKER_TIMEOUT`` overrides the derived value.
+    """
+    override = os.environ.get(WORKER_TIMEOUT_ENV)
+    if override:
+        try:
+            return float(override)
+        except ValueError:
+            LOG.warning(f"{WORKER_TIMEOUT_ENV}={override!r} is not a number; "
+                        f"using the derived bound")
+    return WORKER_BOOT_ALLOWANCE + max(rows, 1) * max(timeout, 1.0)
+
+
 def _run_locale(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
                 pipeline: Optional[Sequence[str]], preset: Optional[str],
                 timeout: float) -> List[RowResult]:
@@ -380,19 +405,41 @@ def _run_locale(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
             "preset": preset,
             "timeout": timeout,
         }, ensure_ascii=False), encoding="utf-8")
-        proc = subprocess.run([sys.executable, "-m", WORKER_MODULE,
-                               str(job), str(out)])
+        bound = worker_timeout(len(rows), timeout)
+        try:
+            proc = subprocess.run([sys.executable, "-m", WORKER_MODULE,
+                                   str(job), str(out)], timeout=bound)
+        except subprocess.TimeoutExpired:
+            raise PresetUnavailable(
+                f"the golden worker for {lang} did not finish in "
+                f"{bound:.0f}s and was killed. That is {len(rows)} row(s) at "
+                f"{timeout:.0f}s each plus {WORKER_BOOT_ALLOWANCE:.0f}s for "
+                f"the boot; set OVOSCOPE_WORKER_TIMEOUT to change it.")
         if not out.is_file():
             raise PresetUnavailable(
                 f"the golden worker for {lang} ended with exit code "
                 f"{proc.returncode} and wrote no result. A kill for memory "
                 f"reads as exit code -9.")
-        answer = json.loads(out.read_text(encoding="utf-8"))
+        try:
+            answer = json.loads(out.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            # a kill that lands while the child writes leaves a part of the
+            # file; that is the same "could not boot" case as no file at all
+            raise PresetUnavailable(
+                f"the golden worker for {lang} ended with exit code "
+                f"{proc.returncode} and wrote a result that cannot be read: "
+                f"{type(exc).__name__}: {exc}") from exc
     if "error" in answer:
         cls = {"RootDirMismatch": RootDirMismatch}.get(
             answer.get("error_type"), PresetUnavailable)
         raise cls(f"[{lang}] {answer['error']}")
-    return [RowResult(**r) for r in answer["results"]]
+    try:
+        return [RowResult(**r) for r in answer["results"]]
+    except (AttributeError, KeyError, TypeError) as exc:
+        raise PresetUnavailable(
+            f"the golden worker for {lang} ended with exit code "
+            f"{proc.returncode} and wrote a result of the wrong shape: "
+            f"{type(exc).__name__}: {exc}") from exc
 
 
 def run_rows_per_locale(rows: List[GoldenRow], skill_id: str, checkout: Path,

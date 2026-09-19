@@ -106,6 +106,9 @@ test = [
     "nebulento",
     "ovos-m2v-pipeline",
     "ovos-spec-tools>=1.9.1a1",
+    # test/unittests/test_audit_round*.py carry `pytest.mark.timeout`; the
+    # marks do nothing unless this plugin is installed
+    "pytest-timeout",
 ]
 dev = ["ovoscope[test]"]
 

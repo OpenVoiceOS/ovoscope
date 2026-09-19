@@ -136,6 +136,11 @@ M2V_PIPELINE = [
 # for any loaded skill. Pass a different repo/path to get_m2v_minicroft when
 # testing another checkpoint.
 M2V_MULTILINGUAL_MODEL = "OpenVoiceOS/ovos-m2v-intents-multi-128M-v5"
+# The published default model: what ovos-m2v-pipeline loads when a config
+# names no model (its DEFAULT_MULTILINGUAL). The `ovoscope golden` m2v
+# presets boot this checkpoint, so a golden run measures the engine a
+# device gets out of the box, not a candidate under evaluation.
+M2V_PUBLISHED_MODEL = "OpenVoiceOS/ovos-m2v-intents-multilingual"
 # Config key ovos-m2v-pipeline reads under Configuration()["intents"]. Note the
 # underscores: the pipeline id in a pipeline list is "ovos-m2v-pipeline" (with
 # tier suffixes -high/-medium/-low), but the config section is keyed with
@@ -163,6 +168,15 @@ M2V_PROTOTYPE_CONFIG_KEY = "ovos-m2v-prototype-pipeline"
 # cross-label case where a skill's label was in the training set at some
 # point but is no longer, and prototype mode must win that case rather than
 # have the stale classifier answer intercept it first.
+# Prototype mode alone: the three prototype tiers and nothing else. No
+# classifier, so no label deny-list; every label a loaded skill registers
+# from its .intent files is served by prototype mode. This is the boot
+# behind the `m2v-prototype` preset of `ovoscope golden`.
+M2V_PROTOTYPE_PIPELINE = [
+    "ovos-m2v-prototype-pipeline-high",
+    "ovos-m2v-prototype-pipeline-medium",
+    "ovos-m2v-prototype-pipeline-low",
+]
 M2V_DUAL_PIPELINE = [
     "ovos-stop-pipeline-plugin-high",
     "ovos-converse-pipeline-plugin",
@@ -1546,6 +1560,7 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
                       max_wait: float = 300,
                       wait_for_trained: bool = False,
                       prototype: bool = True,
+                      classifier: bool = True,
                       prototype_ignore_intents: Optional[List[str]] = None,
                       prototype_conf_high: Optional[float] = None,
                       prototype_conf_medium: Optional[float] = None,
@@ -1572,6 +1587,14 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
     ``M2V_PIPELINE``, exactly as it did before dual-mode existed — for
     callers who want only the trained checkpoint and no per-boot prototype
     build.
+
+    With ``classifier=False`` this boots prototype mode alone via
+    ``M2V_PROTOTYPE_PIPELINE``: the checkpoint supplies the embedding model
+    and nothing else, the deny-list holds only ``ignore_intents``, and no
+    label split is asserted because there is nothing to split. This is the
+    boot behind the ``m2v-prototype`` preset of ``ovoscope golden``. Both
+    flags ``False`` is a boot with no m2v stage at all and raises
+    ``ValueError``.
 
     This is the reusable entry point for routing a skill's golden/e2e
     utterances through the candidate default engine. The classifier syncs the
@@ -1609,6 +1632,8 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
             explicit default is kept for older harness versions.
         prototype: Boot both m2v modes side by side (default). ``False``
             boots the classifier alone.
+        classifier: ``False`` boots prototype mode alone, with no
+            classifier stage and no deny-list beyond ``ignore_intents``.
         prototype_ignore_intents: Override the prototype stage's computed
             deny-list (normally the model's own label list plus
             ``ignore_intents``) with exactly this list instead. For tests
@@ -1617,8 +1642,12 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
 
     Returns:
         A started, READY MiniCroft booted with ``M2V_DUAL_PIPELINE`` (or
-        ``M2V_PIPELINE`` when ``prototype=False``).
+        ``M2V_PIPELINE`` when ``prototype=False``, or
+        ``M2V_PROTOTYPE_PIPELINE`` when ``classifier=False``).
     """
+    if not prototype and not classifier:
+        raise ValueError("get_m2v_minicroft: prototype=False and "
+                         "classifier=False leaves no m2v stage to boot")
     m2v_cfg: Dict[str, Any] = {
         "model": model,
         "conf_high": conf_high,
@@ -1642,6 +1671,10 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
 
     if prototype_ignore_intents is not None:
         proto_ignore = list(prototype_ignore_intents)
+    elif not classifier:
+        # no classifier owns any label, so the model's label list is not a
+        # deny-list here: prototype mode serves every registered label
+        proto_ignore = sorted(set(ignore_intents or []))
     else:
         proto_ignore = sorted(set(m2v_model_labels(model)) | set(ignore_intents or []))
     proto_cfg: Dict[str, Any] = {
@@ -1655,6 +1688,15 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
         proto_cfg["conf_medium"] = prototype_conf_medium
     if prototype_conf_low is not None:
         proto_cfg["conf_low"] = prototype_conf_low
+    if not classifier:
+        return get_minicroft(skill_ids,
+                             default_pipeline=M2V_PROTOTYPE_PIPELINE,
+                             pipeline_config={M2V_PROTOTYPE_CONFIG_KEY: proto_cfg},
+                             lang=lang,
+                             secondary_langs=secondary_langs,
+                             max_wait=max_wait,
+                             wait_for_trained=wait_for_trained,
+                             **kwargs)
     pipeline_config = {M2V_CONFIG_KEY: m2v_cfg,
                        M2V_PROTOTYPE_CONFIG_KEY: proto_cfg}
     mc = get_minicroft(skill_ids,

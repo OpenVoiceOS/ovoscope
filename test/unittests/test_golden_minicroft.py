@@ -19,15 +19,25 @@ import shutil
 import sys
 import tempfile
 import textwrap
+import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from ovos_utils.log import LOG
 
-from ovoscope import get_minicroft, is_pipeline_available, LEAN_DEFAULT_PIPELINE
-from ovoscope.golden_minicroft import (EXIT_ALL_SKIPPED, RootDirMismatch,
+from ovoscope import (get_minicroft, get_m2v_minicroft, is_pipeline_available,
+                      m2v_model_labels, LEAN_DEFAULT_PIPELINE,
+                      M2V_DUAL_PIPELINE, M2V_PROTOTYPE_PIPELINE,
+                      M2V_PUBLISHED_MODEL)
+from ovoscope.golden_minicroft import (EXIT_ALL_SKIPPED, EXIT_PRESET,
+                                       PresetUnavailable, RootDirMismatch,
                                        assert_root_dir, collect_rows,
-                                       run_golden, run_rows, scoreboard)
+                                       WORKER_BOOT_ALLOWANCE, WORKER_MODULE,
+                                       preset_factory, preset_unavailable,
+                                       worker_timeout,
+                                       resolve_pipeline, run_golden, run_rows,
+                                       scoreboard)
 
 SKILL_ID = "ovoscope-unittest-golden.test"
 SKILL_SRC = textwrap.dedent('''
@@ -247,3 +257,379 @@ class TestAssertRootDirSegments(unittest.TestCase):
                 assert_root_dir(self._mc(checkout.parent), SKILL_ID, checkout)
         finally:
             shutil.rmtree(checkout, ignore_errors=True)
+
+
+PRESET_SKILL_ID = "ovoscope-unittest-golden-presets.test"
+PRESET_SKILL_SRC = textwrap.dedent('''
+    from ovos_bus_client.message import Message
+    from ovos_workshop.decorators import intent_handler
+    from ovos_workshop.skills.ovos import OVOSSkill
+
+
+    class PresetFixtureSkill(OVOSSkill):
+        @intent_handler("greet.intent")
+        def handle_greet(self, message: Message):
+            self.speak("hi", wait=False)
+''')
+INTENT = {"en-US": "say hello to me\ngreet me\ngive me a greeting\n",
+          "pt-PT": "diz olá\ncumprimenta-me\ndá-me uma saudação\n"}
+PRESET_ROWS = [
+    {"utterance": "greet me", "lang": "en-US", "skill_id": PRESET_SKILL_ID,
+     "expected_intent": "greet.intent"},
+    {"utterance": "cumprimenta-me", "lang": "pt-PT",
+     "skill_id": PRESET_SKILL_ID, "expected_intent": "greet.intent"},
+]
+
+
+def _write_preset_skill(root: Path, module_name: str):
+    (root / "locale").mkdir(parents=True)
+    for lang, lines in INTENT.items():
+        (root / "locale" / lang).mkdir()
+        (root / "locale" / lang / "greet.intent").write_text(lines, encoding="utf-8")
+    (root / f"{module_name}.py").write_text(PRESET_SKILL_SRC, encoding="utf-8")
+    sys.path.insert(0, str(root))
+    try:
+        module = importlib.import_module(module_name)
+    finally:
+        sys.path.remove(str(root))
+    return module.PresetFixtureSkill
+
+
+class TestPipelinePresets(unittest.TestCase):
+    """``--pipeline`` presets: ``repo`` resolves to the checkout's own list,
+    the m2v presets boot through ``get_m2v_minicroft`` on the published
+    model, and a preset that cannot boot here exits 5 with its reason."""
+
+    @classmethod
+    def setUpClass(cls):
+        LOG.set_level("ERROR")
+        cls.tmp = Path(tempfile.mkdtemp(prefix="ovoscope-golden-presets-"))
+        cls.checkout = cls.tmp / "checkout"
+        cls.skill_cls = _write_preset_skill(cls.checkout, "preset_fixture_skill")
+        cls.rows_path = cls.checkout / "test" / "end2end" / "golden_utterances_all.jsonl"
+        _write_rows(cls.rows_path, PRESET_ROWS)
+
+    @classmethod
+    def tearDownClass(cls):
+        LOG.set_level("CRITICAL")
+        sys.modules.pop("preset_fixture_skill", None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_repo_preset_is_the_checkout_declaration(self):
+        # no pyproject: the repo preset leaves the pipeline to MiniCroft
+        self.assertEqual(resolve_pipeline(None, self.checkout), (None, None))
+        self.assertEqual(resolve_pipeline(["repo"], self.checkout), (None, None))
+        declared = ["ovos-padatious-pipeline-plugin-high",
+                    "ovos-padacioso-pipeline-plugin-high"]
+        (self.checkout / "pyproject.toml").write_text(
+            '[project]\nname = "x"\n[tool.ovoscope]\npipeline = [\n'
+            + "".join(f'  "{s}",\n' for s in declared) + "]\n",
+            encoding="utf-8")
+        try:
+            self.assertEqual(resolve_pipeline(None, self.checkout), (None, declared))
+            # an explicit list wins over the declaration
+            self.assertEqual(resolve_pipeline(["a", "b"], self.checkout),
+                             (None, ["a", "b"]))
+            # a preset stands alone
+            with self.assertRaises(PresetUnavailable):
+                resolve_pipeline(["repo", "a"], self.checkout)
+            # the declared list is what the boot and every Session receive
+            seen = []
+
+            def factory(skill_id, lang, pipe):
+                seen.append(list(pipe))
+                return get_minicroft([skill_id], lang=lang,
+                                     default_pipeline=list(pipe),
+                                     extra_skills={skill_id: self.skill_cls})
+            lines = []
+            code = run_golden([str(self.rows_path)], PRESET_SKILL_ID,
+                              str(self.checkout), locales=["en-US"],
+                              minicroft_factory=factory, echo=lines.append)
+            self.assertEqual(code, 0, lines)
+            self.assertEqual(seen, [declared])
+            self.assertIn(f"pipeline: {declared}", lines)
+        finally:
+            (self.checkout / "pyproject.toml").unlink()
+
+    def test_a_bad_declaration_is_named(self):
+        (self.checkout / "pyproject.toml").write_text(
+            '[tool.ovoscope]\npipeline = "not-a-list"\n', encoding="utf-8")
+        try:
+            lines = []
+            code = run_golden([str(self.rows_path)], PRESET_SKILL_ID,
+                              str(self.checkout), echo=lines.append)
+            self.assertEqual(code, EXIT_PRESET, lines)
+            self.assertTrue(lines[0].startswith("PRESET UNAVAILABLE: [tool.ovoscope]"), lines)
+        finally:
+            (self.checkout / "pyproject.toml").unlink()
+
+    def test_an_unavailable_preset_exits_5_with_the_reason(self):
+        with mock.patch("ovoscope.golden_minicroft.preset_unavailable",
+                        return_value="preset 'm2v-dual': model is not reachable: probe"):
+            lines = []
+            code = run_golden([str(self.rows_path)], PRESET_SKILL_ID,
+                              str(self.checkout), pipeline=["m2v-dual"],
+                              echo=lines.append)
+        self.assertEqual(code, EXIT_PRESET)
+        self.assertEqual(code, 5)
+        self.assertEqual(lines, ["PRESET UNAVAILABLE: preset 'm2v-dual': model "
+                                 "is not reachable: probe"])
+
+    def _run_preset(self, preset):
+        reason = preset_unavailable(preset)
+        if reason:
+            self.skipTest(reason)
+        booted = []
+
+        def factory(skill_id, lang, pipe):
+            mc = preset_factory(preset, extra_skills={skill_id: self.skill_cls})(
+                skill_id, lang, pipe)
+            booted.append(mc)
+            return mc
+        rows = collect_rows([str(self.rows_path)])
+        results = run_rows(rows, PRESET_SKILL_ID, self.checkout, preset=preset,
+                           minicroft_factory=factory)
+        return booted, {r.utterance: r for r in results}
+
+    def test_m2v_prototype_preset_matches_both_locales(self):
+        booted, by_utt = self._run_preset("m2v-prototype")
+        self.assertEqual(len(booted), 2)
+        for mc in booted:
+            self.assertEqual(mc.pipeline, M2V_PROTOTYPE_PIPELINE)
+            self.assertNotIn("ovos-m2v-pipeline", mc.intents.pipeline_plugins)
+            proto = mc.intents.pipeline_plugins["ovos-m2v-prototype-pipeline"]
+            self.assertEqual(proto.config.get("model"), M2V_PUBLISHED_MODEL)
+            self.assertEqual(list(proto.ignore_labels), [])
+        self.assertTrue(by_utt["greet me"].matched, by_utt["greet me"].fired)
+        self.assertTrue(by_utt["cumprimenta-me"].matched, by_utt["cumprimenta-me"].fired)
+
+    def test_m2v_dual_preset_matches_both_locales(self):
+        booted, by_utt = self._run_preset("m2v-dual")
+        self.assertEqual(len(booted), 2)
+        for mc in booted:
+            self.assertEqual(mc.pipeline, M2V_DUAL_PIPELINE)
+            classifier = mc.intents.pipeline_plugins["ovos-m2v-pipeline"]
+            proto = mc.intents.pipeline_plugins["ovos-m2v-prototype-pipeline"]
+            self.assertEqual(classifier.config.get("model"), M2V_PUBLISHED_MODEL)
+            # the label mask is the published model's own label list
+            self.assertEqual(set(proto.ignore_labels),
+                             set(m2v_model_labels(M2V_PUBLISHED_MODEL)))
+            self.assertNotIn(f"{PRESET_SKILL_ID}:greet", proto.ignore_labels)
+        self.assertTrue(by_utt["greet me"].matched, by_utt["greet me"].fired)
+        self.assertTrue(by_utt["cumprimenta-me"].matched, by_utt["cumprimenta-me"].fired)
+
+    def test_a_boot_with_no_m2v_stage_is_refused(self):
+        with self.assertRaises(ValueError):
+            get_m2v_minicroft([PRESET_SKILL_ID], prototype=False, classifier=False)
+
+
+HOOK_SRC = textwrap.dedent('''
+    """A stand-in minicroft_factory for the golden worker, named by
+    OVOSCOPE_GOLDEN_FACTORY. It records the pid of every boot."""
+    import os
+
+    from ovoscope import get_minicroft
+    from golden_fixture_skill import GoldenFixtureSkill
+
+
+    def factory(preset):
+        def boot(skill_id, lang, pipeline):
+            with open(os.environ["OVOSCOPE_GOLDEN_PIDFILE"], "a") as fh:
+                fh.write(f"{lang} {os.getpid()}\\n")
+            if os.environ.get("OVOSCOPE_GOLDEN_RAISE"):
+                raise RuntimeError("weights download failed after warm-up")
+            hang = float(os.environ.get("OVOSCOPE_GOLDEN_SLEEP") or 0)
+            if hang:
+                import time
+                time.sleep(hang)
+            return get_minicroft([skill_id], lang=lang,
+                                 extra_skills={skill_id: GoldenFixtureSkill})
+        return boot
+''')
+
+
+@unittest.skipUnless(is_pipeline_available(LEAN_DEFAULT_PIPELINE),
+                     "lean pipeline plugins not installed")
+class TestGoldenBootFailureAndProcesses(unittest.TestCase):
+    """T-3630: a boot that fails exits 5, and a locale can own its process."""
+
+    @classmethod
+    def setUpClass(cls):
+        LOG.set_level("ERROR")
+        cls.tmp = Path(tempfile.mkdtemp(prefix="ovoscope-golden-boot-"))
+        cls.checkout = cls.tmp / "checkout"
+        cls.skill_cls = _write_skill(cls.checkout, "golden_fixture_skill")
+        cls.rows_path = cls.checkout / "test" / "end2end" / "golden_utterances_all.jsonl"
+        _write_rows(cls.rows_path)
+        (cls.checkout / "golden_worker_hook.py").write_text(HOOK_SRC,
+                                                            encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        LOG.set_level("CRITICAL")
+        sys.modules.pop("golden_fixture_skill", None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _child_env(self, **extra):
+        """The environment the worker children inherit: the hook, the pid
+        file, and the fixture skill on the import path."""
+        self.pidfile = self.tmp / f"pids-{self.id().rsplit('.', 1)[-1]}.txt"
+        path = os.pathsep.join([str(self.checkout),
+                                os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+        env = {"OVOSCOPE_GOLDEN_FACTORY": "golden_worker_hook:factory",
+               "OVOSCOPE_GOLDEN_PIDFILE": str(self.pidfile),
+               "PYTHONPATH": path}
+        env.update(extra)
+        return mock.patch.dict(os.environ, env)
+
+    def test_a_factory_that_raises_after_the_check_exits_5(self):
+        """The preset check passed; the boot itself failed. Exit 5, not 1:
+        a miss is a corpus result and this run measured nothing."""
+        def factory(skill_id, lang, pipe):
+            raise RuntimeError("weights download failed after warm-up")
+
+        lines = []
+        with mock.patch("ovoscope.golden_minicroft.preset_unavailable",
+                        return_value=None):
+            code = run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), pipeline=["m2v-dual"],
+                              minicroft_factory=factory, echo=lines.append)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertEqual(code, 5)
+        reason = [l for l in lines if l.startswith("PRESET UNAVAILABLE:")]
+        self.assertEqual(len(reason), 1, lines)
+        self.assertIn("could not boot for en-US", reason[0])
+        self.assertIn("weights download failed after warm-up", reason[0])
+
+    def test_a_boot_failure_with_no_preset_exits_5_too(self):
+        """Exit 5 means "could not boot" on every path, preset or not."""
+        def factory(skill_id, lang, pipe):
+            raise RuntimeError("no audio backend")
+
+        lines = []
+        code = run_golden([str(self.rows_path)], SKILL_ID, str(self.checkout),
+                          minicroft_factory=factory, echo=lines.append)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("the MiniCroft boot could not boot for en-US",
+                      lines[-1])
+
+    def test_each_locale_boots_in_its_own_process(self):
+        """The memory of a stopped MiniCroft comes back at process exit, so
+        a many-locale run boots one interpreter per locale (T-3533)."""
+        lines = []
+        with self._child_env():
+            code = run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), out_dir=str(self.tmp / "out"),
+                              echo=lines.append, per_locale_process=True)
+        self.assertEqual(code, 0, lines)
+        board = json.loads((self.tmp / "out" / "scoreboard.json")
+                           .read_text(encoding="utf-8"))[f"minicroft:{SKILL_ID}"]
+        self.assertEqual((board["total"], board["matched"], board["skipped"]),
+                         (3, 3, 1))
+        booted = [l.split() for l in
+                  self.pidfile.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(sorted(l for l, _ in booted), ["en-US", "pt-PT"])
+        pids = {pid for _, pid in booted}
+        self.assertEqual(len(pids), 2, booted)
+        self.assertNotIn(str(os.getpid()), pids)
+
+    def test_a_boot_failure_in_a_worker_reaches_the_caller_as_exit_5(self):
+        lines = []
+        with self._child_env(OVOSCOPE_GOLDEN_RAISE="1"):
+            code = run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), echo=lines.append,
+                              per_locale_process=True)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("weights download failed after warm-up", lines[-1])
+
+
+class TestGoldenWorkerFailures(unittest.TestCase):
+    """T-3688: a worker that hangs, or that writes a result nobody can read,
+    is a boot failure like any other: exit 5 naming the locale."""
+
+    @classmethod
+    def setUpClass(cls):
+        LOG.set_level("ERROR")
+        cls.tmp = Path(tempfile.mkdtemp(prefix="ovoscope-golden-worker-"))
+        cls.checkout = cls.tmp / "checkout"
+        cls.skill_cls = _write_skill(cls.checkout, "golden_fixture_skill")
+        cls.rows_path = cls.checkout / "test" / "end2end" / "golden_utterances_all.jsonl"
+        _write_rows(cls.rows_path)
+        (cls.checkout / "golden_worker_hook.py").write_text(HOOK_SRC,
+                                                            encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        LOG.set_level("CRITICAL")
+        sys.modules.pop("golden_fixture_skill", None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _run(self, echo_lines, **env):
+        path = os.pathsep.join([str(self.checkout),
+                                os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+        base = {"OVOSCOPE_GOLDEN_FACTORY": "golden_worker_hook:factory",
+                "OVOSCOPE_GOLDEN_PIDFILE": str(self.tmp / "pids.txt"),
+                "PYTHONPATH": path}
+        base.update(env)
+        with mock.patch.dict(os.environ, base):
+            return run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), echo=echo_lines.append,
+                              per_locale_process=True)
+
+    def test_the_derived_bound_covers_the_boot_and_every_row(self):
+        self.assertEqual(worker_timeout(3, 20.0),
+                         WORKER_BOOT_ALLOWANCE + 60.0)
+        # a locale with no active row still gets the boot allowance
+        self.assertEqual(worker_timeout(0, 20.0),
+                         WORKER_BOOT_ALLOWANCE + 20.0)
+
+    def test_the_environment_sets_the_bound(self):
+        with mock.patch.dict(os.environ, {"OVOSCOPE_WORKER_TIMEOUT": "7.5"}):
+            self.assertEqual(worker_timeout(100, 20.0), 7.5)
+        with mock.patch.dict(os.environ, {"OVOSCOPE_WORKER_TIMEOUT": "soon"}):
+            self.assertEqual(worker_timeout(1, 20.0),
+                             WORKER_BOOT_ALLOWANCE + 20.0)
+
+    def test_a_worker_that_hangs_is_killed_and_exits_5(self):
+        lines = []
+        code = self._run(lines, OVOSCOPE_GOLDEN_SLEEP="300",
+                         OVOSCOPE_WORKER_TIMEOUT="3")
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("did not finish in 3s", lines[-1])
+        self.assertIn("en-US", lines[-1])
+
+    def _with_worker_writing(self, text, returncode=-9):
+        """Run with a stubbed worker that writes *text* as its result."""
+        real_run = subprocess.run
+
+        def fake_run(args, **kwargs):
+            if len(args) > 3 and args[1:3] == ["-m", WORKER_MODULE]:
+                Path(args[4]).write_text(text, encoding="utf-8")
+                return subprocess.CompletedProcess(args, returncode)
+            return real_run(args, **kwargs)  # pragma: no cover - not used
+
+        lines = []
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            code = run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), echo=lines.append,
+                              per_locale_process=True)
+        return code, lines
+
+    def test_a_truncated_result_file_exits_5(self):
+        code, lines = self._with_worker_writing('{"results": [{"utteranc')
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("cannot be read", lines[-1])
+        self.assertIn("exit code -9", lines[-1])
+        self.assertIn("en-US", lines[-1])
+
+    def test_a_result_file_without_rows_exits_5(self):
+        code, lines = self._with_worker_writing("{}", returncode=0)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("wrong shape", lines[-1])
+        self.assertIn("en-US", lines[-1])
+
+    def test_a_result_row_of_the_wrong_shape_exits_5(self):
+        code, lines = self._with_worker_writing('{"results": [{"nope": 1}]}',
+                                                returncode=0)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("wrong shape", lines[-1])

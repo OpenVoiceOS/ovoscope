@@ -16,7 +16,14 @@ Three constraints the fleet learned the hard way, each enforced here:
 - the row's ``lang`` goes on the Session of every utterance; the runner
   never defaults to ``en-US`` (T-3308);
 - no slot is supplied: a slot proves which template line matched, not
-  the intent.
+  the intent;
+- a machine-drafted row that misses is a coverage gap only when the name
+  it expects exists in that locale's resources. A row that names a
+  resource nobody ships is a defect in the row and stays a miss, with the
+  missing name in the message (T-3140: nine machine-drafted rows named
+  pre-rename dialogs and a per-repo runner turned every one of them into
+  an expected failure, so the run was green on a name the skill had never
+  shipped).
 
 ``--pipeline`` takes an explicit list of plugin ids or one of three named
 presets. ``repo`` (the default) is the checkout's own list, read from
@@ -35,7 +42,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Union
 
 from ovos_bus_client.message import Message
 from ovos_bus_client.session import Session
@@ -49,6 +56,9 @@ INSTALL_SEGMENTS = frozenset({"site-packages", "dist-packages", ".venv", "venv"}
 #: exit codes of ``ovoscope golden``
 EXIT_MISS, EXIT_NO_ROWS, EXIT_ROOT_DIR, EXIT_ALL_SKIPPED = 1, 2, 3, 4
 EXIT_PRESET = 5
+#: every loaded row is a coverage gap: the corpus exists and nothing
+#: in it is measurable yet. Not the same as an empty corpus (4).
+EXIT_ALL_GAPS = 6
 #: the named ``--pipeline`` presets
 PRESET_REPO, PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL = ("repo", "m2v-prototype",
                                                       "m2v-dual")
@@ -204,6 +214,11 @@ class RowResult:
     core: bool
     latency_ms: float
     skipped: bool = False
+    #: a machine-drafted row that missed while the name it expects does
+    #: exist in the locale's resources: a coverage gap, not a defect
+    gap: bool = False
+    #: why the row was skipped, or why a miss is a missing resource
+    reason: Optional[str] = None
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -266,6 +281,57 @@ def assert_root_dir(minicroft, skill_id: str, checkout: Path) -> Path:
     return root
 
 
+def assert_res_dir(minicroft, skill_id: str, checkout: Path,
+                   root: Path) -> Path:
+    """The directory the loaded skill reads its resources from.
+
+    ovos-workshop sets ``self.res_dir = resources_dir or self.root_dir``
+    (``ovos_workshop/skills/ovos.py``), and every resource loader reads
+    ``res_dir``, never ``root_dir``: ``load_lang``, ``load_dialog_files``,
+    ``load_vocab_files``, ``load_regex_files`` and ``find_resource`` all
+    take it. A skill constructed with ``resources_dir=`` therefore ships
+    its locale tree somewhere ``root_dir`` does not hold, and a bound read
+    off ``root_dir`` alone finds nothing there: the skill's OWN resource
+    then reads as a name nobody ships, which fails a row that should pass.
+
+    *res_dir* gets the same two checks ``assert_root_dir`` puts on *root*,
+    because it is read for the same purpose. A path outside the checkout,
+    or one under an ``INSTALL_SEGMENTS`` directory inside it, is REFUSED
+    rather than accepted: the names read out of such a tree cannot be shown
+    to be the checkout's own source, and accepting them lets another copy's
+    resource excuse a wrong gold row, which is T-3140 from a new direction.
+    A refusal is loud and exits ``EXIT_ROOT_DIR``; the alternative is a
+    green run on a name this checkout never shipped.
+
+    Returns *root* unchanged when the skill sets no ``resources_dir``,
+    which is every skill that does not ask for one.
+    """
+    loader = minicroft.plugin_skills.get(skill_id)
+    instance = getattr(loader, "instance", None) if loader else None
+    if instance is None:
+        raise RootDirMismatch(f"skill {skill_id!r} did not load")
+    res = Path(getattr(instance, "res_dir", None) or root).resolve()
+    if res == root:
+        return root
+    checkout = Path(checkout).resolve()
+    if checkout != res and checkout not in res.parents:
+        raise RootDirMismatch(
+            f"skill {skill_id!r} reads its resources from {res}, which is "
+            f"not under the checkout {checkout}. The run would read another "
+            f"tree's names, so a gold row naming a resource this checkout "
+            f"does not ship would pass. Point resources_dir inside the "
+            f"checkout, or measure the skill where its resources live.")
+    between = res.relative_to(checkout).parts if res != checkout else ()
+    installed = [p for p in between if p in INSTALL_SEGMENTS]
+    if installed:
+        raise RootDirMismatch(
+            f"skill {skill_id!r} reads its resources from {res}, an installed "
+            f"copy under {'/'.join(installed)} inside the checkout "
+            f"{checkout}, not the checkout's own source. Install the checkout "
+            f"editable.")
+    return res
+
+
 def _fired_types(minicroft, skill_id: str, row: GoldenRow, pipeline,
                  timeout: float) -> tuple:
     """Fire the row's utterance with its own lang and read what the skill ran."""
@@ -292,6 +358,203 @@ def _fired_types(minicroft, skill_id: str, row: GoldenRow, pipeline,
                      if m.msg_type == "mycroft.skill.handler.start"
                      and str(m.data.get("name", "")).startswith(prefix)]
     return fired, handler_names, latency
+
+
+#: the resource kinds a gold row may name: an intent file or a dialog
+RESOURCE_SUFFIXES = (".intent", ".dialog", ".voc")
+
+
+class _NoPackage:
+    """The type of :data:`NO_PACKAGE`. One instance, compared with ``is``.
+
+    Deliberately not a string and deliberately truthy. An empty string would
+    have read the same as ``None`` to any consumer that tested the value's
+    truthiness, and the third state would have collapsed back into the second
+    in silence, which is the failure this whole bound is recovering from. A
+    consumer that writes ``if package:`` instead of ``if package is None:``
+    now takes the name branch and raises on ``root / package``, which is loud.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "NO_PACKAGE"
+
+
+#: ``own_package``'s answer meaning "the skill ships no package directory under
+#: *root*": its module sits directly there, so *root* alone holds its locale
+#: tree. Distinct from ``None``, which means the package could not be
+#: determined at all. The two shared one value once, and that is why this bound
+#: never ran in production: a skill's ``root_dir`` IS its class module's
+#: directory (ovos-workshop ``skills/ovos.py``), so the relative path always
+#: has exactly one part and every real skill looked undetermined.
+NO_PACKAGE = _NoPackage()
+
+#: what ``own_package`` returns and every consumer below accepts
+OwnPackage = Union[str, _NoPackage, None]
+
+#: appended to a coverage gap's reason when the row was judged under the WIDE
+#: bound, so the run's own output says the bound was not applied. A gap excused
+#: by a neighbour's resource is otherwise invisible in the result, and a log
+#: line is not something a CI reader opens.
+WIDE_BOUND_NOTE = ("judged under the wide bound: the skill's own package could "
+                   "not be determined, so a neighbour's locale tree may have "
+                   "answered for it")
+
+
+def own_package(minicroft, skill_id: str, root: Path) -> OwnPackage:
+    """Which package directory under *root* holds the skill.
+
+    Three answers, and they are three because conflating two of them is what
+    made this bound dead code:
+
+    - a package name, when the class's module sits inside a directory under
+      *root*. No production caller reaches this arm today: ``own_package`` is
+      called with the ``root_dir`` ovos-workshop derives from the class
+      module's own directory, so the relative path has exactly one part. The
+      arm needs a caller that passes a root ABOVE that directory, and none
+      does. It is kept because a future caller passing the checkout, or a
+      workshop that stops deriving ``root_dir`` from the module, makes it
+      live, and it is the NARROWING answer: losing it widens the bound;
+    - :data:`NO_PACKAGE`, when the class's module sits directly in *root*. The
+      skill ships no package directory, so *root* alone holds its locale tree
+      and no child of *root* belongs to it. This is the answer for BOTH
+      production layouts, because ``root_dir`` is the class module's own
+      directory: in the packaged layout ``root_dir`` IS the package, and in the
+      legacy top-level layout it is the checkout;
+    - ``None``, when the package genuinely cannot be determined: no module in
+      ``sys.modules``, no ``__file__``, or a module file outside *root*. Only
+      this answer widens the bound, and the caller logs it.
+    """
+    loader = minicroft.plugin_skills.get(skill_id)
+    instance = getattr(loader, "instance", None) if loader else None
+    if instance is None:
+        return None
+    module = sys.modules.get(type(instance).__module__)
+    filename = getattr(module, "__file__", None)
+    if not filename:
+        return None
+    try:
+        parts = Path(filename).resolve().relative_to(Path(root).resolve()).parts
+    except ValueError:
+        return None
+    return parts[0] if len(parts) > 1 else NO_PACKAGE
+
+
+def _own_locale_roots(root: Path,
+                      package: OwnPackage = None) -> List[Path]:
+    """The directories whose ``locale`` tree belongs to the skill at *root*.
+
+    A skill ships its locale tree at ``<root>/locale/<lang>`` (the legacy
+    top-level layout) or at ``<root>/<package>/locale/<lang>`` (the
+    packaged layout), and nothing deeper belongs to it. A recursive walk
+    of the checkout reads any other skill's tree as well: a ``.venv`` or a
+    ``site-packages`` under the checkout makes the name set fleet-wide,
+    and an installed skill's file then answers for this skill (T-3140).
+
+    *package* is :func:`own_package`'s answer and has three cases.
+
+    A NAME accepts that one directory beside *root*, so a second skill
+    vendored as a direct child package of the checkout does not answer for
+    this one. The child needs only to be a directory outside
+    ``INSTALL_SEGMENTS``: ``own_package`` has already proved the skill's own
+    module file lives inside it, which is stronger evidence than an
+    ``__init__.py`` marker, and a PEP 420 namespace package carries no such
+    marker.
+
+    :data:`NO_PACKAGE` accepts *root* ALONE. The skill's module sits directly
+    in *root*, so its locale tree is ``<root>/locale`` and no child of *root*
+    is part of it. Every child package there is a different skill, which is
+    the ``sibling_dialog`` hole this closes. This is the case both production
+    layouts take.
+
+    ``None`` means undetermined, and only then is the wide bound used: every
+    direct child package is accepted, which over-reads rather than
+    under-reads. The caller logs when it happens.
+    """
+    roots = [root]
+    if package is NO_PACKAGE:
+        return roots
+    if package is not None:
+        child = root / package
+        if child.name not in INSTALL_SEGMENTS and child.is_dir():
+            roots.append(child)
+        return roots
+    try:
+        children = sorted(root.iterdir())
+    except OSError:
+        return roots
+    for child in children:
+        if child.name in INSTALL_SEGMENTS or not child.is_dir():
+            continue
+        if (child / "__init__.py").is_file():
+            roots.append(child)
+    return roots
+
+
+def locale_resources(root: Path, lang: str,
+                     package: OwnPackage = None) -> set:
+    """The resource names the skill at *root* ships for *lang*.
+
+    Every ``<base>/locale/<lang>/<name>.<kind>``, for each base
+    :func:`_own_locale_roots` names, gives ``<name>``. The name is taken as
+    written: a gold row that says ``who.is`` where the skill ships
+    ``who_is`` names a resource that does not exist, and that is the case
+    this set is read for.
+    """
+    names = set()
+    for base in _own_locale_roots(Path(root).resolve(), package):
+        folder = base / "locale" / lang
+        if not folder.is_dir():
+            continue
+        for path in folder.iterdir():
+            for suffix in RESOURCE_SUFFIXES:
+                if path.name.endswith(suffix):
+                    names.add(path.name[:-len(suffix)])
+                    break
+    return names
+
+
+def _expected_name(skill_id: str, expected: str) -> str:
+    """The bare resource name a row's ``expected_intent`` states."""
+    name = expected.split(":", 1)[1] if expected.startswith(f"{skill_id}:") \
+        else expected
+    if name.endswith(".intent"):
+        name = name[:-len(".intent")]
+    return name
+
+
+def _machine_generated(row: GoldenRow) -> bool:
+    return bool(row.provenance.get("machine_generated"))
+
+
+def missing_resource(row: GoldenRow, skill_id: str, root: Path,
+                     known_labels: Optional[Iterable[str]] = None,
+                     package: OwnPackage = None) -> Optional[str]:
+    """The resource name *row* expects and the locale does not ship.
+
+    ``None`` means the name is real: the locale ships a file under it, or
+    the run itself fired that label in *this row's locale*, which proves
+    the intent exists even where no file declares it (an Adapt intent
+    built in code). ``known_labels`` is the caller's set for ``row.lang``
+    alone: a label fired in another locale says nothing here.
+
+    This is what separates a coverage gap from a wrong name. A
+    machine-drafted row that misses while its name exists is a gap: a
+    native speaker has not confirmed the phrase yet. A row that names a
+    resource nobody ships is a defect in the row, whoever drafted it, and
+    a runner that turns it into an expected failure keeps a wrong name
+    green (T-3140: nine kab and oc-FR rows named pre-rename dialogs).
+    """
+    if not row.expected_intent:
+        return None
+    name = _expected_name(skill_id, row.expected_intent)
+    if name in locale_resources(root, row.lang, package):
+        return None
+    forms = _label_forms(skill_id, row.expected_intent)
+    if known_labels and any(f in set(known_labels) for f in forms):
+        return None
+    return name
 
 
 def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
@@ -328,13 +591,28 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
     for row in rows:
         by_lang.setdefault(row.lang, []).append(row)
 
+    #: the package that belongs to the skill, read off the loaded instance
+    #: once it boots; a lang holding only skipped rows leaves it unset
+    skill_package: OwnPackage = None
     results: List[RowResult] = []
+    #: the GoldenRow behind each RowResult, for the coverage-gap pass below
+    sources: List[Optional[GoldenRow]] = []
+    #: the tree the skill reads its resources from: its ``res_dir``, which
+    #: is its ``root_dir`` unless it was built with ``resources_dir=``. The
+    #: coverage-gap pass reads resources from this tree and no other.
+    skill_root = Path(checkout).resolve()
+    #: the labels the run fired, per locale. A label fired in one locale
+    #: proves nothing about another: its resources are a different tree.
+    fired_labels: Dict[str, set] = {}
     for lang in sorted(by_lang):
+        fired_here = fired_labels.setdefault(lang, set())
         active = [r for r in by_lang[lang] if not _skipped(r)]
         for r in by_lang[lang]:
             if _skipped(r):
                 results.append(RowResult(r.utterance, r.lang, r.expected_intent,
-                                         [], True, r.core, 0.0, skipped=True))
+                                         [], True, r.core, 0.0, skipped=True,
+                                         reason="needs_manual"))
+                sources.append(None)
         if not active:
             continue
         try:
@@ -350,7 +628,28 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
         if preset is not None:
             session_pipeline = list(mc.pipeline)
         try:
-            assert_root_dir(mc, skill_id, checkout)
+            root = assert_root_dir(mc, skill_id, checkout)
+            skill_root = assert_res_dir(mc, skill_id, checkout, root)
+            if skill_root != root:
+                # the skill DECLARED where its resources live, which is
+                # stronger evidence than any inference from the module's
+                # path: that directory alone holds its locale tree, and no
+                # child of it belongs to it. Same answer as NO_PACKAGE.
+                skill_package = NO_PACKAGE
+            else:
+                # which package under the skill root holds it. NO_PACKAGE
+                # means the root alone, which is what both production
+                # layouts give.
+                skill_package = own_package(mc, skill_id, skill_root)
+            if skill_package is None:
+                # the only case that widens the bound, so it is never silent:
+                # every direct child package of the root answers, and another
+                # skill vendored there can mask a wrong gold row (T-3140)
+                LOG.warning(
+                    f"could not determine the package of {skill_id!r} under "
+                    f"{skill_root}; reading every child package's locale tree "
+                    f"as well, so another skill vendored there may answer for "
+                    f"it")
             for row in active:
                 fired, handlers, latency = _fired_types(mc, skill_id, row,
                                                         session_pipeline, timeout)
@@ -360,12 +659,56 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
                     forms = _label_forms(skill_id, row.expected_intent)
                     matched = any(f in forms for f in fired) or \
                         any(h in forms for h in handlers)
+                fired_here.update(fired)
+                fired_here.update(h for h in handlers if h)
                 results.append(RowResult(row.utterance, row.lang,
                                          row.expected_intent, fired, matched,
                                          row.core, latency))
+                sources.append(row)
         finally:
             mc.stop()
+    _mark_coverage_gaps(results, sources, skill_id, skill_root, fired_labels,
+                        skill_package)
     return results
+
+
+def _mark_coverage_gaps(results: List[RowResult],
+                        sources: List[Optional[GoldenRow]], skill_id: str,
+                        skill_root: Path,
+                        fired_labels: Dict[str, set],
+                        skill_package: OwnPackage = None) -> None:
+    """Split the machine-drafted misses into gaps and wrong names.
+
+    A machine-drafted row that misses is a coverage gap only when the name
+    it expects exists for its locale. Otherwise the row names a resource
+    nobody ships, and it stays a miss that says which name is missing.
+
+    ``fired_labels`` is keyed by lang, and each row reads its own locale's
+    set alone. ``skill_root`` is the tree the skill READS its resources from,
+    its ``res_dir``, not the checkout and not always its ``root_dir``, and
+    ``skill_package`` is the one package directory under it that belongs to
+    this skill: another skill's file never answers for this one, whether it
+    sits in a ``.venv``, under a ``vendor`` directory, or as a sibling
+    package of the checkout.
+    """
+    for result, row in zip(results, sources):
+        if row is None or result.matched or not _machine_generated(row):
+            continue
+        missing = missing_resource(row, skill_id, skill_root,
+                                   fired_labels.get(row.lang, set()),
+                                   skill_package)
+        if missing is None:
+            result.gap = True
+            result.reason = ("coverage-gap (machine-drafted, pending native "
+                             "validation)")
+            if skill_package is None:
+                # the name may belong to another skill beside this one; say so
+                # where the result is read, not only in the log
+                result.reason += f". {WIDE_BOUND_NOTE}"
+        else:
+            result.reason = (f"{row.lang} ships no resource named "
+                             f"{missing!r}: the row names one that does not "
+                             f"exist, which is a defect in the row")
 
 
 def worker_timeout(rows: int, timeout: float) -> float:
@@ -460,6 +803,12 @@ def run_rows_per_locale(rows: List[GoldenRow], skill_id: str, checkout: Path,
     for row in rows:
         by_lang.setdefault(row.lang, []).append(row)
     results: List[RowResult] = []
+    # Each child runs :func:`run_rows` on one locale, so the coverage-gap
+    # pass and its ``fired_labels`` are per locale here by construction.
+    # That is deliberate, and it is the same rule the one-process path
+    # applies with a set keyed by lang; the two paths must not drift.
+    # ``gap`` and ``reason`` come back through the JSON result file:
+    # ``as_dict`` writes them and ``RowResult(**r)`` reads them.
     for lang in sorted(by_lang):
         results.extend(_run_locale(by_lang[lang], skill_id, checkout,
                                    pipeline=pipeline, preset=preset,
@@ -475,7 +824,7 @@ def scoreboard(results: List[RowResult], skill_id: str,
     ``pipeline`` and ``preset`` record what the run booted, so a board
     read later says which engine produced its numbers.
     """
-    scored = [r for r in results if not r.skipped]
+    scored = [r for r in results if not r.skipped and not r.gap]
     entry = {
         "gating": True,
         "preset": preset,
@@ -485,9 +834,15 @@ def scoreboard(results: List[RowResult], skill_id: str,
         "core_total": sum(1 for r in scored if r.core),
         "core_matched": sum(1 for r in scored if r.core and r.matched),
         "skipped": sum(1 for r in results if r.skipped),
+        "coverage_gap": sum(1 for r in results if r.gap),
+        "gaps": [{"utterance": r.utterance, "lang": r.lang,
+                  "expected": r.expected, "got": r.fired,
+                  "reason": r.reason}
+                 for r in results if r.gap],
         "failures": [{"utterance": r.utterance, "lang": r.lang,
                       "expected": r.expected, "got": r.fired,
-                      "confidence": None, "core": r.core}
+                      "confidence": None, "core": r.core,
+                      "reason": r.reason}
                      for r in scored if not r.matched],
     }
     entry["pct"] = (entry["matched"] / entry["total"]) if entry["total"] else 1.0
@@ -558,20 +913,40 @@ def run_golden(rows_patterns: Sequence[str], skill_id: str, checkout: str,
                   else M2V_PROTOTYPE_PIPELINE)
     board = scoreboard(results, skill_id, pipeline=stages, preset=preset)
     entry = board[f"{RUNNER_ID}:{skill_id}"]
-    if entry["total"] == 0:
+    if entry["total"] == 0 and entry["coverage_gap"] == 0:
         echo(f"ALL SKIPPED: {entry['skipped']} row(s) loaded, every one "
              f"needs_manual, nothing measured")
         if out_dir:
             for path in write_results(results, board, Path(out_dir)):
                 echo(f"wrote {path}")
         return EXIT_ALL_SKIPPED
+    for gap in entry["gaps"]:
+        echo(f"COVERAGE GAP [{gap['lang']}] {gap['utterance']!r}: expected "
+             f"{gap['expected']!r}, fired {gap['got']}. Machine-drafted, and "
+             f"the name it expects does exist here")
+    widened = [g for g in entry["gaps"]
+               if WIDE_BOUND_NOTE in (g.get("reason") or "")]
+    if widened:
+        echo(f"WIDE BOUND: {len(widened)} coverage gap(s) were judged without "
+             f"knowing which package is the skill's, so a second skill beside "
+             f"it may have supplied the name. Treat those gaps as unproven.")
     for failure in entry["failures"]:
-        echo(f"MISS [{failure['lang']}] {failure['utterance']!r}: expected "
-             f"{failure['expected']!r}, fired {failure['got']}")
+        line = (f"MISS [{failure['lang']}] {failure['utterance']!r}: expected "
+                f"{failure['expected']!r}, fired {failure['got']}")
+        if failure.get("reason"):
+            line += f". {failure['reason']}"
+        echo(line)
     echo(f"{entry['total']} rows, {entry['matched']} matched, "
          f"{entry['total'] - entry['matched']} failed, "
-         f"{entry['skipped']} skipped (needs_manual)")
+         f"{entry['skipped']} skipped (needs_manual), "
+         f"{entry['coverage_gap']} coverage gap(s)")
+    if entry["total"] == 0:
+        echo(f"ALL GAPS: {entry['coverage_gap']} row(s) measured, every one "
+             f"a coverage gap, nothing scored. The gap lines above say which "
+             f"rows a native speaker must confirm.")
     if out_dir:
         for path in write_results(results, board, Path(out_dir)):
             echo(f"wrote {path}")
+    if entry["total"] == 0:
+        return EXIT_ALL_GAPS
     return 0 if entry["gate_passed"] else EXIT_MISS

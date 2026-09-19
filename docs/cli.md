@@ -257,12 +257,45 @@ it, and it grants nothing new: whoever can set it can already set
 
 The scoreboard records `preset` and `pipeline` beside the counts.
 
+A machine-drafted row that misses is a coverage gap only when the name it
+expects is a resource the skill ships for that row's locale. A row that
+names a resource nobody ships is a defect in the row, and it stays a miss
+that says which name is missing.
+
+The runner reads the resource names from the skill's own tree alone. The tree
+is `<root>/locale/<lang>`, where `<root>` is the directory the loaded skill
+READS its resources from: its `res_dir`, which is the directory the skill
+class came from unless the skill was built with `resources_dir=`. A skill that
+sets `resources_dir` keeps its locale tree there and its `root_dir` holds
+none, so the runner follows `res_dir`. That directory gets the same two checks
+as the root: a `resources_dir` outside `--checkout`, or one under a
+`site-packages`, `dist-packages`, `.venv` or `venv` directory inside it, is
+refused with exit 3. The names in such a tree cannot be shown to be this
+checkout's own source, and reading them lets a gold row that names a resource
+this checkout does not ship pass. Nothing under
+a sibling directory of `<root>` belongs to the skill, so a `.venv`, a vendored
+second skill under the checkout, and a second skill sitting beside this one all
+answer for that skill and never for this one.
+
+Where the runner cannot tell which directory the loaded class came from it
+widens the search to every package directory beside `<root>` rather than
+narrowing it, because over-reading makes a wrong gold row pass while
+under-reading makes a right one fail. It logs a warning naming the skill
+whenever it does, so a run that read a neighbour's tree says so.
+
+A label the run fired is proof the name is real, for the locale that fired
+it alone. An Adapt intent built in code ships no resource file.
+
 Exit codes: 0 every row matched; 1 a miss; 2 no row loaded; 3 the skill did
-not load from `--checkout`; 4 every row was `needs_manual`; 5 the run could
-not boot. Exit 5 covers every boot path: the preset check before the run,
-and the boot itself, with or without a preset. A boot failure is never
-exit 1, because exit 1 is a corpus miss and a failed boot measured
-nothing.
+not load from `--checkout`, or reads its resources from outside it; 4 every
+row was `needs_manual`; 5 the run could
+not boot; 6 every measured row was a coverage gap. Exit 5 covers every boot
+path: the preset check before the run, and the boot itself, with or without
+a preset. A boot failure is never exit 1, because exit 1 is a corpus miss
+and a failed boot measured nothing. Exit 6 is not exit 4: exit 4 says the
+corpus is empty of measurable rows, and exit 6 says the rows were measured
+and each one waits for a native speaker. The `COVERAGE GAP` lines name
+them.
 
 ---
 

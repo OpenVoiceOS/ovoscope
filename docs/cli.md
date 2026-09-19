@@ -1,7 +1,8 @@
 # ovoscope CLI
 
-The `ovoscope` command-line tool provides six subcommands for recording,
-replaying, diffing, validating, and scanning E2E test fixtures.
+The `ovoscope` command-line tool provides seven subcommands: golden-utterance
+runs on a real intent service, and recording, replaying, diffing, validating
+and scanning E2E test fixtures.
 
 ## Installation
 
@@ -177,6 +178,63 @@ ovoscope-setup --uninstall --claude
 
 With no explicit `--claude`/`--gemini` flag, the tool auto-detects which of
 `claude`/`gemini` are on `PATH` and installs for those.
+
+---
+
+### `ovoscope golden`: Golden-utterance rows on a real intent service
+
+Runs a skill's `golden_utterances*.jsonl` rows through one `MiniCroft` per
+locale and reads the fired intent back from the bus (`cli.py:cmd_golden`).
+The loaded skill must come from `--checkout`, and every utterance carries
+its row's `lang`.
+
+```bash
+ovoscope golden --rows 'test/end2end/golden_utterances_*.jsonl' \
+    --skill ovos-skill-parrot.openvoiceos --checkout . --out golden-results
+ovoscope golden --rows 'test/end2end/*.jsonl' --skill my-skill.openvoiceos \
+    --pipeline m2v-prototype
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--rows` | **required** | Glob(s) of `golden_utterances*.jsonl` files. |
+| `--skill` | **required** | The skill id (its entry point name). |
+| `--checkout` | `.` | The checkout the loaded skill must come from. |
+| `--locales` | all | Comma-separated lang list to run. |
+| `--pipeline` | `repo` | A preset, or comma-separated pipeline plugin ids. |
+| `--out` | None | Directory for `scoreboard.json` and `predictions.jsonl`. |
+| `--timeout` | `20` | Seconds to wait per utterance. |
+
+`--pipeline` presets:
+
+| Preset | Boots |
+|--------|-------|
+| `repo` | The checkout's own list, `[tool.ovoscope] pipeline` in its `pyproject.toml`. When the checkout declares none, MiniCroft's lean default (stop, converse, adapt, padatious, padacioso, fallback). |
+| `m2v-prototype` | Prototype mode alone (`M2V_PROTOTYPE_PIPELINE`) on the published model `OpenVoiceOS/ovos-m2v-intents-multilingual`. Every label the skill registers is served from its own `.intent` files; no classifier, no label mask. |
+| `m2v-dual` | The classifier and prototype mode side by side (`M2V_DUAL_PIPELINE`) on the published model, prototype first at every tier, the classifier's label list masked from the prototype stage. |
+
+Both m2v presets boot through `get_m2v_minicroft`, so the model, the label
+mask and the tier order are the one implementation the m2v tests use. The
+model is loaded before the first row is fired. A preset that cannot boot
+here (plugin not installed, model not reachable) exits 5 and prints the
+reason. A preset stands alone: it cannot be mixed with plugin ids.
+
+```toml
+# pyproject.toml of a skill: what the repo preset boots
+[tool.ovoscope]
+pipeline = [
+  "ovos-padatious-pipeline-plugin-high",
+  "ovos-padacioso-pipeline-plugin-high",
+  "ovos-padacioso-pipeline-plugin-medium",
+  "ovos-padacioso-pipeline-plugin-low",
+]
+```
+
+The scoreboard records `preset` and `pipeline` beside the counts.
+
+Exit codes: 0 every row matched; 1 a miss; 2 no row loaded; 3 the skill did
+not load from `--checkout`; 4 every row was `needs_manual`; 5 the preset
+cannot boot here.
 
 ---
 

@@ -17,6 +17,14 @@ Three constraints the fleet learned the hard way, each enforced here:
   never defaults to ``en-US`` (T-3308);
 - no slot is supplied: a slot proves which template line matched, not
   the intent.
+
+``--pipeline`` takes an explicit list of plugin ids or one of three named
+presets. ``repo`` (the default) is the checkout's own list, read from
+``[tool.ovoscope] pipeline`` in its ``pyproject.toml``, and MiniCroft's
+lean default when the checkout declares none. ``m2v-prototype`` and
+``m2v-dual`` boot through :func:`ovoscope.get_m2v_minicroft` on the
+published model, so the model, the label mask and the tier order are the
+one implementation the ovoscope m2v tests already use.
 """
 from __future__ import annotations
 
@@ -24,6 +32,7 @@ import dataclasses
 import glob
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -38,10 +47,139 @@ RUNNER_ID = "minicroft"
 INSTALL_SEGMENTS = frozenset({"site-packages", "dist-packages", ".venv", "venv"})
 #: exit codes of ``ovoscope golden``
 EXIT_MISS, EXIT_NO_ROWS, EXIT_ROOT_DIR, EXIT_ALL_SKIPPED = 1, 2, 3, 4
+EXIT_PRESET = 5
+#: the named ``--pipeline`` presets
+PRESET_REPO, PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL = ("repo", "m2v-prototype",
+                                                      "m2v-dual")
+PRESETS = (PRESET_REPO, PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL)
+M2V_PRESETS = (PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL)
 
 
 class RootDirMismatch(RuntimeError):
     """The loaded skill did not come from the checkout under test."""
+
+
+class PresetUnavailable(RuntimeError):
+    """A ``--pipeline`` preset cannot boot here; the message says why."""
+
+
+def repo_pipeline(checkout: Path) -> Optional[List[str]]:
+    """The checkout's own pipeline list, or ``None`` when it declares none.
+
+    Read from ``[tool.ovoscope] pipeline`` in ``<checkout>/pyproject.toml``.
+    """
+    path = Path(checkout) / "pyproject.toml"
+    if not path.is_file():
+        return None
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:  # pragma: no cover - 3.10 only
+        import tomli as tomllib
+    with path.open("rb") as fh:
+        data = tomllib.load(fh)
+    stages = data.get("tool", {}).get("ovoscope", {}).get("pipeline")
+    if stages is None:
+        return None
+    if not isinstance(stages, list) or not all(isinstance(s, str) for s in stages):
+        raise PresetUnavailable(
+            f"[tool.ovoscope] pipeline in {path} must be a list of plugin ids")
+    return list(stages) or None
+
+
+def m2v_model_unreachable(model: str) -> Optional[str]:
+    """Why ``model`` cannot be loaded here, or ``None`` when it can.
+
+    A local directory or a Hub checkpoint already in the cache is reachable
+    offline; otherwise one ``config.json`` download decides. The reason is
+    the text a test gives ``skipTest`` and the CLI prints before exit 5.
+    """
+    if os.path.isdir(model):
+        if os.path.isfile(os.path.join(model, "config.json")):
+            return None
+        return f"{model} is a directory without config.json"
+    try:
+        import huggingface_hub
+    except ImportError:
+        return "huggingface_hub is not installed"
+    try:
+        huggingface_hub.hf_hub_download(model, "config.json")
+    except Exception as exc:  # network, 401/404, offline mode
+        return f"{model} is not reachable: {type(exc).__name__}: {exc}"
+    return None
+
+
+def preset_unavailable(preset: str) -> Optional[str]:
+    """Why an m2v preset cannot boot here, or ``None`` when it can."""
+    from ovoscope import (M2V_DUAL_PIPELINE, M2V_PROTOTYPE_PIPELINE,
+                          M2V_PUBLISHED_MODEL, is_pipeline_available)
+    stages = (M2V_DUAL_PIPELINE if preset == PRESET_M2V_DUAL
+              else M2V_PROTOTYPE_PIPELINE)
+    if not is_pipeline_available(stages):
+        return f"preset {preset!r} needs ovos-m2v-pipeline installed"
+    reason = m2v_model_unreachable(M2V_PUBLISHED_MODEL)
+    if reason:
+        return f"preset {preset!r}: {reason}"
+    return None
+
+
+def resolve_pipeline(spec: Optional[Sequence[str]], checkout: Path
+                     ) -> tuple:
+    """Turn ``--pipeline`` into ``(preset, stages)``.
+
+    ``spec`` is ``None`` or a list with one preset name, or a list of plugin
+    ids. A preset returns ``(name, None)``; ``repo`` returns ``(None,
+    <declared list or None>)`` since it is an explicit list once read; an
+    explicit list returns ``(None, list)``. Raises :class:`PresetUnavailable`
+    when an m2v preset cannot boot here.
+    """
+    if not spec:
+        spec = [PRESET_REPO]
+    if len(spec) == 1 and spec[0] in PRESETS:
+        preset = spec[0]
+        if preset == PRESET_REPO:
+            return None, repo_pipeline(checkout)
+        reason = preset_unavailable(preset)
+        if reason:
+            raise PresetUnavailable(reason)
+        return preset, None
+    unknown = [s for s in spec if s in PRESETS]
+    if unknown:
+        raise PresetUnavailable(
+            f"a preset stands alone: {unknown} cannot be mixed with plugin ids")
+    return None, list(spec)
+
+
+def preset_factory(preset: str, **boot_kwargs):
+    """The ``minicroft_factory`` of an m2v preset: one boot implementation.
+
+    Both presets call :func:`ovoscope.get_m2v_minicroft` on
+    ``M2V_PUBLISHED_MODEL``; ``m2v-prototype`` passes ``classifier=False``.
+    ``boot_kwargs`` reach the boot unchanged (a test passes
+    ``extra_skills``).
+    """
+    from ovoscope import M2V_PUBLISHED_MODEL, get_m2v_minicroft
+
+    def factory(skill_id, lang, pipe):
+        mc = get_m2v_minicroft([skill_id], model=M2V_PUBLISHED_MODEL,
+                               lang=lang,
+                               classifier=preset == PRESET_M2V_DUAL,
+                               **boot_kwargs)
+        warm_m2v_models(mc)
+        return mc
+    return factory
+
+
+def warm_m2v_models(mc) -> None:
+    """Load every m2v stage's model now, before the first row is fired.
+
+    ovos-m2v-pipeline defers the model load to the first utterance and
+    answers that utterance with "still warming up", so a golden run that
+    fires straight after READY loses its first row per locale to the load.
+    """
+    for plugin in mc.intents.pipeline_plugins.values():
+        ensure = getattr(plugin, "_ensure_model", None)
+        if ensure is not None:
+            ensure(background_ok=False)
 
 
 @dataclasses.dataclass
@@ -146,11 +284,15 @@ def _fired_types(minicroft, skill_id: str, row: GoldenRow, pipeline,
 
 def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
              pipeline: Optional[Sequence[str]] = None,
+             preset: Optional[str] = None,
              timeout: float = 20.0, minicroft_factory=None) -> List[RowResult]:
     """Run every row, one MiniCroft per locale, locale order, never two alive.
 
     ``minicroft_factory(skill_id, lang, pipeline)`` returns a started
-    MiniCroft; the default calls :func:`ovoscope.get_minicroft`.
+    MiniCroft; the default calls :func:`ovoscope.get_minicroft`, or
+    :func:`ovoscope.get_m2v_minicroft` for an m2v ``preset``. Under a
+    preset every Session carries the booted MiniCroft's own pipeline, so
+    the tier order on the wire is the one the boot chose.
     """
     from ovoscope import get_minicroft
 
@@ -160,7 +302,12 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
             kwargs["default_pipeline"] = list(pipe)
         return get_minicroft([sid], **kwargs)
 
-    factory = minicroft_factory or default_factory
+    if preset in M2V_PRESETS:
+        factory = minicroft_factory or preset_factory(preset)
+    elif preset is not None:
+        raise PresetUnavailable(f"unknown preset {preset!r}; one of {PRESETS}")
+    else:
+        factory = minicroft_factory or default_factory
     by_lang: Dict[str, List[GoldenRow]] = {}
     for row in rows:
         by_lang.setdefault(row.lang, []).append(row)
@@ -175,11 +322,14 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
         if not active:
             continue
         mc = factory(skill_id, lang, pipeline)
+        session_pipeline = pipeline
+        if preset is not None:
+            session_pipeline = list(mc.pipeline)
         try:
             assert_root_dir(mc, skill_id, checkout)
             for row in active:
                 fired, handlers, latency = _fired_types(mc, skill_id, row,
-                                                        pipeline, timeout)
+                                                        session_pipeline, timeout)
                 if row.expected_intent is None:
                     matched = not fired
                 else:
@@ -194,11 +344,19 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
     return results
 
 
-def scoreboard(results: List[RowResult], skill_id: str) -> Dict[str, dict]:
-    """The ``run_golden_suite`` scoreboard shape, one engine: the MiniCroft."""
+def scoreboard(results: List[RowResult], skill_id: str,
+               pipeline: Optional[Sequence[str]] = None,
+               preset: Optional[str] = None) -> Dict[str, dict]:
+    """The ``run_golden_suite`` scoreboard shape, one engine: the MiniCroft.
+
+    ``pipeline`` and ``preset`` record what the run booted, so a board
+    read later says which engine produced its numbers.
+    """
     scored = [r for r in results if not r.skipped]
     entry = {
         "gating": True,
+        "preset": preset,
+        "pipeline": list(pipeline) if pipeline else None,
         "total": len(scored),
         "matched": sum(1 for r in scored if r.matched),
         "core_total": sum(1 for r in scored if r.core),
@@ -234,14 +392,29 @@ def run_golden(rows_patterns: Sequence[str], skill_id: str, checkout: str,
                pipeline: Optional[Sequence[str]] = None,
                out_dir: Optional[str] = None, timeout: float = 20.0,
                minicroft_factory=None, echo=print) -> int:
-    """The ``ovoscope golden`` command body. Returns the exit code."""
+    """The ``ovoscope golden`` command body. Returns the exit code.
+
+    ``pipeline`` is the ``--pipeline`` value split on commas: a preset name
+    alone, an explicit list, or ``None`` for the ``repo`` preset.
+    """
     rows = collect_rows(rows_patterns, locales)
     if not rows:
         echo(f"no golden rows under {list(rows_patterns)}")
         return EXIT_NO_ROWS
-    results = run_rows(rows, skill_id, Path(checkout), pipeline=pipeline,
-                       timeout=timeout, minicroft_factory=minicroft_factory)
-    board = scoreboard(results, skill_id)
+    try:
+        preset, stages = resolve_pipeline(pipeline, Path(checkout))
+    except PresetUnavailable as exc:
+        echo(f"PRESET UNAVAILABLE: {exc}")
+        return EXIT_PRESET
+    echo(f"pipeline: {preset or (stages if stages else 'MiniCroft default')}")
+    results = run_rows(rows, skill_id, Path(checkout), pipeline=stages,
+                       preset=preset, timeout=timeout,
+                       minicroft_factory=minicroft_factory)
+    if preset in M2V_PRESETS:
+        from ovoscope import M2V_DUAL_PIPELINE, M2V_PROTOTYPE_PIPELINE
+        stages = (M2V_DUAL_PIPELINE if preset == PRESET_M2V_DUAL
+                  else M2V_PROTOTYPE_PIPELINE)
+    board = scoreboard(results, skill_id, pipeline=stages, preset=preset)
     entry = board[f"{RUNNER_ID}:{skill_id}"]
     if entry["total"] == 0:
         echo(f"ALL SKIPPED: {entry['skipped']} row(s) loaded, every one "

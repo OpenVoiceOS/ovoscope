@@ -239,7 +239,11 @@ the classifier at every confidence tier so it wins the one case where both
 engines could otherwise answer. `get_m2v_minicroft` calls
 `assert_m2v_label_split(mc)` before returning and raises `RuntimeError`
 naming any label caught in both engines or in neither. Pass `prototype=False`
-to boot the classifier alone via `M2V_PIPELINE`.
+to boot the classifier alone via `M2V_PIPELINE`, or `classifier=False` to
+boot prototype mode alone via `M2V_PROTOTYPE_PIPELINE`: no classifier, no
+label mask, every registered label served from the skill's `.intent` files.
+Both `False` raises `ValueError`. `M2V_PUBLISHED_MODEL` names the model
+ovos-m2v-pipeline loads by default; the `ovoscope golden` presets boot it.
 
 The classifier's `conf_high`/`conf_medium`/`conf_low` (0.7/0.5/0.15) are
 calibrated for its softmax probabilities. Prototype mode scores raw cosine

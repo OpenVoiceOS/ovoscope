@@ -464,7 +464,8 @@ def cmd_golden(args: argparse.Namespace) -> int:
 
     Exit 0 when every row matched, 1 on any miss, 2 when no row loaded,
     3 when the skill did not load from ``--checkout``, 4 when every row
-    was skipped as ``needs_manual``.
+    was skipped as ``needs_manual``, 5 when a ``--pipeline`` preset cannot
+    boot here (plugin not installed, model not reachable).
     The loaded skill must come from ``--checkout`` (T-3351) and every
     utterance carries its row's ``lang`` (T-3308).
     """
@@ -509,7 +510,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_golden.add_argument("--locales", default=None,
                           help="comma-separated lang list to run (default: all)")
     p_golden.add_argument("--pipeline", default=None,
-                          help="comma-separated pipeline ids (default: MiniCroft's)")
+                          help="a preset (repo, m2v-prototype, m2v-dual) or "
+                               "comma-separated pipeline ids. Default: repo, "
+                               "the checkout's [tool.ovoscope] pipeline, or "
+                               "MiniCroft's lean default when none is declared")
     p_golden.add_argument("--out", default=None,
                           help="directory for scoreboard.json and predictions.jsonl")
     p_golden.add_argument("--timeout", type=float, default=20.0,

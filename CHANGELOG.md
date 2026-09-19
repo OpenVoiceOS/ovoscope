@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.11.0a1) (2026-09-19)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.10.0a1...1.11.0a1)
+
+**Merged pull requests:**
+
+- feat\(golden\): named --pipeline presets, repo, m2v-prototype and m2v-dual [\#214](https://github.com/OpenVoiceOS/ovoscope/pull/214) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.10.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.10.0a1) (2026-09-18)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.9.0a1...1.10.0a1)
@@ -381,10 +389,6 @@
 ## [1.1.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.1.0a2) (2026-06-29)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.1.0a1...1.1.0a2)
-
-**Merged pull requests:**
-
-- docs: clarify MockTTS bus.ee.emit rationale [\#104](https://github.com/OpenVoiceOS/ovoscope/pull/104) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.1.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.1.0a1) (2026-06-29)
 

@@ -88,7 +88,7 @@ def bridge_recognizer_loop_to_bus(loop: Any, bus: FakeBus) -> Any:
         lambda event=None, *a: bus.emit(Message(
             "recognizer_loop:utterance",
             event or {},
-            {**ctx, "destination": ["skills"]},
+            {**ctx, "destination": "skills"},
         )),
     )
     loop.on(

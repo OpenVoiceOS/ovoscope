@@ -16,7 +16,14 @@ Three constraints the fleet learned the hard way, each enforced here:
 - the row's ``lang`` goes on the Session of every utterance; the runner
   never defaults to ``en-US`` (T-3308);
 - no slot is supplied: a slot proves which template line matched, not
-  the intent.
+  the intent;
+- a machine-drafted row that misses is a coverage gap only when the name
+  it expects exists in that locale's resources. A row that names a
+  resource nobody ships is a defect in the row and stays a miss, with the
+  missing name in the message (T-3140: nine machine-drafted rows named
+  pre-rename dialogs and a per-repo runner turned every one of them into
+  an expected failure, so the run was green on a name the skill had never
+  shipped).
 """
 from __future__ import annotations
 
@@ -54,6 +61,11 @@ class RowResult:
     core: bool
     latency_ms: float
     skipped: bool = False
+    #: a machine-drafted row that missed while the name it expects does
+    #: exist in the locale's resources: a coverage gap, not a defect
+    gap: bool = False
+    #: why the row was skipped, or why a miss is a missing resource
+    reason: Optional[str] = None
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -144,6 +156,65 @@ def _fired_types(minicroft, skill_id: str, row: GoldenRow, pipeline,
     return fired, handler_names, latency
 
 
+#: the resource kinds a gold row may name: an intent file or a dialog
+RESOURCE_SUFFIXES = (".intent", ".dialog", ".voc")
+
+
+def locale_resources(checkout: Path, lang: str) -> set:
+    """The resource names the checkout ships for *lang*.
+
+    Every ``<checkout>/**/locale/<lang>/<name>.<kind>`` gives ``<name>``.
+    The name is taken as written: a gold row that says ``who.is`` where the
+    skill ships ``who_is`` names a resource that does not exist, and that is
+    the case this set is read for.
+    """
+    names = set()
+    for suffix in RESOURCE_SUFFIXES:
+        for path in Path(checkout).glob(f"**/locale/{lang}/*{suffix}"):
+            names.add(path.name[:-len(suffix)])
+    return names
+
+
+def _expected_name(skill_id: str, expected: str) -> str:
+    """The bare resource name a row's ``expected_intent`` states."""
+    name = expected.split(":", 1)[1] if expected.startswith(f"{skill_id}:") \
+        else expected
+    if name.endswith(".intent"):
+        name = name[:-len(".intent")]
+    return name
+
+
+def _machine_generated(row: GoldenRow) -> bool:
+    return bool(row.provenance.get("machine_generated"))
+
+
+def missing_resource(row: GoldenRow, skill_id: str, checkout: Path,
+                     known_labels: Optional[Iterable[str]] = None
+                     ) -> Optional[str]:
+    """The resource name *row* expects and the locale does not ship.
+
+    ``None`` means the name is real: the locale ships a file under it, or
+    the run itself fired that label, which proves the intent exists even
+    where no file declares it (an Adapt intent built in code).
+
+    This is what separates a coverage gap from a wrong name. A
+    machine-drafted row that misses while its name exists is a gap: a
+    native speaker has not confirmed the phrase yet. A row that names a
+    resource nobody ships is a defect in the row, whoever drafted it, and
+    a runner that turns it into an expected failure keeps a wrong name
+    green (T-3140: nine kab and oc-FR rows named pre-rename dialogs).
+    """
+    if not row.expected_intent:
+        return None
+    name = _expected_name(skill_id, row.expected_intent)
+    if name in locale_resources(checkout, row.lang):
+        return None
+    forms = _label_forms(skill_id, row.expected_intent)
+    if known_labels and any(f in set(known_labels) for f in forms):
+        return None
+    return name
+
+
 def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
              pipeline: Optional[Sequence[str]] = None,
              timeout: float = 20.0, minicroft_factory=None) -> List[RowResult]:
@@ -166,12 +237,17 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
         by_lang.setdefault(row.lang, []).append(row)
 
     results: List[RowResult] = []
+    #: the GoldenRow behind each RowResult, for the coverage-gap pass below
+    sources: List[Optional[GoldenRow]] = []
+    fired_labels: set = set()
     for lang in sorted(by_lang):
         active = [r for r in by_lang[lang] if not _skipped(r)]
         for r in by_lang[lang]:
             if _skipped(r):
                 results.append(RowResult(r.utterance, r.lang, r.expected_intent,
-                                         [], True, r.core, 0.0, skipped=True))
+                                         [], True, r.core, 0.0, skipped=True,
+                                         reason="needs_manual"))
+                sources.append(None)
         if not active:
             continue
         mc = factory(skill_id, lang, pipeline)
@@ -186,17 +262,44 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
                     forms = _label_forms(skill_id, row.expected_intent)
                     matched = any(f in forms for f in fired) or \
                         any(h in forms for h in handlers)
+                fired_labels.update(fired)
+                fired_labels.update(h for h in handlers if h)
                 results.append(RowResult(row.utterance, row.lang,
                                          row.expected_intent, fired, matched,
                                          row.core, latency))
+                sources.append(row)
         finally:
             mc.stop()
+    _mark_coverage_gaps(results, sources, skill_id, checkout, fired_labels)
     return results
+
+
+def _mark_coverage_gaps(results: List[RowResult],
+                        sources: List[Optional[GoldenRow]], skill_id: str,
+                        checkout: Path, fired_labels: set) -> None:
+    """Split the machine-drafted misses into gaps and wrong names.
+
+    A machine-drafted row that misses is a coverage gap only when the name
+    it expects exists for its locale. Otherwise the row names a resource
+    nobody ships, and it stays a miss that says which name is missing.
+    """
+    for result, row in zip(results, sources):
+        if row is None or result.matched or not _machine_generated(row):
+            continue
+        missing = missing_resource(row, skill_id, checkout, fired_labels)
+        if missing is None:
+            result.gap = True
+            result.reason = ("coverage-gap (machine-drafted, pending native "
+                             "validation)")
+        else:
+            result.reason = (f"{row.lang} ships no resource named "
+                             f"{missing!r}: the row names one that does not "
+                             f"exist, which is a defect in the row")
 
 
 def scoreboard(results: List[RowResult], skill_id: str) -> Dict[str, dict]:
     """The ``run_golden_suite`` scoreboard shape, one engine: the MiniCroft."""
-    scored = [r for r in results if not r.skipped]
+    scored = [r for r in results if not r.skipped and not r.gap]
     entry = {
         "gating": True,
         "total": len(scored),
@@ -204,9 +307,14 @@ def scoreboard(results: List[RowResult], skill_id: str) -> Dict[str, dict]:
         "core_total": sum(1 for r in scored if r.core),
         "core_matched": sum(1 for r in scored if r.core and r.matched),
         "skipped": sum(1 for r in results if r.skipped),
+        "coverage_gap": sum(1 for r in results if r.gap),
+        "gaps": [{"utterance": r.utterance, "lang": r.lang,
+                  "expected": r.expected, "got": r.fired}
+                 for r in results if r.gap],
         "failures": [{"utterance": r.utterance, "lang": r.lang,
                       "expected": r.expected, "got": r.fired,
-                      "confidence": None, "core": r.core}
+                      "confidence": None, "core": r.core,
+                      "reason": r.reason}
                      for r in scored if not r.matched],
     }
     entry["pct"] = (entry["matched"] / entry["total"]) if entry["total"] else 1.0
@@ -250,12 +358,20 @@ def run_golden(rows_patterns: Sequence[str], skill_id: str, checkout: str,
             for path in write_results(results, board, Path(out_dir)):
                 echo(f"wrote {path}")
         return EXIT_ALL_SKIPPED
+    for gap in entry["gaps"]:
+        echo(f"COVERAGE GAP [{gap['lang']}] {gap['utterance']!r}: expected "
+             f"{gap['expected']!r}, fired {gap['got']}. Machine-drafted, and "
+             f"the name it expects does exist here")
     for failure in entry["failures"]:
-        echo(f"MISS [{failure['lang']}] {failure['utterance']!r}: expected "
-             f"{failure['expected']!r}, fired {failure['got']}")
+        line = (f"MISS [{failure['lang']}] {failure['utterance']!r}: expected "
+                f"{failure['expected']!r}, fired {failure['got']}")
+        if failure.get("reason"):
+            line += f". {failure['reason']}"
+        echo(line)
     echo(f"{entry['total']} rows, {entry['matched']} matched, "
          f"{entry['total'] - entry['matched']} failed, "
-         f"{entry['skipped']} skipped (needs_manual)")
+         f"{entry['skipped']} skipped (needs_manual), "
+         f"{entry['coverage_gap']} coverage gap(s)")
     if out_dir:
         for path in write_results(results, board, Path(out_dir)):
             echo(f"wrote {path}")

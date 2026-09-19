@@ -418,3 +418,119 @@ class TestPipelinePresets(unittest.TestCase):
     def test_a_boot_with_no_m2v_stage_is_refused(self):
         with self.assertRaises(ValueError):
             get_m2v_minicroft([PRESET_SKILL_ID], prototype=False, classifier=False)
+
+
+HOOK_SRC = textwrap.dedent('''
+    """A stand-in minicroft_factory for the golden worker, named by
+    OVOSCOPE_GOLDEN_FACTORY. It records the pid of every boot."""
+    import os
+
+    from ovoscope import get_minicroft
+    from golden_fixture_skill import GoldenFixtureSkill
+
+
+    def factory(preset):
+        def boot(skill_id, lang, pipeline):
+            with open(os.environ["OVOSCOPE_GOLDEN_PIDFILE"], "a") as fh:
+                fh.write(f"{lang} {os.getpid()}\\n")
+            if os.environ.get("OVOSCOPE_GOLDEN_RAISE"):
+                raise RuntimeError("weights download failed after warm-up")
+            return get_minicroft([skill_id], lang=lang,
+                                 extra_skills={skill_id: GoldenFixtureSkill})
+        return boot
+''')
+
+
+@unittest.skipUnless(is_pipeline_available(LEAN_DEFAULT_PIPELINE),
+                     "lean pipeline plugins not installed")
+class TestGoldenBootFailureAndProcesses(unittest.TestCase):
+    """T-3630: a boot that fails exits 5, and a locale can own its process."""
+
+    @classmethod
+    def setUpClass(cls):
+        LOG.set_level("ERROR")
+        cls.tmp = Path(tempfile.mkdtemp(prefix="ovoscope-golden-boot-"))
+        cls.checkout = cls.tmp / "checkout"
+        cls.skill_cls = _write_skill(cls.checkout, "golden_fixture_skill")
+        cls.rows_path = cls.checkout / "test" / "end2end" / "golden_utterances_all.jsonl"
+        _write_rows(cls.rows_path)
+        (cls.checkout / "golden_worker_hook.py").write_text(HOOK_SRC,
+                                                            encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        LOG.set_level("CRITICAL")
+        sys.modules.pop("golden_fixture_skill", None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _child_env(self, **extra):
+        """The environment the worker children inherit: the hook, the pid
+        file, and the fixture skill on the import path."""
+        self.pidfile = self.tmp / f"pids-{self.id().rsplit('.', 1)[-1]}.txt"
+        path = os.pathsep.join([str(self.checkout),
+                                os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+        env = {"OVOSCOPE_GOLDEN_FACTORY": "golden_worker_hook:factory",
+               "OVOSCOPE_GOLDEN_PIDFILE": str(self.pidfile),
+               "PYTHONPATH": path}
+        env.update(extra)
+        return mock.patch.dict(os.environ, env)
+
+    def test_a_factory_that_raises_after_the_check_exits_5(self):
+        """The preset check passed; the boot itself failed. Exit 5, not 1:
+        a miss is a corpus result and this run measured nothing."""
+        def factory(skill_id, lang, pipe):
+            raise RuntimeError("weights download failed after warm-up")
+
+        lines = []
+        with mock.patch("ovoscope.golden_minicroft.preset_unavailable",
+                        return_value=None):
+            code = run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), pipeline=["m2v-dual"],
+                              minicroft_factory=factory, echo=lines.append)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertEqual(code, 5)
+        reason = [l for l in lines if l.startswith("PRESET UNAVAILABLE:")]
+        self.assertEqual(len(reason), 1, lines)
+        self.assertIn("could not boot for en-US", reason[0])
+        self.assertIn("weights download failed after warm-up", reason[0])
+
+    def test_a_boot_failure_with_no_preset_exits_5_too(self):
+        """Exit 5 means "could not boot" on every path, preset or not."""
+        def factory(skill_id, lang, pipe):
+            raise RuntimeError("no audio backend")
+
+        lines = []
+        code = run_golden([str(self.rows_path)], SKILL_ID, str(self.checkout),
+                          minicroft_factory=factory, echo=lines.append)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("the MiniCroft boot could not boot for en-US",
+                      lines[-1])
+
+    def test_each_locale_boots_in_its_own_process(self):
+        """The memory of a stopped MiniCroft comes back at process exit, so
+        a many-locale run boots one interpreter per locale (T-3533)."""
+        lines = []
+        with self._child_env():
+            code = run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), out_dir=str(self.tmp / "out"),
+                              echo=lines.append, per_locale_process=True)
+        self.assertEqual(code, 0, lines)
+        board = json.loads((self.tmp / "out" / "scoreboard.json")
+                           .read_text(encoding="utf-8"))[f"minicroft:{SKILL_ID}"]
+        self.assertEqual((board["total"], board["matched"], board["skipped"]),
+                         (3, 3, 1))
+        booted = [l.split() for l in
+                  self.pidfile.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(sorted(l for l, _ in booted), ["en-US", "pt-PT"])
+        pids = {pid for _, pid in booted}
+        self.assertEqual(len(pids), 2, booted)
+        self.assertNotIn(str(os.getpid()), pids)
+
+    def test_a_boot_failure_in_a_worker_reaches_the_caller_as_exit_5(self):
+        lines = []
+        with self._child_env(OVOSCOPE_GOLDEN_RAISE="1"):
+            code = run_golden([str(self.rows_path)], SKILL_ID,
+                              str(self.checkout), echo=lines.append,
+                              per_locale_process=True)
+        self.assertEqual(code, EXIT_PRESET, lines)
+        self.assertIn("weights download failed after warm-up", lines[-1])

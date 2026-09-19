@@ -204,6 +204,7 @@ ovoscope golden --rows 'test/end2end/*.jsonl' --skill my-skill.openvoiceos \
 | `--pipeline` | `repo` | A preset, or comma-separated pipeline plugin ids. |
 | `--out` | None | Directory for `scoreboard.json` and `predictions.jsonl`. |
 | `--timeout` | `20` | Seconds to wait per utterance. |
+| `--processes` | `auto` | `auto`: one process per locale for the m2v presets, one process for the whole run otherwise. `per-locale`: always one process per locale. `single`: always one process. |
 
 `--pipeline` presets:
 
@@ -230,11 +231,25 @@ pipeline = [
 ]
 ```
 
+### One process per locale
+
+An m2v boot holds its model in memory, and `MiniCroft.stop()` does not give
+that memory back. A 16-locale `m2v-dual` run in one process was killed for
+memory at locale 5, so the first published dual number came from 16
+processes run by hand. The runner now starts those processes itself: under
+an m2v preset each locale boots in a fresh interpreter, which the operating
+system reclaims in full at exit, and one command measures the whole corpus.
+`--processes single` keeps the old one-process behaviour, and
+`--processes per-locale` uses one process per locale for any pipeline.
+
 The scoreboard records `preset` and `pipeline` beside the counts.
 
 Exit codes: 0 every row matched; 1 a miss; 2 no row loaded; 3 the skill did
-not load from `--checkout`; 4 every row was `needs_manual`; 5 the preset
-cannot boot here.
+not load from `--checkout`; 4 every row was `needs_manual`; 5 the run could
+not boot. Exit 5 covers every boot path: the preset check before the run,
+and the boot itself, with or without a preset. A boot failure is never
+exit 1, because exit 1 is a corpus miss and a failed boot measured
+nothing.
 
 ---
 

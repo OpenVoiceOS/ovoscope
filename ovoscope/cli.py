@@ -464,8 +464,9 @@ def cmd_golden(args: argparse.Namespace) -> int:
 
     Exit 0 when every row matched, 1 on any miss, 2 when no row loaded,
     3 when the skill did not load from ``--checkout``, 4 when every row
-    was skipped as ``needs_manual``, 5 when a ``--pipeline`` preset cannot
-    boot here (plugin not installed, model not reachable).
+    was skipped as ``needs_manual``, 5 when the run could not boot: the
+    preset check before the run (plugin not installed, model not reachable)
+    or the boot itself, with or without a preset.
     The loaded skill must come from ``--checkout`` (T-3351) and every
     utterance carries its row's ``lang`` (T-3308).
     """
@@ -474,10 +475,12 @@ def cmd_golden(args: argparse.Namespace) -> int:
 
     locales = [l for l in (args.locales or "").split(",") if l] or None
     pipeline = [p for p in (args.pipeline or "").split(",") if p] or None
+    per_locale = {"auto": None, "per-locale": True, "single": False}[args.processes]
     try:
         return run_golden(args.rows, args.skill, args.checkout,
                           locales=locales, pipeline=pipeline,
-                          out_dir=args.out, timeout=args.timeout)
+                          out_dir=args.out, timeout=args.timeout,
+                          per_locale_process=per_locale)
     except RootDirMismatch as exc:
         _die(str(exc), EXIT_ROOT_DIR)
 
@@ -518,6 +521,13 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="directory for scoreboard.json and predictions.jsonl")
     p_golden.add_argument("--timeout", type=float, default=20.0,
                           help="seconds to wait per utterance")
+    p_golden.add_argument("--processes", default="auto",
+                          choices=("auto", "per-locale", "single"),
+                          help="how many interpreters the run uses. auto "
+                               "(default): one process per locale for the m2v "
+                               "presets, one process for the whole run "
+                               "otherwise. per-locale: always one process per "
+                               "locale. single: always one process")
 
     # --- record ---
     p_record = sub.add_parser("record", help="Record a fixture file.")

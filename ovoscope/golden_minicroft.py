@@ -53,6 +53,11 @@ PRESET_REPO, PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL = ("repo", "m2v-prototype",
                                                       "m2v-dual")
 PRESETS = (PRESET_REPO, PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL)
 M2V_PRESETS = (PRESET_M2V_PROTOTYPE, PRESET_M2V_DUAL)
+#: the module one locale of an isolated run boots in
+WORKER_MODULE = "ovoscope.golden_worker"
+#: a test names ``module:callable`` here; the worker calls it with the
+#: preset name and boots the ``minicroft_factory`` it returns
+WORKER_FACTORY_ENV = "OVOSCOPE_GOLDEN_FACTORY"
 
 
 class RootDirMismatch(RuntimeError):
@@ -293,6 +298,10 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
     :func:`ovoscope.get_m2v_minicroft` for an m2v ``preset``. Under a
     preset every Session carries the booted MiniCroft's own pipeline, so
     the tier order on the wire is the one the boot chose.
+
+    A boot that raises, on any path, becomes a :class:`PresetUnavailable`
+    with the locale and the reason. The caller reports exit 5 for it, since
+    exit 1 is a corpus miss and a boot failure measured nothing.
     """
     from ovoscope import get_minicroft
 
@@ -321,7 +330,15 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
                                          [], True, r.core, 0.0, skipped=True))
         if not active:
             continue
-        mc = factory(skill_id, lang, pipeline)
+        try:
+            mc = factory(skill_id, lang, pipeline)
+        except PresetUnavailable:
+            raise
+        except Exception as exc:
+            what = f"preset {preset!r}" if preset else "the MiniCroft boot"
+            raise PresetUnavailable(
+                f"{what} could not boot for {lang}: "
+                f"{type(exc).__name__}: {exc}") from exc
         session_pipeline = pipeline
         if preset is not None:
             session_pipeline = list(mc.pipeline)
@@ -341,6 +358,65 @@ def run_rows(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
                                          row.core, latency))
         finally:
             mc.stop()
+    return results
+
+
+def _run_locale(rows: List[GoldenRow], skill_id: str, checkout: Path, *,
+                pipeline: Optional[Sequence[str]], preset: Optional[str],
+                timeout: float) -> List[RowResult]:
+    """One locale in its own interpreter; the results come back as rows."""
+    import subprocess
+    import tempfile
+
+    lang = rows[0].lang
+    with tempfile.TemporaryDirectory(prefix="ovoscope-golden-") as tmp:
+        job = Path(tmp) / "job.json"
+        out = Path(tmp) / "out.json"
+        job.write_text(json.dumps({
+            "rows": [dataclasses.asdict(r) for r in rows],
+            "skill_id": skill_id,
+            "checkout": str(checkout),
+            "pipeline": list(pipeline) if pipeline else None,
+            "preset": preset,
+            "timeout": timeout,
+        }, ensure_ascii=False), encoding="utf-8")
+        proc = subprocess.run([sys.executable, "-m", WORKER_MODULE,
+                               str(job), str(out)])
+        if not out.is_file():
+            raise PresetUnavailable(
+                f"the golden worker for {lang} ended with exit code "
+                f"{proc.returncode} and wrote no result. A kill for memory "
+                f"reads as exit code -9.")
+        answer = json.loads(out.read_text(encoding="utf-8"))
+    if "error" in answer:
+        cls = {"RootDirMismatch": RootDirMismatch}.get(
+            answer.get("error_type"), PresetUnavailable)
+        raise cls(f"[{lang}] {answer['error']}")
+    return [RowResult(**r) for r in answer["results"]]
+
+
+def run_rows_per_locale(rows: List[GoldenRow], skill_id: str, checkout: Path,
+                        *, pipeline: Optional[Sequence[str]] = None,
+                        preset: Optional[str] = None,
+                        timeout: float = 20.0) -> List[RowResult]:
+    """:func:`run_rows`, one interpreter per locale, results concatenated.
+
+    An m2v boot holds its model in memory, and ``MiniCroft.stop()`` does
+    not give that memory back. A 16-locale ``m2v-dual`` run in one process
+    was killed for memory at locale 5 (T-3533), so the published 202/319
+    came from 16 processes run by hand. Here the runner starts those
+    processes itself: each locale boots in a fresh interpreter, which the
+    operating system reclaims in full at exit, and one command measures the
+    whole corpus.
+    """
+    by_lang: Dict[str, List[GoldenRow]] = {}
+    for row in rows:
+        by_lang.setdefault(row.lang, []).append(row)
+    results: List[RowResult] = []
+    for lang in sorted(by_lang):
+        results.extend(_run_locale(by_lang[lang], skill_id, checkout,
+                                   pipeline=pipeline, preset=preset,
+                                   timeout=timeout))
     return results
 
 
@@ -391,11 +467,17 @@ def run_golden(rows_patterns: Sequence[str], skill_id: str, checkout: str,
                locales: Optional[Sequence[str]] = None,
                pipeline: Optional[Sequence[str]] = None,
                out_dir: Optional[str] = None, timeout: float = 20.0,
-               minicroft_factory=None, echo=print) -> int:
+               minicroft_factory=None, echo=print,
+               per_locale_process: Optional[bool] = None) -> int:
     """The ``ovoscope golden`` command body. Returns the exit code.
 
     ``pipeline`` is the ``--pipeline`` value split on commas: a preset name
     alone, an explicit list, or ``None`` for the ``repo`` preset.
+
+    ``per_locale_process`` puts each locale in its own interpreter. It
+    defaults to on for the m2v presets, whose models stay in memory after
+    ``stop()``, and off for every other pipeline. A ``minicroft_factory``
+    is a callable of this process, so it keeps the run in one process.
     """
     rows = collect_rows(rows_patterns, locales)
     if not rows:
@@ -407,9 +489,22 @@ def run_golden(rows_patterns: Sequence[str], skill_id: str, checkout: str,
         echo(f"PRESET UNAVAILABLE: {exc}")
         return EXIT_PRESET
     echo(f"pipeline: {preset or (stages if stages else 'MiniCroft default')}")
-    results = run_rows(rows, skill_id, Path(checkout), pipeline=stages,
-                       preset=preset, timeout=timeout,
-                       minicroft_factory=minicroft_factory)
+    if per_locale_process is None:
+        per_locale_process = preset in M2V_PRESETS and minicroft_factory is None
+    try:
+        if per_locale_process:
+            echo("one process per locale: the model memory goes back to the "
+                 "operating system between locales")
+            results = run_rows_per_locale(rows, skill_id, Path(checkout),
+                                          pipeline=stages, preset=preset,
+                                          timeout=timeout)
+        else:
+            results = run_rows(rows, skill_id, Path(checkout), pipeline=stages,
+                               preset=preset, timeout=timeout,
+                               minicroft_factory=minicroft_factory)
+    except PresetUnavailable as exc:
+        echo(f"PRESET UNAVAILABLE: {exc}")
+        return EXIT_PRESET
     if preset in M2V_PRESETS:
         from ovoscope import M2V_DUAL_PIPELINE, M2V_PROTOTYPE_PIPELINE
         stages = (M2V_DUAL_PIPELINE if preset == PRESET_M2V_DUAL

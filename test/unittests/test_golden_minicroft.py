@@ -25,9 +25,12 @@ from pathlib import Path
 from ovos_utils.log import LOG
 
 from ovoscope import get_minicroft, is_pipeline_available, LEAN_DEFAULT_PIPELINE
-from ovoscope.golden_minicroft import (EXIT_ALL_SKIPPED, RootDirMismatch,
-                                       assert_root_dir, collect_rows,
-                                       run_golden, run_rows, scoreboard)
+from ovoscope.golden import GoldenRow
+from ovoscope.golden_minicroft import (EXIT_ALL_SKIPPED, EXIT_MISS,
+                                       RootDirMismatch, assert_root_dir,
+                                       collect_rows, locale_resources,
+                                       missing_resource, run_golden, run_rows,
+                                       scoreboard)
 
 SKILL_ID = "ovoscope-unittest-golden.test"
 SKILL_SRC = textwrap.dedent('''
@@ -247,3 +250,147 @@ class TestAssertRootDirSegments(unittest.TestCase):
                 assert_root_dir(self._mc(checkout.parent), SKILL_ID, checkout)
         finally:
             shutil.rmtree(checkout, ignore_errors=True)
+
+
+GAP_ROWS = [
+    {"utterance": "hello", "lang": "en-US", "skill_id": SKILL_ID,
+     "expected_intent": "HelloIntent"},
+    # machine-drafted, and the name it expects is a dialog the locale ships:
+    # a native speaker has not confirmed the phrase yet
+    {"utterance": "who made you", "lang": "en-US", "skill_id": SKILL_ID,
+     "expected_intent": "who_is", "machine_generated": True},
+    # machine-drafted, and the name is the pre-rename spelling nobody ships
+    {"utterance": "who are you", "lang": "en-US", "skill_id": SKILL_ID,
+     "expected_intent": "who.is", "machine_generated": True},
+]
+
+
+@unittest.skipUnless(is_pipeline_available(LEAN_DEFAULT_PIPELINE),
+                     "lean pipeline plugins not installed")
+class TestMachineDraftedRowsNameRealResources(unittest.TestCase):
+    """T-3714: a wrong expected name is not a coverage gap.
+
+    Nine machine-drafted rows on ovos-skill-fallback-unknown#69 named dotted
+    pre-rename dialogs that do not exist, and the runner turned every
+    mismatch into an expected failure, so the run stayed green on a name the
+    skill had never shipped.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        LOG.set_level("ERROR")
+        cls.tmp = Path(tempfile.mkdtemp(prefix="ovoscope-golden-gap-"))
+        cls.checkout = cls.tmp / "checkout"
+        cls.skill_cls = _write_skill(cls.checkout, "golden_gap_skill")
+        # the skill ships who_is.dialog for en-US, and nothing dotted
+        (cls.checkout / "locale" / "en-US" / "who_is.dialog").write_text(
+            "i am a test skill\n", encoding="utf-8")
+        cls.rows_path = cls.checkout / "test" / "end2end" / "golden_utterances_all.jsonl"
+        _write_rows(cls.rows_path, GAP_ROWS)
+
+    @classmethod
+    def tearDownClass(cls):
+        LOG.set_level("CRITICAL")
+        sys.modules.pop("golden_gap_skill", None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _factory(self):
+        skill_cls = self.skill_cls
+
+        def factory(skill_id, lang, pipeline):
+            return get_minicroft([skill_id], lang=lang,
+                                 extra_skills={skill_id: skill_cls})
+        return factory
+
+    def test_locale_resources_read_the_names_as_written(self):
+        names = locale_resources(self.checkout, "en-US")
+        self.assertIn("who_is", names)
+        self.assertIn("hello", names)
+        self.assertNotIn("who.is", names)
+        self.assertEqual(locale_resources(self.checkout, "kab"), set())
+
+    def test_a_name_the_locale_ships_is_a_coverage_gap(self):
+        rows = collect_rows([str(self.rows_path)])
+        results = run_rows(rows, SKILL_ID, self.checkout,
+                           minicroft_factory=self._factory())
+        by_utt = {r.utterance: r for r in results}
+        gap = by_utt["who made you"]
+        self.assertFalse(gap.matched)
+        self.assertTrue(gap.gap)
+        self.assertIn("coverage-gap", gap.reason)
+
+    def test_a_name_nobody_ships_stays_a_miss_that_says_so(self):
+        rows = collect_rows([str(self.rows_path)])
+        results = run_rows(rows, SKILL_ID, self.checkout,
+                           minicroft_factory=self._factory())
+        by_utt = {r.utterance: r for r in results}
+        wrong = by_utt["who are you"]
+        self.assertFalse(wrong.matched)
+        self.assertFalse(wrong.gap, "a wrong name is not a coverage gap")
+        self.assertIn("who.is", wrong.reason)
+        self.assertIn("en-US ships no resource", wrong.reason)
+
+    def test_the_run_fails_on_the_wrong_name_and_not_on_the_gap(self):
+        lines = []
+        code = run_golden([str(self.rows_path)], SKILL_ID, str(self.checkout),
+                          minicroft_factory=self._factory(),
+                          out_dir=str(self.tmp / "out"), echo=lines.append)
+        self.assertEqual(code, EXIT_MISS, lines)
+        board = json.loads((self.tmp / "out" / "scoreboard.json")
+                           .read_text(encoding="utf-8"))[f"minicroft:{SKILL_ID}"]
+        self.assertEqual(board["coverage_gap"], 1)
+        self.assertEqual(board["total"], 2)
+        self.assertEqual(board["matched"], 1)
+        self.assertFalse(board["gate_passed"])
+        failures = board["failures"]
+        self.assertEqual([f["expected"] for f in failures], ["who.is"])
+        self.assertIn("who.is", failures[0]["reason"])
+        self.assertTrue(any("COVERAGE GAP" in line for line in lines), lines)
+
+    def test_an_intent_no_file_declares_is_not_a_missing_resource(self):
+        """The run itself fired the label, so the name is real: an Adapt
+        intent built in code ships no resource file."""
+        rows = [r for r in collect_rows([str(self.rows_path)])
+                if r.utterance == "hello"]
+        rows.append(GoldenRow(utterance="hi there", lang="en-US",
+                              skill_id=SKILL_ID, expected_intent="HelloIntent",
+                              provenance={"machine_generated": True}))
+        # a second row whose utterance the skill does not know: it misses,
+        # and its label was fired by the first row
+        rows.append(GoldenRow(utterance="greetings to you", lang="en-US",
+                              skill_id=SKILL_ID, expected_intent="HelloIntent",
+                              provenance={"machine_generated": True}))
+        results = run_rows(rows, SKILL_ID, self.checkout,
+                           minicroft_factory=self._factory())
+        missed = [r for r in results if not r.matched]
+        self.assertEqual([r.utterance for r in missed], ["greetings to you"])
+        self.assertTrue(missed[0].gap)
+        self.assertIn("coverage-gap", missed[0].reason)
+
+    def test_the_rule_the_skill_repos_ship_tolerates_both_rows(self):
+        """Fail-before control. The per-repo runners xfail on
+        `row["machine_generated"] and not matched` alone, which covers the
+        wrong name as well as the real gap. The resource check is the whole
+        difference."""
+        rows = collect_rows([str(self.rows_path)])
+        results = run_rows(rows, SKILL_ID, self.checkout,
+                           minicroft_factory=self._factory())
+        drafted = {r.utterance: r for r in results
+                   if not r.matched and r.expected in ("who_is", "who.is")}
+        # the old predicate: both misses are machine-drafted
+        self.assertEqual(sorted(drafted), ["who are you", "who made you"])
+        # this runner: only the one whose name exists is a gap
+        self.assertTrue(drafted["who made you"].gap)
+        self.assertFalse(drafted["who are you"].gap)
+
+    def test_missing_resource_names_the_name(self):
+        rows = collect_rows([str(self.rows_path)])
+        by_utt = {r.utterance: r for r in rows}
+        self.assertIsNone(missing_resource(by_utt["who made you"], SKILL_ID,
+                                           self.checkout))
+        self.assertEqual(missing_resource(by_utt["who are you"], SKILL_ID,
+                                          self.checkout), "who.is")
+        # a label the run fired is real even where no file declares it
+        self.assertIsNone(missing_resource(by_utt["who are you"], SKILL_ID,
+                                           self.checkout,
+                                           known_labels={f"{SKILL_ID}:who.is"}))

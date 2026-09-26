@@ -394,6 +394,27 @@ LIGHT_TEST_PIPELINE = [
 
 DEFAULT_PIPELINE_UNSET = object()
 
+# The lang patch is process wide: Configuration() and the default Session are
+# singletons. Two MiniCrofts with a lang can be live at one time, and they are
+# not always stopped in the reverse of the order they started. Each instance
+# alone cannot know the lang the process had before any of them ran, because an
+# instance that starts second reads a value an instance that started first
+# wrote. These records hold the outermost original and a count of the live
+# patches. The first patch saves the original, the last release restores it,
+# and the order of the releases does not matter.
+_LANG_PATCH_LOCK = threading.RLock()
+_LANG_CFG_PATCH: Dict[str, Any] = {"depth": 0, "had": False, "value": None}
+_LANG_SESSION_PATCH: Dict[str, Any] = {"depth": 0, "value": None}
+# The default-session snapshot and the xdg_configs swap are process wide for
+# the same reason, and they carried the same defect: an instance that starts
+# second snapshots the state the first instance wrote, so a stop in any order
+# other than last-in-first-out put that foreign state back. The snapshot holds
+# the session lang, so this record decides the final lang as much as
+# _LANG_SESSION_PATCH does.
+_SESSION_SNAPSHOT: Dict[str, Any] = {"depth": 0, "state": None, "api": None,
+                                     "active": None}
+_XDG_PATCH: Dict[str, Any] = {"depth": 0, "value": None}
+
 
 def is_pipeline_available(pipeline: List[str]) -> bool:
     """Return True if all pipeline stages in *pipeline* are currently installed.
@@ -551,6 +572,21 @@ class MiniCroft(SkillManager):
         except Exception:  # pragma: no cover - defensive
             self._default_active_skills = None
 
+        # Keep the OUTERMOST snapshot, not this instance's. A second MiniCroft
+        # built while the first is live snapshots the first one's mutations
+        # (its lang above all), and a stop in insertion order would then write
+        # that foreign state back over the true original.
+        with _LANG_PATCH_LOCK:
+            if _SESSION_SNAPSHOT["depth"] == 0:
+                _SESSION_SNAPSHOT["state"] = self._default_session_state
+                _SESSION_SNAPSHOT["api"] = self._session_api
+                _SESSION_SNAPSHOT["active"] = self._default_active_skills
+            _SESSION_SNAPSHOT["depth"] += 1
+            self._holds_session_snapshot = True
+            self._default_session_state = _SESSION_SNAPSHOT["state"]
+            self._session_api = _SESSION_SNAPSHOT["api"]
+            self._default_active_skills = _SESSION_SNAPSHOT["active"]
+
         # Orphaned TTS timers (see _mock_tts below) would fire on a closed bus
         # after stop() and corrupt the global SessionManager during a LATER
         # test. Track them so stop() can cancel them.
@@ -623,6 +659,11 @@ class MiniCroft(SkillManager):
         self._original_lang: Optional[str] = None
         self._original_cfg_lang: Optional[str] = None
         self._had_lang: bool = False
+        # True while this instance holds a share of the process wide lang patch
+        self._holds_cfg_lang_patch: bool = False
+        self._holds_session_lang_patch: bool = False
+        self._holds_xdg_patch: bool = False
+        self._holds_session_snapshot: bool = False
         self._original_secondary_langs: Optional[List[str]] = None
         self._had_secondary_langs: bool = False
         self._pipeline_config: Optional[Dict[str, Dict]] = pipeline_config
@@ -636,8 +677,13 @@ class MiniCroft(SkillManager):
             # (/etc/mycroft/mycroft.conf) and built-in defaults are still used.
             # Note: LocalConf(None) cannot be used here — its reload() calls
             # os.stat(None) and raises TypeError.  An empty list is safe.
-            self._original_xdg_configs = Configuration.xdg_configs[:]
-            Configuration.xdg_configs = []
+            with _LANG_PATCH_LOCK:
+                if _XDG_PATCH["depth"] == 0:
+                    _XDG_PATCH["value"] = Configuration.xdg_configs[:]
+                _XDG_PATCH["depth"] += 1
+                self._holds_xdg_patch = True
+                self._original_xdg_configs = _XDG_PATCH["value"]
+                Configuration.xdg_configs = []
             Configuration.reload()
             LOG.debug("ovoscope: user config isolated (xdg_configs cleared)")
 
@@ -647,11 +693,17 @@ class MiniCroft(SkillManager):
         if self._lang is not None or self._secondary_langs is not None:
             cfg = Configuration()
             if self._lang is not None:
-                self._had_lang = "lang" in cfg
-                self._original_cfg_lang = cfg.get("lang")
-                cfg["lang"] = self._lang
+                with _LANG_PATCH_LOCK:
+                    if _LANG_CFG_PATCH["depth"] == 0:
+                        _LANG_CFG_PATCH["had"] = "lang" in cfg
+                        _LANG_CFG_PATCH["value"] = cfg.get("lang")
+                    _LANG_CFG_PATCH["depth"] += 1
+                    self._holds_cfg_lang_patch = True
+                    self._had_lang = _LANG_CFG_PATCH["had"]
+                    self._original_cfg_lang = _LANG_CFG_PATCH["value"]
+                    cfg["lang"] = self._lang
                 LOG.debug(f"ovoscope: lang set to '{self._lang}' "
-                          f"(was '{self._original_cfg_lang}')")
+                          f"(outermost was '{self._original_cfg_lang}')")
             if self._secondary_langs is not None:
                 self._had_secondary_langs = "secondary_langs" in cfg
                 self._original_secondary_langs = cfg.get("secondary_langs")
@@ -990,8 +1042,14 @@ class MiniCroft(SkillManager):
                       f"({len(self._default_pipeline)} stages, "
                       f"was {len(self._original_pipeline)})")
         if self._lang is not None:
-            self._original_lang = SessionManager.get_default_session().lang
-            SessionManager.get_default_session().lang = self._lang
+            with _LANG_PATCH_LOCK:
+                if _LANG_SESSION_PATCH["depth"] == 0:
+                    _LANG_SESSION_PATCH["value"] = \
+                        SessionManager.get_default_session().lang
+                _LANG_SESSION_PATCH["depth"] += 1
+                self._holds_session_lang_patch = True
+                self._original_lang = _LANG_SESSION_PATCH["value"]
+                SessionManager.get_default_session().lang = self._lang
         if self._isolated_config:
             # Session.__init__ reads Configuration()["skills"]["blacklisted_skills"]
             # and Configuration()["intents"]["blacklisted_intents"] from the live
@@ -1110,13 +1168,28 @@ class MiniCroft(SkillManager):
                 intents_cfg.pop("blacklisted_intents", None)
             LOG.debug("ovoscope: blacklisted_skills and blacklisted_intents restored")
         if self._lang is not None:
-            cfg = Configuration()
-            if self._had_lang:
-                cfg["lang"] = self._original_cfg_lang
-            else:
-                cfg.pop("lang", None)
-            SessionManager.get_default_session().lang = self._original_lang
-            LOG.debug(f"ovoscope: lang restored to '{self._original_lang}'")
+            with _LANG_PATCH_LOCK:
+                if self._holds_cfg_lang_patch:
+                    self._holds_cfg_lang_patch = False
+                    _LANG_CFG_PATCH["depth"] -= 1
+                    if _LANG_CFG_PATCH["depth"] <= 0:
+                        _LANG_CFG_PATCH["depth"] = 0
+                        cfg = Configuration()
+                        if _LANG_CFG_PATCH["had"]:
+                            cfg["lang"] = _LANG_CFG_PATCH["value"]
+                        else:
+                            cfg.pop("lang", None)
+                        LOG.debug("ovoscope: config lang restored to "
+                                  f"'{_LANG_CFG_PATCH['value']}'")
+                if self._holds_session_lang_patch:
+                    self._holds_session_lang_patch = False
+                    _LANG_SESSION_PATCH["depth"] -= 1
+                    if _LANG_SESSION_PATCH["depth"] <= 0:
+                        _LANG_SESSION_PATCH["depth"] = 0
+                        SessionManager.get_default_session().lang = \
+                            _LANG_SESSION_PATCH["value"]
+                        LOG.debug("ovoscope: session lang restored to "
+                                  f"'{_LANG_SESSION_PATCH['value']}'")
         if self._secondary_langs is not None:
             cfg = Configuration()
             if self._had_secondary_langs:
@@ -1133,10 +1206,18 @@ class MiniCroft(SkillManager):
                 else:
                     intents_cfg.pop(plugin_key, None)
             LOG.debug("ovoscope: pipeline_config restored")
-        if self._isolated_config and self._original_xdg_configs is not None:
-            Configuration.xdg_configs = self._original_xdg_configs
-            Configuration.reload()
-            LOG.debug("ovoscope: user config restored")
+        if self._isolated_config and self._holds_xdg_patch:
+            restore_xdg = False
+            with _LANG_PATCH_LOCK:
+                self._holds_xdg_patch = False
+                _XDG_PATCH["depth"] -= 1
+                if _XDG_PATCH["depth"] <= 0:
+                    _XDG_PATCH["depth"] = 0
+                    restore_xdg = True
+                    Configuration.xdg_configs = _XDG_PATCH["value"]
+            if restore_xdg:
+                Configuration.reload()
+                LOG.debug("ovoscope: user config restored")
         SessionManager.bus = self._original_sm_bus
         LOG.debug("ovoscope: SessionManager.bus restored")
         SkillApi.bus = self._original_skill_api_bus
@@ -1172,6 +1253,20 @@ class MiniCroft(SkillManager):
         onto the singleton. Restoring the full snapshot keeps that mutation
         inside the test that caused it.
         """
+        with _LANG_PATCH_LOCK:
+            # getattr: a caller may build the instance with __new__ and call
+            # this directly, with no share of the snapshot to release.
+            if getattr(self, "_holds_session_snapshot", False):
+                self._holds_session_snapshot = False
+                _SESSION_SNAPSHOT["depth"] -= 1
+                if _SESSION_SNAPSHOT["depth"] > 0:
+                    # another harness is still live and still needs the state
+                    # it is running on; the last one to stop puts it back
+                    LOG.debug("ovoscope: default session restore deferred, "
+                              f"{_SESSION_SNAPSHOT['depth']} harness(es) live")
+                    return
+                _SESSION_SNAPSHOT["depth"] = 0
+
         state = getattr(self, "_default_session_state", None)
         if state is None:
             # The snapshot failed. Do not degrade to a total no-op: skills

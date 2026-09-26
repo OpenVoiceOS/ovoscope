@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.11.1a1) (2026-09-26)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.11.0a2...1.11.1a1)
+
+**Merged pull requests:**
+
+- fix: let the player asserts wait for the bus instead of reading once [\#218](https://github.com/OpenVoiceOS/ovoscope/pull/218) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.11.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.11.0a2) (2026-09-26)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.11.0a1...1.11.0a2)
@@ -373,10 +381,6 @@
 ## [1.4.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.4.0a1) (2026-06-29)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.3.0a1...1.4.0a1)
-
-**Merged pull requests:**
-
-- feat: skill\_id lifecycle filter + eof\_count for End2EndTest [\#110](https://github.com/OpenVoiceOS/ovoscope/pull/110) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.3.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.3.0a1) (2026-06-29)
 

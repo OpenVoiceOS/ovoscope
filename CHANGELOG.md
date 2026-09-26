@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.11.0a2) (2026-09-26)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.11.0a1...1.11.0a2)
+
+**Merged pull requests:**
+
+- chore\(ci\): drop the broken Dependabot config [\#208](https://github.com/OpenVoiceOS/ovoscope/pull/208) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.11.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.11.0a1) (2026-09-19)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.10.0a1...1.11.0a1)
@@ -374,17 +382,9 @@
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.2.0a1...1.3.0a1)
 
-**Merged pull requests:**
-
-- feat: emit recognizer\_loop:audio\_output\_start in \_mock\_tts alongside audio\_output\_end [\#108](https://github.com/OpenVoiceOS/ovoscope/pull/108) ([JarbasAl](https://github.com/JarbasAl))
-
 ## [1.2.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.2.0a1) (2026-06-29)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.1.0a2...1.2.0a1)
-
-**Merged pull requests:**
-
-- feat: MockTTS publishes audio\_output\_end via the full bus \(faithful\) [\#106](https://github.com/OpenVoiceOS/ovoscope/pull/106) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.1.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.1.0a2) (2026-06-29)
 

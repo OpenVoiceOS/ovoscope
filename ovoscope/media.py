@@ -581,51 +581,84 @@ class OCPPlayerHarness:
     # Assertion helpers
     # ------------------------------------------------------------------
 
+    #: How long an assert waits for the bus to deliver before it fails.
+    #: The transport calls emit and return; the player changes state on
+    #: another thread, so "not yet" and "wrong" are different answers and
+    #: only a deadline tells them apart.
+    settle_timeout = 2.0
+
+    def _eventually(self, read, want, describe):
+        """Wait for ``read()`` to equal ``want``, then return.
+
+        Returns as soon as it matches, so a passing assert costs nothing.
+        On timeout raises with the last value read, the time it waited and
+        the deadline it waited to, so "not yet" reads differently from
+        "wrong".
+        """
+        started = time.monotonic()
+        deadline = started + self.settle_timeout
+        got = read()
+        while got != want and time.monotonic() < deadline:
+            time.sleep(0.01)
+            got = read()
+        if got != want:
+            waited = time.monotonic() - started
+            raise AssertionError(
+                f"{describe(got)} after {waited:.2f}s "
+                f"(settle_timeout={self.settle_timeout}s)")
+
     def assert_player_state(self, state: PlayerState) -> None:
-        """Assert the player is in the given ``PlayerState``.
+        """Assert the player reaches the given ``PlayerState``.
 
         Args:
             state: Expected ``PlayerState``.
         """
-        assert self.player.state == state, (
-            f"Expected PlayerState.{state.name}, "
-            f"got PlayerState.{self.player.state.name}"
-        )
+        self._eventually(
+            lambda: self.player.state, state,
+            lambda got: (f"Expected PlayerState.{state.name}, "
+                         f"got PlayerState.{got.name}"))
 
     def assert_media_state(self, state: MediaState) -> None:
-        """Assert the player's media state matches *state*.
+        """Assert the player reaches the given ``MediaState``.
 
         Args:
             state: Expected ``MediaState``.
         """
-        assert self.player.media_state == state, (
-            f"Expected MediaState.{state.name}, "
-            f"got MediaState.{self.player.media_state.name}"
-        )
+        self._eventually(
+            lambda: self.player.media_state, state,
+            lambda got: (f"Expected MediaState.{state.name}, "
+                         f"got MediaState.{got.name}"))
 
     def assert_backend_playing(self) -> None:
-        """Assert the mock backend is currently playing."""
-        assert self.backend.is_playing, "Expected backend to be playing"
+        """Assert the mock backend reaches playing."""
+        self._eventually(lambda: bool(self.backend.is_playing), True,
+                         lambda got: f"Expected backend to be playing, "
+                                     f"got is_playing={got}")
 
     def assert_backend_paused(self) -> None:
-        """Assert the mock backend is currently paused."""
-        assert self.backend.is_paused, "Expected backend to be paused"
+        """Assert the mock backend reaches paused."""
+        self._eventually(lambda: bool(self.backend.is_paused), True,
+                         lambda got: f"Expected backend to be paused, "
+                                     f"got is_paused={got}")
 
     def assert_backend_stopped(self) -> None:
-        """Assert the mock backend is neither playing nor paused."""
-        assert not self.backend.is_playing, \
-            "Expected backend to be stopped (is_playing=True)"
-        assert not self.backend.is_paused, \
-            "Expected backend to be stopped (is_paused=True)"
+        """Assert the mock backend reaches neither playing nor paused."""
+        self._eventually(
+            lambda: (bool(self.backend.is_playing),
+                     bool(self.backend.is_paused)), (False, False),
+            lambda got: (f"Expected backend to be stopped "
+                         f"(is_playing={got[0]}, is_paused={got[1]})"))
 
     def assert_now_playing_uri(self, uri: str) -> None:
-        """Assert the currently playing URI matches *uri*.
+        """Assert the currently playing URI reaches *uri*.
 
         Args:
             uri: Expected URI string.
         """
-        actual = self.player.now_playing.uri if self.player.now_playing else None
-        assert actual == uri, f"Expected now_playing.uri={uri!r}, got {actual!r}"
+        self._eventually(
+            lambda: (self.player.now_playing.uri
+                     if self.player.now_playing else None), uri,
+            lambda got: f"Expected now_playing.uri={uri!r}, got {got!r}")
 
 
 # ---------------------------------------------------------------------------

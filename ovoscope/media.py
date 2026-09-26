@@ -26,7 +26,7 @@ Classes:
 
 import dataclasses
 import time
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 from unittest.mock import MagicMock, patch
 
 from ovos_bus_client.message import Message
@@ -266,6 +266,17 @@ class OCPPlayerHarness:
     Args:
         backend_namespace: Namespace for ``MockOCPBackend``; default ``"audio"``.
     """
+
+    #: How long an assertion waits for the state it expects, in seconds.
+    #:
+    #: The transport methods emit on the bus and return; the player transitions
+    #: on ANOTHER thread. A read taken straight afterwards can land before the
+    #: transition, and then "not yet" is indistinguishable from "wrong". Raise
+    #: it on a slow box, or set it to 0 to get the old single-read behaviour.
+    settle_timeout: float = 2.0
+
+    #: How often an assertion re-reads while it waits, in seconds.
+    settle_interval: float = 0.01
 
     def __init__(self, backend_namespace: str = "audio",
                  backend_factory: Optional[Callable[[FakeBus], AudioBackend]] = None,
@@ -581,51 +592,102 @@ class OCPPlayerHarness:
     # Assertion helpers
     # ------------------------------------------------------------------
 
+    def _eventually(self, read: Callable[[], Any],
+                    ok: Callable[[Any], bool],
+                    describe: Callable[[Any], str]) -> Any:
+        """Re-read until *ok* holds, or fail after ``settle_timeout``.
+
+        A transport method emits on the bus and returns; the player transitions
+        on another thread. A single read cannot tell "not yet" from "wrong", so
+        every state assertion waits for the value it expects instead of
+        sampling once.
+
+        It returns as soon as *ok* holds, so a passing assertion costs one read
+        and the suite does not get slower. On timeout it raises the message
+        *describe* builds from the value it last read, with the deadline
+        appended, so a real failure still names the state it really saw.
+
+        Args:
+            read: Reads the value under test. Called repeatedly.
+            ok: True when the value is what the assertion wants.
+            describe: Builds the failure message from the last value read.
+
+        Returns:
+            The value that satisfied *ok*.
+        """
+        deadline = time.monotonic() + self.settle_timeout
+        while True:
+            value = read()
+            if ok(value):
+                return value
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"{describe(value)} after {self.settle_timeout}s")
+            time.sleep(self.settle_interval)
+
     def assert_player_state(self, state: PlayerState) -> None:
-        """Assert the player is in the given ``PlayerState``.
+        """Assert the player reaches the given ``PlayerState``.
 
         Args:
             state: Expected ``PlayerState``.
         """
-        assert self.player.state == state, (
-            f"Expected PlayerState.{state.name}, "
-            f"got PlayerState.{self.player.state.name}"
-        )
+        self._eventually(
+            lambda: self.player.state,
+            lambda actual: actual == state,
+            lambda actual: (f"Expected PlayerState.{state.name}, "
+                            f"got PlayerState.{actual.name}"))
 
     def assert_media_state(self, state: MediaState) -> None:
-        """Assert the player's media state matches *state*.
+        """Assert the player's media state reaches *state*.
 
         Args:
             state: Expected ``MediaState``.
         """
-        assert self.player.media_state == state, (
-            f"Expected MediaState.{state.name}, "
-            f"got MediaState.{self.player.media_state.name}"
-        )
+        self._eventually(
+            lambda: self.player.media_state,
+            lambda actual: actual == state,
+            lambda actual: (f"Expected MediaState.{state.name}, "
+                            f"got MediaState.{actual.name}"))
 
     def assert_backend_playing(self) -> None:
-        """Assert the mock backend is currently playing."""
-        assert self.backend.is_playing, "Expected backend to be playing"
+        """Assert the mock backend reaches the playing state."""
+        self._eventually(lambda: self.backend.is_playing,
+                         lambda playing: playing,
+                         lambda playing: "Expected backend to be playing")
 
     def assert_backend_paused(self) -> None:
-        """Assert the mock backend is currently paused."""
-        assert self.backend.is_paused, "Expected backend to be paused"
+        """Assert the mock backend reaches the paused state."""
+        self._eventually(lambda: self.backend.is_paused,
+                         lambda paused: paused,
+                         lambda paused: "Expected backend to be paused")
 
     def assert_backend_stopped(self) -> None:
-        """Assert the mock backend is neither playing nor paused."""
-        assert not self.backend.is_playing, \
-            "Expected backend to be stopped (is_playing=True)"
-        assert not self.backend.is_paused, \
-            "Expected backend to be stopped (is_paused=True)"
+        """Assert the mock backend reaches a stopped state.
+
+        Two conditions, read TOGETHER: a backend that stops playing and pauses
+        in the same transition must never look stopped in between, and two
+        sequential single-condition waits could see exactly that.
+        """
+        def _describe(state) -> str:
+            which = "is_playing=True" if state[0] else "is_paused=True"
+            return f"Expected backend to be stopped ({which})"
+
+        self._eventually(
+            lambda: (self.backend.is_playing, self.backend.is_paused),
+            lambda state: not state[0] and not state[1],
+            _describe)
 
     def assert_now_playing_uri(self, uri: str) -> None:
-        """Assert the currently playing URI matches *uri*.
+        """Assert the currently playing URI reaches *uri*.
 
         Args:
             uri: Expected URI string.
         """
-        actual = self.player.now_playing.uri if self.player.now_playing else None
-        assert actual == uri, f"Expected now_playing.uri={uri!r}, got {actual!r}"
+        self._eventually(
+            lambda: (self.player.now_playing.uri
+                     if self.player.now_playing else None),
+            lambda actual: actual == uri,
+            lambda actual: f"Expected now_playing.uri={uri!r}, got {actual!r}")
 
 
 # ---------------------------------------------------------------------------

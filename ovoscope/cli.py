@@ -21,6 +21,8 @@ Provides the ``ovoscope`` command with the following subcommands:
 * ``validate``   — Schema-validate one or more fixture files.
 * ``coverage``   — Scan a workspace root and report E2E test coverage.
 * ``bus-coverage`` — Run fixtures and report bus handler/emitter coverage.
+* ``golden``     — Run golden-utterance rows through one MiniCroft per locale.
+* ``generate``   — Draft golden rows from a skill's ``.intent`` templates.
 
 Usage::
 
@@ -31,6 +33,8 @@ Usage::
     ovoscope validate fixture.json
     ovoscope coverage path/to/OpenVoiceOS/
     ovoscope bus-coverage test/fixtures/
+    ovoscope generate --skill ovos-skill-hello-world.openvoiceos \\
+        --checkout . --lang en-us --out golden_generated_en-US.jsonl
 """
 from __future__ import annotations
 
@@ -459,6 +463,75 @@ def cmd_bus_coverage(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def cmd_generate(args: argparse.Namespace) -> int:
+    """Draft golden-utterance rows from a checkout's ``.intent`` templates.
+
+    Rows go to ``--out`` (or stdout) in the ``golden_utterances*.jsonl``
+    format, or with ``--format intent-cases`` to ``<out>/<lang>/
+    <Intent>.intent.test`` files. Every row is marked ``source:
+    generated``. Skipped templates and warnings go to stderr, and to
+    ``--report`` as JSON. Exit 0 when rows were written, 2 when none were
+    (no ``.intent`` templates for the languages, or every one skipped),
+    3 when an output file exists and ``--force`` was not given.
+    """
+    from pathlib import Path
+
+    from ovoscope.generate import (EXIT_EXISTS, EXIT_NOTHING_GENERATED,
+                                   generate_rows, write_golden_rows,
+                                   write_intent_cases)
+
+    langs = [l for part in (args.lang or []) for l in part.split(",") if l]
+    slot_values: dict = {}
+    for item in args.slot or []:
+        name, sep, value = item.partition("=")
+        if not sep or not name.strip() or not value.strip():
+            _die(f"--slot takes NAME=VALUE, got {item!r}")
+        slot_values.setdefault(name.strip(), []).append(value.strip())
+    if args.format == "intent-cases" and not args.out:
+        _die("--format intent-cases needs --out <cases dir>")
+    if args.format == "golden" and args.out and Path(args.out).exists() \
+            and not args.force:
+        _die(f"{args.out} exists; pass --force to overwrite", EXIT_EXISTS)
+
+    result = generate_rows(Path(args.checkout), args.skill, langs=langs,
+                           max_per_intent=args.max_per_intent,
+                           slot_values=slot_values)
+    for item in result.skipped:
+        print(f"SKIPPED [{item.lang}] {item.intent} ({item.reason}): "
+              f"{item.template!r} in {item.source_file}", file=sys.stderr)
+    for item in result.warnings:
+        print(f"WARNING [{item.lang}] {item.intent} ({item.reason}): "
+              f"{item.template!r} in {item.source_file}; rows still "
+              f"generated", file=sys.stderr)
+    if args.report:
+        Path(args.report).write_text(
+            json.dumps(result.report(), indent=2, ensure_ascii=False),
+            encoding="utf-8")
+
+    n_intents = sum(len(v) for v in result.intents.values())
+    print(f"{len(result.rows)} rows from {n_intents} intent(s) in "
+          f"{len(result.intents)} language(s); {len(result.skipped)} "
+          f"skipped, {len(result.warnings)} warning(s)", file=sys.stderr)
+    if not result.rows:
+        return EXIT_NOTHING_GENERATED
+
+    if args.format == "intent-cases":
+        try:
+            paths = write_intent_cases(result.rows, Path(args.out),
+                                       force=args.force)
+        except FileExistsError as exc:
+            _die(str(exc), EXIT_EXISTS)
+        print(f"wrote {len(paths)} case file(s) under {args.out}",
+              file=sys.stderr)
+    elif args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            write_golden_rows(result.rows, fh)
+        print(f"wrote {args.out}", file=sys.stderr)
+    else:
+        write_golden_rows(result.rows, sys.stdout)
+    return 0
+
+
 def cmd_golden(args: argparse.Namespace) -> int:
     """Run a skill's golden-utterance rows through one MiniCroft per locale.
 
@@ -528,6 +601,38 @@ def _build_parser() -> argparse.ArgumentParser:
                                "presets, one process for the whole run "
                                "otherwise. per-locale: always one process per "
                                "locale. single: always one process")
+
+    # --- generate ---
+    p_gen = sub.add_parser(
+        "generate",
+        help="Draft golden-utterance rows from a skill's .intent/.entity "
+             "files; every row is marked source: generated.")
+    p_gen.add_argument("--skill", required=True,
+                       help="skill id every row carries (the entry point name)")
+    p_gen.add_argument("--checkout", default=".",
+                       help="the skill checkout to read locale/ from "
+                            "(default: .)")
+    p_gen.add_argument("--lang", action="append", default=None,
+                       help="language to draft for; repeat or comma-separate. "
+                            "Default: every language under locale/")
+    p_gen.add_argument("--out", default=None,
+                       help="output .jsonl file (default: stdout), or the "
+                            "cases directory for --format intent-cases")
+    p_gen.add_argument("--format", default="golden",
+                       choices=("golden", "intent-cases"),
+                       help="golden: golden_utterances*.jsonl rows (default). "
+                            "intent-cases: <out>/<lang>/<Intent>.intent.test")
+    p_gen.add_argument("--max-per-intent", type=int, default=10,
+                       help="most rows per intent and language; templates "
+                            "take turns (default: 10)")
+    p_gen.add_argument("--slot", action="append", default=None,
+                       metavar="NAME=VALUE",
+                       help="value for a slot with no .entity file; repeatable")
+    p_gen.add_argument("--report", default=None,
+                       help="write rows per intent, skipped templates and "
+                            "warnings as JSON to this file")
+    p_gen.add_argument("--force", action="store_true",
+                       help="overwrite existing output files")
 
     # --- record ---
     p_record = sub.add_parser("record", help="Record a fixture file.")
@@ -611,6 +716,7 @@ def main() -> None:
 
     dispatch = {
         "golden": cmd_golden,
+        "generate": cmd_generate,
         "record": cmd_record,
         "run": cmd_run,
         "diff": cmd_diff,

@@ -1,8 +1,8 @@
 # ovoscope CLI
 
-The `ovoscope` command-line tool provides seven subcommands: golden-utterance
-runs on a real intent service, and recording, replaying, diffing, validating
-and scanning E2E test fixtures.
+The `ovoscope` command-line tool provides eight subcommands: golden-utterance
+runs on a real intent service, drafting golden rows from a skill's templates,
+and recording, replaying, diffing, validating and scanning E2E test fixtures.
 
 ## Installation
 
@@ -263,6 +263,82 @@ not boot. Exit 5 covers every boot path: the preset check before the run,
 and the boot itself, with or without a preset. A boot failure is never
 exit 1, because exit 1 is a corpus miss and a failed boot measured
 nothing.
+
+---
+
+### `ovoscope generate`: Golden rows drafted from a skill's templates
+
+Most skills ship no golden file, but every skill that registers Padatious
+intents already says what it was trained on. `generate` reads the checkout's
+`locale/<lang>/*.intent` and `*.entity` files and writes rows that
+`ovoscope golden` runs, so a skill without a golden file can still be tested
+(`cli.py:cmd_generate`, `ovoscope/generate.py`).
+
+```bash
+ovoscope generate --skill ovos-skill-hello-world.openvoiceos --checkout . \
+    --lang en-us --out generated_en-US.jsonl
+ovoscope golden --rows generated_en-US.jsonl \
+    --skill ovos-skill-hello-world.openvoiceos --checkout .
+
+# the same sentences as editable intent-case files
+ovoscope generate --skill my-skill.openvoiceos --format intent-cases \
+    --out test/end2end/cases
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--skill` | **required** | The skill id every row carries (its entry point name). |
+| `--checkout` | `.` | The checkout to read `locale/` from. |
+| `--lang` | all | Language to draft for; repeat or comma-separate. |
+| `--out` | stdout | The `.jsonl` file, or the cases directory for `--format intent-cases`. |
+| `--format` | `golden` | `golden`: `golden_utterances*.jsonl` rows. `intent-cases`: `<out>/<lang>/<Intent>.intent.test` files. |
+| `--max-per-intent` | `10` | Most rows per intent and language. |
+| `--slot` | None | `NAME=VALUE` for a slot with no `.entity` file; repeatable. |
+| `--report` | None | JSON file with rows per intent, skipped templates and warnings. |
+| `--force` | off | Overwrite existing output files. |
+
+**How a row is made.** `ovos_spec_tools.inline_keywords` and `iter_expand`
+(OVOS-INTENT-1) expand each template line, and
+`ovos_utils.bracket_expansion.expand_slots` fills its slots. A slot takes its
+values from its `.entity` file, then from `--slot`, then from a small table of
+defaults (by the slot's declared type, then its name: `{number}` 10,
+`{location}` london, ...). Free-text slots such as `{query}` have no default:
+give one with `--slot`.
+
+**What is skipped.** A template is skipped exactly when ovos-workshop 9.x
+drops it, that is when `expand` raises `MalformedTemplate`: adjacent slots,
+an empty sample, a slot-only line. Also skipped: a slot-only *sample* (`{x}`
+from `{x} [please]`), and a sample whose slot nothing fills. Each skip is
+printed to stderr and listed in `--report` with a stable reason id
+(`adjacent-slots`, `empty-sample`, `slot-only`, `slot-only-sample`,
+`unfilled-slot`, `malformed`). A single-branch group `(word)` is not
+skipped: ovos-spec-tools folds it to the bare word and ovos-workshop
+registers it, so its rows are generated and the template is reported as a
+`single-branch-group` warning.
+
+**The cap.** Templates can expand to thousands of sentences, so each intent
+gets at most `--max-per-intent` rows. Templates take turns: every template
+line gives one row before any gives a second, because the bugs this finds are
+per line (a line ending in a slot, a line another skill steals). Entity values
+are spread evenly over the value set. The same checkout always gives the same
+rows in the same order.
+
+**Generated is not golden.** Every row carries `"source": "generated"` and
+`"machine_generated": true`, plus the `template`, `source_file` and
+`slot_sources` it came from; `load_golden_rows` keeps these in
+`GoldenRow.provenance`. Intent-case files, which have no per-line fields,
+open with a comment saying the same. Padatious was trained on exactly these
+sentences, so a pass proves the intent is reachable: it registered, no other
+skill or pipeline stage took the sentence, and the handler ran. It does not
+prove the skill understands other phrasings; that still needs hand-written
+golden rows. Keep the two apart in reports.
+
+`--format intent-cases` never overwrites an existing case file without
+`--force`, since it may hold hand-written cases.
+
+Exit codes: 0 rows written; 2 no rows (no `.intent` templates for the
+languages, or every one skipped); 3 an output file exists and `--force` was
+not given.
 
 ---
 

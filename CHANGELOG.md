@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.2a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.11.2a1) (2026-10-01)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.11.1a1...1.11.2a1)
+
+**Merged pull requests:**
+
+- fix\(golden\): a machine-drafted row that names no real resource is a miss [\#215](https://github.com/OpenVoiceOS/ovoscope/pull/215) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.11.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.11.1a1) (2026-09-26)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.11.0a2...1.11.1a1)
@@ -373,10 +381,6 @@
 ## [1.5.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.5.0a1) (2026-07-02)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.4.0a1...1.5.0a1)
-
-**Merged pull requests:**
-
-- feat: add a pipeline\_id filter to End2EndTest [\#112](https://github.com/OpenVoiceOS/ovoscope/pull/112) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.4.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.4.0a1) (2026-06-29)
 

@@ -52,6 +52,8 @@ from typing import TYPE_CHECKING, Iterator, List, Optional, Union
 if TYPE_CHECKING:
     from ovoscope.bus_coverage import BusCoverageReport
 
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -421,6 +423,48 @@ def _autodiscover_intent_cases(config):
     return None
 
 
+def _forget_failed_module(module_path, known_before) -> None:
+    """Drop the corpse a failed import just left in ``sys.modules``.
+
+    Two conditions, both necessary. The entry must name *module_path* by
+    ``__file__``, because the name pytest derived cannot be guessed: under
+    ``--import-mode=importlib`` it depends on the rootdir and on
+    ``consider_namespace_packages``, and a wrong guess would silently do
+    nothing. And the entry must be **new** since *known_before*, the set of
+    ``sys.modules`` keys snapshotted immediately before the ``collector.obj``
+    access that failed.
+
+    The second condition is what keeps this to the corpse. One file can sit in
+    ``sys.modules`` under two names -- a symlinked test file, or the same file
+    collected through two rootdirs -- and the other name may be a healthy
+    import that happened long before this hook ran. Matching on the path alone
+    evicts that healthy twin as well: the next import of it re-executes the
+    module, so the classes it exports are no longer the objects already held,
+    and an ``isinstance`` check against a class captured earlier starts
+    failing. An entry that was present before this hook touched anything is by
+    construction not the corpse this hook created, so it is left alone.
+
+    Whatever else the failed import managed to load is also left alone; those
+    modules are in the same state they would be in under prepend mode.
+    """
+    try:
+        target = os.path.realpath(str(module_path))
+    except Exception:  # noqa: BLE001 - a path that cannot be resolved
+        return
+    for name in [n for n in list(sys.modules) if n not in known_before]:
+        module = sys.modules.get(name)
+        if module is None:
+            continue
+        filename = getattr(module, "__file__", None)
+        if not filename:
+            continue
+        try:
+            if os.path.realpath(filename) == target:
+                del sys.modules[name]
+        except Exception:  # noqa: BLE001,S112 - a module with an odd __file__
+            continue
+
+
 @pytest.hookimpl(wrapper=True)
 def pytest_pycollect_makemodule(module_path, parent):
     """Auto-register intent-case tests on shim modules that declare
@@ -441,6 +485,10 @@ def pytest_pycollect_makemodule(module_path, parent):
     collector = yield
     if collector is None:
         return collector
+    # Snapshot the module table immediately before the access, so the eviction
+    # below can tell the corpse this access creates from a healthy module that
+    # is already loaded under a second name for the same file.
+    known_before = frozenset(sys.modules)
     try:
         mod = collector.obj  # imports the module if not already loaded
     except KeyboardInterrupt:
@@ -456,6 +504,20 @@ def pytest_pycollect_makemodule(module_path, parent):
         # it (and any other import-time failure) here and let pytest's own
         # protected collection call re-import the module later, where it
         # is reported as a normal per-module skip or error instead.
+        #
+        # That re-import has to be made possible again, or the swallow
+        # turns an import failure into an ABSENCE. Measured on pytest
+        # 9.1.1: under the default prepend mode a failed import leaves
+        # nothing in ``sys.modules``, so the next access raises the same
+        # error and pytest reports it; under ``--import-mode=importlib``
+        # the half-executed module STAYS in ``sys.modules``, so the next
+        # access returns that corpse instead - a module object carrying no
+        # test functions, because execution stopped at the failing line.
+        # The collector then yields no items, pytest prints no error and
+        # exits 0. This hook is the first thing to touch ``collector.obj``,
+        # so it consumes the one attempt that ever raises.
+        # Dropping the corpse restores the premise above for both modes.
+        _forget_failed_module(module_path, known_before)
         return collector
     if not hasattr(mod, "ovoscope_intent_cases"):
         return collector

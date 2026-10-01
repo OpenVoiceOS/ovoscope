@@ -234,9 +234,12 @@ it always answers with its best guess among the labels it knows — while
 prototype mode cannot fire on a label it has been denied. The prototype
 stage therefore deny-lists the classifier's own label set, read from the
 model's `config.json` via `m2v_model_labels()` rather than hard-coded, so
-each label is served by exactly one engine, and prototype mode runs ahead of
-the classifier at every confidence tier so it wins the one case where both
-engines could otherwise answer. `get_m2v_minicroft` calls
+each label is served by exactly one engine. Ahead of both stages the list
+runs `ovos-padacioso-pipeline-plugin-high`: the exact template lines a skill
+ships are the template engine's to answer, the classifier answers a
+paraphrase, and the prototype stage covers the labels the checkpoint lacks.
+This is the order Miro named on 2026-09-23 as the intended ovos-config
+default. `get_m2v_minicroft` calls
 `assert_m2v_label_split(mc)` before returning and raises `RuntimeError`
 naming any label caught in both engines or in neither. Pass `prototype=False`
 to boot the classifier alone via `M2V_PIPELINE`, or `classifier=False` to

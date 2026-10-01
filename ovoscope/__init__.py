@@ -156,18 +156,6 @@ M2V_CONFIG_KEY = "ovos_m2v_pipeline"
 # own Configuration() lookup (which does use the underscore form) when the
 # constructor receives literally ``None``, which the factory never passes.
 M2V_PROTOTYPE_CONFIG_KEY = "ovos-m2v-prototype-pipeline"
-# Dual m2v boot mode: the model2vec classifier and model2vec prototype mode
-# side by side, plus stop/converse/fallback. The classifier only ever routes
-# labels the checkpoint was trained on; prototype mode is built at boot time
-# from whatever skills load, straight from their shipped .intent files, and
-# deny-lists the classifier's own label set so each label has exactly one
-# engine. Prototype comes first in every tier: the classifier is confidently
-# wrong on a label it never saw (it will happily emit its best guess among
-# the labels it knows), while prototype mode cannot fire on the classifier's
-# labels once they are denied to it — so the only real contention is the
-# cross-label case where a skill's label was in the training set at some
-# point but is no longer, and prototype mode must win that case rather than
-# have the stale classifier answer intercept it first.
 # Prototype mode alone: the three prototype tiers and nothing else. No
 # classifier, so no label deny-list; every label a loaded skill registers
 # from its .intent files is served by prototype mode. This is the boot
@@ -177,19 +165,34 @@ M2V_PROTOTYPE_PIPELINE = [
     "ovos-m2v-prototype-pipeline-medium",
     "ovos-m2v-prototype-pipeline-low",
 ]
+# Dual m2v boot mode: the intent order Miro named on 2026-09-23 as the
+# intended ovos-config default. Three stages, one job each:
+# * `ovos-padacioso-pipeline-plugin-high` matches the exact template lines a
+#   skill ships. Those lines belong to the template engine. A vector store
+#   asked to hold them answers a near neighbour instead.
+# * `ovos-m2v-pipeline-high` answers a paraphrase no template holds. The
+#   classifier only ever routes labels its checkpoint was trained on.
+# * `ovos-m2v-prototype-pipeline-medium` covers the labels the checkpoint
+#   lacks. The stage is built at boot from whatever skills load, straight
+#   from their shipped .intent files, and deny-lists the classifier's own
+#   label set, so each label has exactly one m2v engine.
+# Padacioso first is what makes the order safe. Without it an m2v stage must
+# answer the exact lines too, and it answers a near neighbour instead.
+# Measured on ovos-skill-volume en-US, 185 expanded template lines, with
+# ovos-m2v-pipeline 0.28.2a1 and the 128M-v5 checkpoint (T-4089):
+#   this list                          185 right,  0 wrong,  0 unmatched
+#   the two m2v stages, prototype first 168 right, 15 wrong,  2 unmatched
+#   the two m2v stages, classifier first 162 right, 21 wrong, 2 unmatched
+# Eight of the classifier-first errors are `volume_reset` lines. T-4073 saw
+# the same eight lines matched by nothing at all on ovos-m2v-pipeline
+# 0.27.2a2; here they reach `volume_level`. The counts move with the release,
+# the lines do not. `test_m2v_dual_order.py` fires the same 185 lines through
+# this list and through the m2v pair, and asserts that this list leaves no
+# line unmatched and no line mis-routed.
 M2V_DUAL_PIPELINE = [
-    "ovos-stop-pipeline-plugin-high",
-    "ovos-converse-pipeline-plugin",
-    "ovos-m2v-prototype-pipeline-high",
+    "ovos-padacioso-pipeline-plugin-high",
     "ovos-m2v-pipeline-high",
-    "ovos-fallback-pipeline-plugin-high",
-    "ovos-stop-pipeline-plugin-medium",
     "ovos-m2v-prototype-pipeline-medium",
-    "ovos-m2v-pipeline-medium",
-    "ovos-fallback-pipeline-plugin-medium",
-    "ovos-m2v-prototype-pipeline-low",
-    "ovos-m2v-pipeline-low",
-    "ovos-fallback-pipeline-plugin-low",
 ]
 # Nebulento — fuzzy intent matching (ConfidenceMatcherPipeline). Single OPM
 # entry point; the pipeline manager handles confidence-tier routing.
@@ -1575,13 +1578,12 @@ def get_m2v_minicroft(skill_ids: Union[List[str], str],
     — for every other label. The prototype stage deny-lists the classifier's
     label set (read from the model's own ``config.json`` via
     ``m2v_model_labels``, never hard-coded) so each label is served by
-    exactly one engine, and prototype runs ahead of the classifier at every
-    tier: the classifier is confidently wrong on a label it never saw, while
-    prototype mode cannot fire on a label denied to it, so ordering
-    prototype first costs nothing on the labels the classifier owns and wins
-    the only real overlap case. ``assert_m2v_label_split`` verifies this
-    split holds before returning, and raises loudly if a label ends up
-    served by both engines or by neither.
+    exactly one engine. ``ovos-padacioso-pipeline-plugin-high`` runs ahead of
+    both m2v stages: the exact template lines a skill ships are padacioso's
+    to answer, the classifier answers a paraphrase, and the prototype stage
+    covers the labels the checkpoint lacks. ``assert_m2v_label_split``
+    verifies the split between the two m2v stages before returning, and
+    raises loudly if a label ends up served by both engines or by neither.
 
     With ``prototype=False`` this boots the classifier alone via
     ``M2V_PIPELINE``, exactly as it did before dual-mode existed — for

@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Iterator, List, Optional, Union
 if TYPE_CHECKING:
     from ovoscope.bus_coverage import BusCoverageReport
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -442,10 +443,22 @@ def pytest_pycollect_makemodule(module_path, parent):
     if collector is None:
         return collector
     try:
+        declares = "ovoscope_intent_cases" in Path(module_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        declares = False
+    if not declares:
+        # importing every module here would turn an import error into a module with no tests
+        return collector
+    try:
         mod = collector.obj  # imports the module if not already loaded
     except KeyboardInterrupt:
         raise
     except BaseException:
+        # importlib mode leaves the half-run module in sys.modules, and pytest's own import would return it
+        # without the failing line's error; drop it so that import raises again
+        for name, loaded in list(sys.modules.items()):
+            if getattr(loaded, "__file__", None) == str(module_path):
+                del sys.modules[name]
         # Importing the module here is a side effect of auto-discovery,
         # not the real collection attempt. A module-level
         # ``pytest.skip()``/``pytest.importorskip()`` raises

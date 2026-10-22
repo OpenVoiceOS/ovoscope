@@ -6,6 +6,8 @@ logic by importing the module and inspecting/mocking its internals.
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import ovoscope.pytest_plugin as plugin_mod
 
 
@@ -145,3 +147,31 @@ class TestModuleLevelSkipDoesNotAbortCollection:
 
         result.assert_outcomes(passed=1, skipped=1)
         assert result.ret == 0
+
+
+class TestBrokenTestModuleIsReported:
+    """A test module that fails to import is a collection error, never zero tests.
+
+    With ``--import-mode=importlib``, the import the hook wrapper made left a partial module in ``sys.modules``.
+    pytest's own import then returned that module, which has none of the tests defined after the failing line,
+    so the run reported no tests and no error for it.
+    """
+
+    BROKEN = """
+    from a_module_that_does_not_exist_xyz import thing
+
+    def test_never_runs():
+        assert thing
+    """
+
+    @pytest.mark.parametrize("mode", ["importlib", "prepend"])
+    def test_an_import_error_is_a_collection_error(self, pytester, mode):
+        pytester.makepyfile(test_broken=self.BROKEN, test_plain="def test_ok():\n    assert True\n")
+        result = pytester.runpytest(f"--import-mode={mode}")
+        result.assert_outcomes(passed=0, errors=1)
+        result.stdout.fnmatch_lines(["*ModuleNotFoundError*a_module_that_does_not_exist_xyz*"])
+
+    def test_a_module_with_intent_cases_that_fails_to_import_is_reported(self, pytester):
+        pytester.makepyfile(test_broken="ovoscope_intent_cases = {}\n" + self.BROKEN)
+        result = pytester.runpytest("--import-mode=importlib")
+        result.assert_outcomes(errors=1)

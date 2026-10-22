@@ -6,6 +6,8 @@ logic by importing the module and inspecting/mocking its internals.
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import ovoscope.pytest_plugin as plugin_mod
 
 
@@ -107,3 +109,69 @@ class TestMinicroftFixtureLogic(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestModuleLevelSkipDoesNotAbortCollection:
+    """Regression test: a module-level ``pytest.importorskip()``/``pytest.skip()``
+    used to abort the *entire* collection session instead of skipping just
+    that one module.
+
+    ``pytest.skip.Exception`` subclasses ``BaseException`` (via
+    ``_pytest.outcomes.OutcomeException``), not ``Exception``. The ovoscope
+    ``pytest_pycollect_makemodule`` hook wrapper imports every collected
+    module eagerly (to look for the ``ovoscope_intent_cases`` shim marker)
+    guarded only by ``except Exception``. That guard never sees the skip
+    exception, so it escapes the hook wrapper uncaught and pytest reports
+    "found no collectors" / exit code 5 for the whole run, even though only
+    one of the test files actually wanted to be skipped.
+    """
+
+    def test_importorskip_module_does_not_nuke_collection(self, pytester):
+        pytester.makepyfile(
+            test_skips_at_import="""
+            import pytest
+            pytest.importorskip("this_module_does_not_exist_xyz")
+
+            def test_never_runs():
+                assert False
+            """
+        )
+        pytester.makepyfile(
+            test_plain="""
+            def test_ok():
+                assert True
+            """
+        )
+
+        result = pytester.runpytest()
+
+        result.assert_outcomes(passed=1, skipped=1)
+        assert result.ret == 0
+
+
+class TestBrokenTestModuleIsReported:
+    """A test module that fails to import is a collection error, never zero tests.
+
+    With ``--import-mode=importlib``, the import the hook wrapper made left a partial module in ``sys.modules``.
+    pytest's own import then returned that module, which has none of the tests defined after the failing line,
+    so the run reported no tests and no error for it.
+    """
+
+    BROKEN = """
+    from a_module_that_does_not_exist_xyz import thing
+
+    def test_never_runs():
+        assert thing
+    """
+
+    @pytest.mark.parametrize("mode", ["importlib", "prepend"])
+    def test_an_import_error_is_a_collection_error(self, pytester, mode):
+        pytester.makepyfile(test_broken=self.BROKEN, test_plain="def test_ok():\n    assert True\n")
+        result = pytester.runpytest(f"--import-mode={mode}")
+        result.assert_outcomes(passed=0, errors=1)
+        result.stdout.fnmatch_lines(["*ModuleNotFoundError*a_module_that_does_not_exist_xyz*"])
+
+    def test_a_module_with_intent_cases_that_fails_to_import_is_reported(self, pytester):
+        pytester.makepyfile(test_broken="ovoscope_intent_cases = {}\n" + self.BROKEN)
+        result = pytester.runpytest("--import-mode=importlib")
+        result.assert_outcomes(errors=1)

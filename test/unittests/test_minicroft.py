@@ -655,16 +655,20 @@ class TestTrainedQuietWindow(unittest.TestCase):
         self.assertIn(stuck_id, message)
         self.assertNotIn(intentless_id, message)
 
+    @patch.dict("os.environ", {"OVOSCOPE_TRAINED_TIMEOUT": "0.3"})
     def test_wait_for_trained_false_opts_out(self):
         """wait_for_trained=False must skip the wait/raise entirely even
-        when an intent was registered and never trained."""
+        when an intent was registered and never trained. The same boot with
+        the default wait raises (test_never_trained_raises_naming_skill);
+        on the adapt pipeline no padatious-family plugin answers the
+        trainer behind the test's back."""
         skill_id = "ovoscope-unittest-optout.test"
         mc = get_minicroft([skill_id],
-                           extra_skills={skill_id: RegistersIntentSkill},
+                           extra_skills={skill_id: StuckTrainerSkill},
+                           default_pipeline=ADAPT_PIPELINE,
                            wait_for_trained=False)
         try:
             self.assertEqual(mc._registered_skill_ids, {skill_id})
-            self.assertEqual(mc._trained_times, [])
         finally:
             mc.stop()
 

@@ -109,6 +109,8 @@ test = [
     # test/unittests/test_audit_round*.py carry `pytest.mark.timeout`; the
     # marks do nothing unless this plugin is installed
     "pytest-timeout",
+    # test/unittests/test_routing.py runs the routing gate under xdist workers
+    "pytest-xdist",
 ]
 dev = ["ovoscope[test]"]
 

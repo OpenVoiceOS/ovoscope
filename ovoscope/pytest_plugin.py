@@ -152,6 +152,14 @@ def pytest_addoption(parser):
         help=("Show the N hardest utterances (lowest cross-pipeline pass "
               "rate) in the Markdown report. Default: 10."),
     )
+    parser.addini(
+        "ovoscope_min_routing_rate",
+        type="string",
+        default=None,
+        help=("Minimum share (0.0-1.0) of the requests recorded in "
+              "ovoscope.routing.TALLY that reached their intent on m2v. "
+              "Below it the session exits non-zero. Default: 0.8."),
+    )
 
 
 @pytest.fixture(scope="class")
@@ -820,9 +828,49 @@ def _gate_state(config):
     return state
 
 
+def _min_routing_rate(config) -> float:
+    """The ``ovoscope_min_routing_rate`` ini value as a share between 0 and 1."""
+    from ovoscope.routing import DEFAULT_MIN_ROUTING_RATE
+    value = config.getini("ovoscope_min_routing_rate")
+    if value is None or value == "":
+        return DEFAULT_MIN_ROUTING_RATE
+    try:
+        rate = float(str(value))
+    except ValueError:
+        rate = -1.0
+    if not 0.0 <= rate <= 1.0:
+        raise pytest.UsageError(f"ovoscope_min_routing_rate must be a number "
+                                f"from 0 to 1, got {value!r}")
+    return rate
+
+
+def pytest_configure(config):
+    """Read the routing gate's minimum once, so a bad value stops the run early."""
+    config._ovoscope_min_routing_rate = _min_routing_rate(config)
+
+
+def _routing_summary(terminalreporter, config):
+    """The routing rate of the checks recorded in ``ovoscope.routing.TALLY``."""
+    from ovoscope.routing import TALLY
+    if not TALLY.total:
+        return
+    min_rate = config._ovoscope_min_routing_rate
+    tr = terminalreporter
+    tr.write_sep("=", "ovoscope m2v routing rate")
+    tr.write_line(f"{len(TALLY.hits)}/{TALLY.total} = {TALLY.rate:.1%} of the "
+                  f"routing checks went right (gate {min_rate:.0%})")
+    for miss in TALLY.misses:
+        tr.write_line(f"  miss {miss}")
+    failure = TALLY.failure(min_rate)
+    if failure:
+        tr.write_sep("!", "ovoscope routing gate FAILED")
+        tr.write_line(f"  - {failure}")
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
-    """Combined session summary: bus coverage + intent-case accuracy."""
+    """Combined session summary: bus coverage, routing rate, intent-case accuracy."""
     _bus_coverage_summary(terminalreporter, config)
+    _routing_summary(terminalreporter, config)
     accum = getattr(pytest_runtest_logreport, "_accum", None)
     if not accum or not accum["results"]:
         return
@@ -911,3 +959,20 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
         session.config._ovoscope_accuracy_gate_failed = True
         if session.exitstatus == 0:
             session.exitstatus = 1
+    from ovoscope.routing import TALLY
+    if hasattr(session.config, "workeroutput"):
+        # a pytest-xdist worker hands its checks to the controller, which gates the whole run
+        session.config.workeroutput["ovoscope_routing"] = {
+            "hits": TALLY.hits, "misses": TALLY.misses}
+    elif TALLY.failure(session.config._ovoscope_min_routing_rate) and session.exitstatus == 0:
+        session.exitstatus = 1
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error):  # noqa: ARG001
+    """Merge a finished pytest-xdist worker's routing checks into the controller's tally."""
+    from ovoscope.routing import TALLY
+    checks = getattr(node, "workeroutput", {}).get("ovoscope_routing")
+    if checks:
+        TALLY.hits.extend(checks["hits"])
+        TALLY.misses.extend(checks["misses"])

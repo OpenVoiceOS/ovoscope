@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.12.0a1) (2026-10-25)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.11.3a1...1.12.0a1)
+
+**Merged pull requests:**
+
+- feat: routing tally and gate for end2end suites on m2v prototype [\#228](https://github.com/OpenVoiceOS/ovoscope/pull/228) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.11.3a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.11.3a1) (2026-10-22)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.11.2a1...1.11.3a1)
@@ -373,10 +381,6 @@
 ## [1.6.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.1a1) (2026-07-24)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.0a1...1.6.1a1)
-
-**Merged pull requests:**
-
-- fix: restore SessionManager.bus when MiniCroft stops [\#116](https://github.com/OpenVoiceOS/ovoscope/pull/116) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.6.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.0a1) (2026-07-16)
 

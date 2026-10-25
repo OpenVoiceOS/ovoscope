@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.12.0a2) (2026-10-25)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.12.0a1...1.12.0a2)
+
+**Merged pull requests:**
+
+- test: check the wait\_for\_trained opt-out on a trainer that never answers [\#230](https://github.com/OpenVoiceOS/ovoscope/pull/230) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.12.0a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.12.0a1) (2026-10-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.11.3a1...1.12.0a1)
@@ -262,10 +270,6 @@
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.13a1...1.6.13a2)
 
-**Merged pull requests:**
-
-- docs: rewrite README in Simplified Technical English [\#119](https://github.com/OpenVoiceOS/ovoscope/pull/119) ([JarbasAl](https://github.com/JarbasAl))
-
 ## [1.6.13a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.13a1) (2026-08-31)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.12a1...1.6.13a1)
@@ -373,10 +377,6 @@
 ## [1.6.2a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a1) (2026-07-31)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.1a1...1.6.2a1)
-
-**Merged pull requests:**
-
-- fix: Han audit round 1 — teardown safety, session isolation, harness lifecycle [\#118](https://github.com/OpenVoiceOS/ovoscope/pull/118) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.6.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.1a1) (2026-07-24)
 

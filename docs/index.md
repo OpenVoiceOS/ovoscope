@@ -4,7 +4,7 @@
 | Document | Description |
 |---|---|
 | [usage-guide.md](usage-guide.md) | **Start here**: tutorial: from zero to your first end2end test |
-| [cli.md](cli.md) | `ovoscope` command-line tool: record, run, diff, validate, coverage |
+| [cli.md](cli.md) | `ovoscope` command-line tool: record, run, diff, validate, coverage, golden, generate |
 | [ci-integration.md](ci-integration.md) | Wiring ovoscope into GitHub Actions CI with gh-automations |
 | [minicroft.md](minicroft.md) | `MiniCroft`: in-process skill runtime |
 | [capture-session.md](capture-session.md) | `CaptureSession`: message capture during a test |

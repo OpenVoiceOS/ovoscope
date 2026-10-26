@@ -20,6 +20,12 @@ test/end2end/cases/
 
 `#` comments and blank lines are ignored in `.test` files.
 
+To start from the skill's own templates instead of an empty folder,
+`ovoscope generate --skill <id> --format intent-cases --out test/end2end/cases`
+writes one `<Intent>.intent.test` per intent, each opening with a comment
+that marks it as generated (see [cli.md](cli.md#ovoscope-generate-golden-rows-drafted-from-a-skills-templates)).
+Edit them and add your own phrasings; `no_match.test` stays hand-written.
+
 ## Usage
 
 One call, in a test module owned by the skill:

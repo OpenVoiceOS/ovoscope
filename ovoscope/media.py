@@ -25,6 +25,7 @@ Classes:
 """
 
 import dataclasses
+import threading
 import time
 from typing import Callable, List, Optional
 from unittest.mock import MagicMock, patch
@@ -450,17 +451,83 @@ class OCPPlayerHarness:
     # Control methods — emit the correct bus message and yield briefly
     # ------------------------------------------------------------------
 
-    def play(self, track: MediaEntry) -> None:
-        """Emit ``ovos.common_play.play`` and wait for synchronous delivery.
+    #: The report ``play()`` waits for. ``OCPMediaPlayer`` emits it when the
+    #: player state actually changes, which is the event a caller that asserts
+    #: on state reports needs to have happened before ``play()`` returns.
+    PLAY_ACK_TOPIC = "ovos.common_play.player.state"
+
+    #: Ceiling on that wait. Generous on purpose: it bounds a hang, it is not a
+    #: guess at how long a cold player takes. A player that reports in 300 ms
+    #: returns in 300 ms.
+    PLAY_ACK_TIMEOUT = 10.0
+
+    def play(self, track: MediaEntry, timeout: Optional[float] = None,
+             require_ack: bool = True) -> List[Message]:
+        """Emit ``ovos.common_play.play`` and wait for the player to report.
+
+        A fixed sleep here was a race, not a wait. ``OCPMediaPlayer`` starts
+        playback on its own thread, and on a cold player the
+        ``ovos.common_play.player.state`` report arrives well after 50 ms: the
+        old body returned with ``player.state`` still ``STOPPED`` and no report
+        emitted, so a caller that asserted on state reports saw none. That is
+        what made ovos-test-harness ``TestSec44StateReports`` fail 8 of 8 when
+        it ran alone and pass when something slower ran before it -- the
+        signature of a sleep standing in for a condition.
+
+        The handler is registered BEFORE the emit, because a bus that
+        dispatches in the calling thread would otherwise deliver the report
+        while ``emit`` is still on the stack and the wait would miss it.
 
         Args:
             track: ``MediaEntry`` to play.
+            timeout: Seconds to wait for the report. Defaults to
+                :attr:`PLAY_ACK_TIMEOUT`.
+            require_ack: Raise if no report arrives inside ``timeout``. Pass
+                ``False`` for a player deliberately stubbed so that it never
+                reports; the call then still waits, and still returns whatever
+                did arrive, instead of failing.
+
+        Returns:
+            The ``ovos.common_play.player.state`` messages seen while waiting,
+            in arrival order. Empty only when ``require_ack`` is ``False``.
+
+        Raises:
+            TimeoutError: ``require_ack`` and no report inside ``timeout``.
         """
-        self.bus.emit(Message("ovos.common_play.play", {
-            "media": track.as_dict,
-            "playlist": [track.as_dict],
-        }))
-        time.sleep(0.05)
+        timeout = self.PLAY_ACK_TIMEOUT if timeout is None else timeout
+        seen: List[Message] = []
+        arrived = threading.Event()
+
+        def _ack(message: Message) -> None:
+            seen.append(message)
+            arrived.set()
+
+        self.bus.on(self.PLAY_ACK_TOPIC, _ack)
+        try:
+            self.bus.emit(Message("ovos.common_play.play", {
+                "media": track.as_dict,
+                "playlist": [track.as_dict],
+            }))
+            started = time.monotonic()
+            if not arrived.wait(timeout) and require_ack:
+                raise TimeoutError(
+                    f"no {self.PLAY_ACK_TOPIC} report {timeout}s after "
+                    f"ovos.common_play.play for {track.uri!r}: the player never "
+                    f"acknowledged the play, so anything this caller asserts "
+                    f"about player state would be reading a player that has not "
+                    f"started. player.state="
+                    f"{getattr(self.player, 'state', None)!r}. Pass "
+                    f"require_ack=False if this player is stubbed and never "
+                    f"reports.")
+            # The state change is what was waited for; a report that shares the
+            # same dispatch (media.state, or a second player.state) can still be
+            # a few milliseconds behind it. This is the only sleep left, and it
+            # is a tail, not the wait.
+            elapsed = time.monotonic() - started
+            time.sleep(min(0.05, max(0.0, timeout - elapsed)))
+        finally:
+            self.bus.remove(self.PLAY_ACK_TOPIC, _ack)
+        return seen
 
     def pause(self) -> None:
         """Emit ``ovos.common_play.pause``."""

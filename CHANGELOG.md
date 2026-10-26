@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.0a3](https://github.com/OpenVoiceOS/ovoscope/tree/1.12.0a3) (2026-10-26)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.12.0a2...1.12.0a3)
+
+**Merged pull requests:**
+
+- ci: grant pull-requests: write to the coverage pages workflow [\#232](https://github.com/OpenVoiceOS/ovoscope/pull/232) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.12.0a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.12.0a2) (2026-10-25)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.12.0a1...1.12.0a2)
@@ -369,10 +377,6 @@
 ## [1.6.2a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a2) (2026-07-31)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.2a1...1.6.2a2)
-
-**Merged pull requests:**
-
-- docs: close the documentation audit gaps \(Han audit round 1\) [\#121](https://github.com/OpenVoiceOS/ovoscope/pull/121) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.6.2a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a1) (2026-07-31)
 

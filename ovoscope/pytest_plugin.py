@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Iterator, List, Optional, Union
 if TYPE_CHECKING:
     from ovoscope.bus_coverage import BusCoverageReport
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -150,6 +151,14 @@ def pytest_addoption(parser):
         metavar="N",
         help=("Show the N hardest utterances (lowest cross-pipeline pass "
               "rate) in the Markdown report. Default: 10."),
+    )
+    parser.addini(
+        "ovoscope_min_routing_rate",
+        type="string",
+        default=None,
+        help=("Minimum share (0.0-1.0) of the requests recorded in "
+              "ovoscope.routing.TALLY that reached their intent on m2v. "
+              "Below it the session exits non-zero. Default: 0.8."),
     )
 
 
@@ -442,8 +451,32 @@ def pytest_pycollect_makemodule(module_path, parent):
     if collector is None:
         return collector
     try:
+        declares = "ovoscope_intent_cases" in Path(module_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        declares = False
+    if not declares:
+        # importing every module here would turn an import error into a module with no tests
+        return collector
+    try:
         mod = collector.obj  # imports the module if not already loaded
-    except Exception:
+    except KeyboardInterrupt:
+        raise
+    except BaseException:
+        # importlib mode leaves the half-run module in sys.modules, and pytest's own import would return it
+        # without the failing line's error; drop it so that import raises again
+        for name, loaded in list(sys.modules.items()):
+            if getattr(loaded, "__file__", None) == str(module_path):
+                del sys.modules[name]
+        # Importing the module here is a side effect of auto-discovery,
+        # not the real collection attempt. A module-level
+        # ``pytest.skip()``/``pytest.importorskip()`` raises
+        # ``pytest.skip.Exception``, which subclasses ``BaseException``
+        # (via ``_pytest.outcomes.OutcomeException``), not ``Exception`` -
+        # a plain ``except Exception`` here lets it escape the hook
+        # wrapper uncaught and abort the whole collection session. Swallow
+        # it (and any other import-time failure) here and let pytest's own
+        # protected collection call re-import the module later, where it
+        # is reported as a normal per-module skip or error instead.
         return collector
     if not hasattr(mod, "ovoscope_intent_cases"):
         return collector
@@ -736,13 +769,115 @@ def _accuracy_markdown(summary, results, baseline_diff=None, top_n=10):
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _gate_state(config):
+    """Compute (and cache) the accuracy summary, baseline diff, and gate result.
+
+    Called from ``pytest_sessionfinish`` — which runs BEFORE
+    ``pytest_terminal_summary`` — so the exit status can be set from the same
+    numbers the summary prints. The result is cached on *config*, so the
+    summary reuses it instead of re-reading the baseline file.
+
+    Returns:
+        Dict with ``summary``, ``baseline_diff``, ``baseline_warning`` and
+        ``failures``, or ``None`` when no intent-case results were collected.
+    """
+    cached = getattr(config, "_ovoscope_gate_state", None)
+    if cached is not None:
+        return cached
+
+    accum = getattr(pytest_runtest_logreport, "_accum", None)
+    if not accum or not accum["results"]:
+        return None
+    summary = _accuracy_summary(accum["results"])
+
+    baseline_path = config.getoption("--ovoscope-accuracy-baseline")
+    baseline_diff = None
+    baseline_warning = None
+    if baseline_path:
+        try:
+            import json as _json
+            with open(baseline_path, "r", encoding="utf-8") as fh:
+                baseline_doc = _json.load(fh)
+            baseline_diff = _baseline_diff(
+                baseline_doc.get("results") or [],
+                accum["results"])
+        except Exception as exc:
+            baseline_warning = (f"could not read baseline "
+                                f"{baseline_path}: {exc}")
+
+    min_acc = config.getoption("--ovoscope-accuracy-min")
+    failures = []
+    if min_acc is not None and summary["overall_accuracy"] < min_acc:
+        failures.append(
+            f"overall accuracy {summary['overall_accuracy']:.1%} < "
+            f"required {min_acc:.1%}")
+    if baseline_diff is not None and baseline_diff["regressed"]:
+        top_regression = baseline_diff["regressed"][0]
+        failures.append(
+            f"{len(baseline_diff['regressed'])} cases regressed vs "
+            f"baseline (first: `{top_regression['pipeline']}` / "
+            f"`{top_regression['lang']}` / "
+            f"`{top_regression['intent']}` / "
+            f"{top_regression['utterance']!r})")
+
+    state = {"summary": summary,
+             "baseline_diff": baseline_diff,
+             "baseline_warning": baseline_warning,
+             "failures": failures}
+    config._ovoscope_gate_state = state
+    return state
+
+
+def _min_routing_rate(config) -> float:
+    """The ``ovoscope_min_routing_rate`` ini value as a share between 0 and 1."""
+    from ovoscope.routing import DEFAULT_MIN_ROUTING_RATE
+    value = config.getini("ovoscope_min_routing_rate")
+    if value is None or value == "":
+        return DEFAULT_MIN_ROUTING_RATE
+    try:
+        rate = float(str(value))
+    except ValueError:
+        rate = -1.0
+    if not 0.0 <= rate <= 1.0:
+        raise pytest.UsageError(f"ovoscope_min_routing_rate must be a number "
+                                f"from 0 to 1, got {value!r}")
+    return rate
+
+
+def pytest_configure(config):
+    """Read the routing gate's minimum once, so a bad value stops the run early."""
+    config._ovoscope_min_routing_rate = _min_routing_rate(config)
+
+
+def _routing_summary(terminalreporter, config):
+    """The routing rate of the checks recorded in ``ovoscope.routing.TALLY``."""
+    from ovoscope.routing import TALLY
+    if not TALLY.total:
+        return
+    min_rate = config._ovoscope_min_routing_rate
+    tr = terminalreporter
+    tr.write_sep("=", "ovoscope m2v routing rate")
+    tr.write_line(f"{len(TALLY.hits)}/{TALLY.total} = {TALLY.rate:.1%} of the "
+                  f"routing checks went right (gate {min_rate:.0%})")
+    for miss in TALLY.misses:
+        tr.write_line(f"  miss {miss}")
+    failure = TALLY.failure(min_rate)
+    if failure:
+        tr.write_sep("!", "ovoscope routing gate FAILED")
+        tr.write_line(f"  - {failure}")
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
-    """Combined session summary: bus coverage + intent-case accuracy."""
+    """Combined session summary: bus coverage, routing rate, intent-case accuracy."""
     _bus_coverage_summary(terminalreporter, config)
+    _routing_summary(terminalreporter, config)
     accum = getattr(pytest_runtest_logreport, "_accum", None)
     if not accum or not accum["results"]:
         return
-    summary = _accuracy_summary(accum["results"])
+    state = _gate_state(config)
+    summary = state["summary"]
+    baseline_diff = state["baseline_diff"]
+    baseline_warning = state["baseline_warning"]
 
     tr = terminalreporter
     tr.write_sep("=", "ovoscope Intent-Case Accuracy")
@@ -767,23 +902,8 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
         ratio = d["pass"] / d["total"] if d["total"] else 0.0
         tr.write_line(f"  {key:48s}  {d['pass']:4d}/{d['total']:<4d}  {ratio:>6.1%}")
 
-    # Load baseline (if any) and compute structural diff up-front so both
-    # the JSON / Markdown outputs and the gate can reuse it.
-    baseline_path = config.getoption("--ovoscope-accuracy-baseline")
-    baseline_diff = None
-    baseline_warning = None
-    if baseline_path:
-        try:
-            import json as _json
-            with open(baseline_path, "r", encoding="utf-8") as fh:
-                baseline_doc = _json.load(fh)
-            baseline_diff = _baseline_diff(
-                baseline_doc.get("results") or [],
-                accum["results"])
-        except Exception as exc:
-            baseline_warning = (f"could not read baseline "
-                                f"{baseline_path}: {exc}")
-            tr.write_line(f"\nWARNING: {baseline_warning}")
+    if baseline_warning:
+        tr.write_line(f"\nWARNING: {baseline_warning}")
 
     # Persist JSON.
     report_path = config.getoption("--ovoscope-accuracy-report")
@@ -820,31 +940,39 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
             fh.write(md)
         tr.write_line(f"Wrote accuracy markdown -> {md_path}")
 
-    # Gate the session.
-    min_acc = config.getoption("--ovoscope-accuracy-min")
-    failures = []
-    if min_acc is not None and summary["overall_accuracy"] < min_acc:
-        failures.append(
-            f"overall accuracy {summary['overall_accuracy']:.1%} < "
-            f"required {min_acc:.1%}")
-    if baseline_diff is not None:
-        if baseline_diff["regressed"]:
-            top_regression = baseline_diff["regressed"][0]
-            failures.append(
-                f"{len(baseline_diff['regressed'])} cases regressed vs "
-                f"baseline (first: `{top_regression['pipeline']}` / "
-                f"`{top_regression['lang']}` / "
-                f"`{top_regression['intent']}` / "
-                f"{top_regression['utterance']!r})")
-    if failures:
+    # Report the gate result computed in pytest_sessionfinish.
+    if state["failures"]:
         tr.write_sep("!", "ovoscope accuracy gate FAILED")
-        for f in failures:
+        for f in state["failures"]:
             tr.write_line(f"  - {f}")
-        config._ovoscope_accuracy_gate_failed = True
 
 
 def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
-    """Propagate accuracy-gate failure as a non-zero exit status."""
-    if getattr(session.config, "_ovoscope_accuracy_gate_failed", False):
+    """Evaluate the accuracy gate and propagate it as a non-zero exit status.
+
+    The gate MUST be computed here, not in ``pytest_terminal_summary``:
+    sessionfinish runs first, so a flag set by the summary would always be
+    read too late and the gate would never change the exit status.
+    """
+    state = _gate_state(session.config)
+    if state and state["failures"]:
+        session.config._ovoscope_accuracy_gate_failed = True
         if session.exitstatus == 0:
             session.exitstatus = 1
+    from ovoscope.routing import TALLY
+    if hasattr(session.config, "workeroutput"):
+        # a pytest-xdist worker hands its checks to the controller, which gates the whole run
+        session.config.workeroutput["ovoscope_routing"] = {
+            "hits": TALLY.hits, "misses": TALLY.misses}
+    elif TALLY.failure(session.config._ovoscope_min_routing_rate) and session.exitstatus == 0:
+        session.exitstatus = 1
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error):  # noqa: ARG001
+    """Merge a finished pytest-xdist worker's routing checks into the controller's tally."""
+    from ovoscope.routing import TALLY
+    checks = getattr(node, "workeroutput", {}).get("ovoscope_routing")
+    if checks:
+        TALLY.hits.extend(checks["hits"])
+        TALLY.misses.extend(checks["misses"])

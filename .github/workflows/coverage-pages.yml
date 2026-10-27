@@ -6,7 +6,10 @@ on:
   workflow_dispatch:
 
 permissions:
+  # The reusable coverage job requests both; a called workflow cannot hold
+  # more than its caller grants, so a missing one fails the run at startup.
   contents: write
+  pull-requests: write
 
 jobs:
   coverage_pages:

@@ -168,15 +168,12 @@ M2V_PROTOTYPE_CONFIG_KEY = "ovos-m2v-prototype-pipeline"
 # cross-label case where a skill's label was in the training set at some
 # point but is no longer, and prototype mode must win that case rather than
 # have the stale classifier answer intercept it first.
-# Prototype mode alone: the three prototype tiers and nothing else. No
-# classifier, so no label deny-list; every label a loaded skill registers
-# from its .intent files is served by prototype mode. This is the boot
-# behind the `m2v-prototype` preset of `ovoscope golden`.
-M2V_PROTOTYPE_PIPELINE = [
-    "ovos-m2v-prototype-pipeline-high",
-    "ovos-m2v-prototype-pipeline-medium",
-    "ovos-m2v-prototype-pipeline-low",
-]
+# Prototype mode alone, as its low stage and nothing else. The three tiers
+# share one scorer, so the low stage gives every request the intent the high
+# and medium stages would. No classifier, so no label deny-list; every label a
+# loaded skill registers from its .intent files is served by prototype mode.
+# This is the boot behind the `m2v-prototype` preset of `ovoscope golden`.
+M2V_PROTOTYPE_PIPELINE = ["ovos-m2v-prototype-pipeline-low"]
 M2V_DUAL_PIPELINE = [
     "ovos-stop-pipeline-plugin-high",
     "ovos-converse-pipeline-plugin",

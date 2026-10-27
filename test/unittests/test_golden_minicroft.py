@@ -29,7 +29,7 @@ from ovos_workshop.resource_files import find_resource
 
 from ovoscope import (get_minicroft, get_m2v_minicroft, is_pipeline_available,
                       m2v_model_labels, LEAN_DEFAULT_PIPELINE,
-                      M2V_DUAL_PIPELINE, M2V_PROTOTYPE_PIPELINE,
+                      M2V_DUAL_PIPELINE,
                       M2V_PUBLISHED_MODEL)
 from ovoscope.golden import GoldenRow
 from ovoscope.golden_minicroft import (EXIT_ALL_GAPS, EXIT_ALL_SKIPPED,
@@ -403,7 +403,7 @@ class TestPipelinePresets(unittest.TestCase):
         booted, by_utt = self._run_preset("m2v-prototype")
         self.assertEqual(len(booted), 2)
         for mc in booted:
-            self.assertEqual(mc.pipeline, M2V_PROTOTYPE_PIPELINE)
+            self.assertEqual(mc.pipeline, ["ovos-m2v-prototype-pipeline-low"])
             self.assertNotIn("ovos-m2v-pipeline", mc.intents.pipeline_plugins)
             proto = mc.intents.pipeline_plugins["ovos-m2v-prototype-pipeline"]
             self.assertEqual(proto.config.get("model"), M2V_PUBLISHED_MODEL)

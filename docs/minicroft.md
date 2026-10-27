@@ -240,7 +240,7 @@ engines could otherwise answer. `get_m2v_minicroft` calls
 `assert_m2v_label_split(mc)` before returning and raises `RuntimeError`
 naming any label caught in both engines or in neither. Pass `prototype=False`
 to boot the classifier alone via `M2V_PIPELINE`, or `classifier=False` to
-boot prototype mode alone via `M2V_PROTOTYPE_PIPELINE`: no classifier, no
+boot prototype mode alone via `M2V_PROTOTYPE_PIPELINE`, its low stage only: no classifier, no
 label mask, every registered label served from the skill's `.intent` files.
 Both `False` raises `ValueError`. `M2V_PUBLISHED_MODEL` names the model
 ovos-m2v-pipeline loads by default; the `ovoscope golden` presets boot it.

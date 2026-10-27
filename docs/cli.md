@@ -211,7 +211,7 @@ ovoscope golden --rows 'test/end2end/*.jsonl' --skill my-skill.openvoiceos \
 | Preset | Boots |
 |--------|-------|
 | `repo` | The checkout's own list, `[tool.ovoscope] pipeline` in its `pyproject.toml`. When the checkout declares none, MiniCroft's lean default (stop, converse, adapt, padatious, padacioso, fallback). |
-| `m2v-prototype` | Prototype mode alone (`M2V_PROTOTYPE_PIPELINE`) on the published model `OpenVoiceOS/ovos-m2v-intents-multilingual`. Every label the skill registers is served from its own `.intent` files; no classifier, no label mask. |
+| `m2v-prototype` | Prototype mode alone, its low stage only (`M2V_PROTOTYPE_PIPELINE`), on the published model `OpenVoiceOS/ovos-m2v-intents-multilingual`. Every label the skill registers is served from its own `.intent` files; no classifier, no label mask. |
 | `m2v-dual` | The classifier and prototype mode side by side (`M2V_DUAL_PIPELINE`) on the published model, prototype first at every tier, the classifier's label list masked from the prototype stage. |
 
 Both m2v presets boot through `get_m2v_minicroft`, so the model, the label

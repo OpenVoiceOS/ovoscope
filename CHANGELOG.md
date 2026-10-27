@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.1a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.12.1a1) (2026-10-27)
+
+[Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.12.0a3...1.12.1a1)
+
+**Merged pull requests:**
+
+- fix: boot the m2v prototype pipeline as its low stage only [\#234](https://github.com/OpenVoiceOS/ovoscope/pull/234) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [1.12.0a3](https://github.com/OpenVoiceOS/ovoscope/tree/1.12.0a3) (2026-10-26)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.12.0a2...1.12.0a3)
@@ -369,10 +377,6 @@
 ## [1.6.3a1](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.3a1) (2026-07-31)
 
 [Full Changelog](https://github.com/OpenVoiceOS/ovoscope/compare/1.6.2a2...1.6.3a1)
-
-**Merged pull requests:**
-
-- fix: Han audit round 2 — SkillApi retention, accuracy gate, false-green assertions, race windows [\#123](https://github.com/OpenVoiceOS/ovoscope/pull/123) ([JarbasAl](https://github.com/JarbasAl))
 
 ## [1.6.2a2](https://github.com/OpenVoiceOS/ovoscope/tree/1.6.2a2) (2026-07-31)
 
